@@ -1,0 +1,298 @@
+using System;
+using System.Collections.Generic;
+using Unity.Mathematics;
+
+namespace GridRoadGenerator.Core
+{
+    /// <summary>
+    /// Représente un segment de route à créer : un point de départ et un point d'arrivée.
+    /// Les coordonnées sont en espace monde (X, Z ; Y = hauteur du terrain, gérée ailleurs).
+    /// </summary>
+    public struct RoadSegmentDef
+    {
+        public float3 Start;
+        public float3 End;
+        public bool IsHorizontal; // "horizontal" = parallèle à l'axe principal de la grille
+
+        public RoadSegmentDef(float3 start, float3 end, bool isHorizontal)
+        {
+            Start = start;
+            End = end;
+            IsHorizontal = isHorizontal;
+        }
+    }
+
+    public enum SpacingMode
+    {
+        /// <summary>Répartit rows/columns de façon égale pour remplir toute l'emprise.</summary>
+        FitToArea,
+        /// <summary>Espacement fixe (en mètres) ; le nombre de routes est calculé automatiquement.</summary>
+        FixedSpacing
+    }
+
+    public struct GridParameters
+    {
+        public SpacingMode Mode;
+        public int Rows;
+        public int Columns;
+        public float SpacingMeters;
+
+        public static GridParameters Default => new GridParameters
+        {
+            Mode = SpacingMode.FitToArea,
+            Rows = 3,
+            Columns = 3,
+            SpacingMeters = 60f
+        };
+    }
+
+    /// <summary>
+    /// Génère une grille de routes à l'intérieur d'un périmètre QUELCONQUE (polygone
+    /// convexe, concave, tourné, irrégulier) défini par les nœuds sélectionnés dans
+    /// leur ordre de clic.
+    ///
+    /// Algorithme :
+    ///  1. Le polygone est fermé à partir des points dans l'ordre de sélection.
+    ///  2. Un repère local (u, v) est construit, orienté sur l'arête la plus longue
+    ///     du polygone : la grille suit ainsi la "rue principale" du périmètre,
+    ///     pas les axes du monde.
+    ///  3. Des lignes de grille u = const et v = const sont générées dans la
+    ///     bounding box locale, selon le mode d'espacement.
+    ///  4. Chaque ligne est découpée aux frontières du polygone par la règle
+    ///     pair-impair (even-odd) : les intersections avec les arêtes sont triées
+    ///     le long de la ligne et appariées deux à deux. Un polygone concave
+    ///     produit donc naturellement plusieurs sous-segments par ligne.
+    ///  5. Les segments trop courts pour être une route sont éliminés.
+    ///
+    /// Cas particulier : avec exactement 2 nœuds, ils sont traités comme les coins
+    /// opposés d'un rectangle aligné sur les axes (comportement simple et prévisible).
+    /// </summary>
+    public static class GridGenerator
+    {
+        /// <summary>Longueur minimale d'un segment généré, en mètres (en dessous, pas une route viable).</summary>
+        public const float MinSegmentLength = 8f;
+
+        private const float Epsilon = 1e-4f;
+
+        public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
+        {
+            if (selectedNodePositions == null || selectedNodePositions.Count < 2)
+                throw new ArgumentException("Il faut au moins 2 nœuds sélectionnés.");
+
+            // Hauteur moyenne ; sera reprojetée sur le terrain à la pose.
+            float y = 0f;
+            foreach (var p in selectedNodePositions) y += p.y;
+            y /= selectedNodePositions.Count;
+
+            // Projection 2D (X, Z)
+            var pts = new List<float2>(selectedNodePositions.Count);
+            foreach (var p in selectedNodePositions) pts.Add(new float2(p.x, p.z));
+
+            // 2 nœuds : rectangle aligné sur les axes, coins opposés.
+            if (pts.Count == 2)
+            {
+                float2 mn = math.min(pts[0], pts[1]);
+                float2 mx = math.max(pts[0], pts[1]);
+                pts = new List<float2> { mn, new float2(mx.x, mn.y), mx, new float2(mn.x, mx.y) };
+            }
+
+            var polygon = RemoveConsecutiveDuplicates(pts);
+            if (polygon.Count < 3 || math.abs(SignedArea(polygon)) < 1f)
+                return new List<RoadSegmentDef>(); // polygone dégénéré (points alignés/confondus)
+
+            // Repère local orienté sur l'arête la plus longue.
+            (float2 origin, float2 uDir, float2 vDir) = BuildLocalFrame(polygon);
+
+            // Polygone en coordonnées locales + bounding box locale.
+            var local = new List<float2>(polygon.Count);
+            float2 lmin = new float2(float.MaxValue), lmax = new float2(float.MinValue);
+            foreach (var p in polygon)
+            {
+                var lp = new float2(math.dot(p - origin, uDir), math.dot(p - origin, vDir));
+                local.Add(lp);
+                lmin = math.min(lmin, lp);
+                lmax = math.max(lmax, lp);
+            }
+
+            // Positions des lignes de grille dans le repère local.
+            List<float> uPositions, vPositions;
+            if (parameters.Mode == SpacingMode.FitToArea)
+            {
+                uPositions = DistributeEvenly(lmin.x, lmax.x, parameters.Columns);
+                vPositions = DistributeEvenly(lmin.y, lmax.y, parameters.Rows);
+            }
+            else
+            {
+                uPositions = DistributeFixed(lmin.x, lmax.x, parameters.SpacingMeters);
+                vPositions = DistributeFixed(lmin.y, lmax.y, parameters.SpacingMeters);
+            }
+
+            var segments = new List<RoadSegmentDef>();
+
+            // Lignes "verticales" locales (u = const), découpées au polygone.
+            foreach (var u in uPositions)
+                foreach (var (a, b) in ClipLineToPolygon(local, axisIsU: true, position: u))
+                    AddSegment(segments, origin, uDir, vDir, a, b, y, isHorizontal: false);
+
+            // Lignes "horizontales" locales (v = const), découpées au polygone.
+            foreach (var v in vPositions)
+                foreach (var (a, b) in ClipLineToPolygon(local, axisIsU: false, position: v))
+                    AddSegment(segments, origin, uDir, vDir, a, b, y, isHorizontal: true);
+
+            return segments;
+        }
+
+        // ------------------------------------------------------------------
+        // Repère local
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Construit le repère (origine, axe u, axe v) : u suit l'arête la plus
+        /// longue du polygone, v lui est perpendiculaire.
+        /// </summary>
+        private static (float2 origin, float2 uDir, float2 vDir) BuildLocalFrame(List<float2> polygon)
+        {
+            int bestIndex = 0;
+            float bestLengthSq = -1f;
+
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                float2 a = polygon[i];
+                float2 b = polygon[(i + 1) % polygon.Count];
+                float lenSq = math.lengthsq(b - a);
+                if (lenSq > bestLengthSq)
+                {
+                    bestLengthSq = lenSq;
+                    bestIndex = i;
+                }
+            }
+
+            float2 origin2 = polygon[bestIndex];
+            float2 uDir = math.normalize(polygon[(bestIndex + 1) % polygon.Count] - origin2);
+            float2 vDir = new float2(-uDir.y, uDir.x); // perpendiculaire (rotation +90°)
+            return (origin2, uDir, vDir);
+        }
+
+        // ------------------------------------------------------------------
+        // Clipping pair-impair d'une ligne de grille dans le polygone
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Découpe la droite (u = position) ou (v = position) aux frontières du
+        /// polygone (en coordonnées locales). Retourne la liste des intervalles
+        /// INTÉRIEURS au polygone, sous forme de paires de coordonnées locales.
+        /// </summary>
+        private static List<(float2 a, float2 b)> ClipLineToPolygon(List<float2> local, bool axisIsU, float position)
+        {
+            // Intersections de la droite avec chaque arête, exprimées par la
+            // coordonnée le long de la droite (t = v si axisIsU, sinon t = u).
+            var crossings = new List<float>();
+
+            for (int i = 0; i < local.Count; i++)
+            {
+                float2 p1 = local[i];
+                float2 p2 = local[(i + 1) % local.Count];
+
+                // Coordonnée "transverse" (celle qui doit franchir 'position')
+                float c1 = axisIsU ? p1.x : p1.y;
+                float c2 = axisIsU ? p2.x : p2.y;
+                // Coordonnée "le long de la droite"
+                float t1 = axisIsU ? p1.y : p1.x;
+                float t2 = axisIsU ? p2.y : p2.x;
+
+                // Règle demi-ouverte [c1, c2) : chaque sommet n'est compté qu'une
+                // fois, ce qui garantit un nombre pair d'intersections (robustesse
+                // du ray-casting quand la droite passe pile sur un sommet).
+                bool crosses = (c1 <= position && position < c2) || (c2 <= position && position < c1);
+                if (!crosses) continue;
+
+                float denom = c2 - c1;
+                if (math.abs(denom) < Epsilon) continue; // arête parallèle à la droite
+
+                float f = (position - c1) / denom;
+                crossings.Add(t1 + f * (t2 - t1));
+            }
+
+            crossings.Sort();
+
+            var result = new List<(float2, float2)>();
+            // Appariement pair-impair : [entrée, sortie], [entrée, sortie], ...
+            for (int i = 0; i + 1 < crossings.Count; i += 2)
+            {
+                float tA = crossings[i];
+                float tB = crossings[i + 1];
+                if (tB - tA < MinSegmentLength) continue; // tronçon trop court
+
+                float2 a = axisIsU ? new float2(position, tA) : new float2(tA, position);
+                float2 b = axisIsU ? new float2(position, tB) : new float2(tB, position);
+                result.Add((a, b));
+            }
+
+            return result;
+        }
+
+        // ------------------------------------------------------------------
+        // Utilitaires
+        // ------------------------------------------------------------------
+
+        private static void AddSegment(List<RoadSegmentDef> segments, float2 origin, float2 uDir, float2 vDir,
+            float2 localA, float2 localB, float y, bool isHorizontal)
+        {
+            float2 worldA = origin + localA.x * uDir + localA.y * vDir;
+            float2 worldB = origin + localB.x * uDir + localB.y * vDir;
+            segments.Add(new RoadSegmentDef(
+                new float3(worldA.x, y, worldA.y),
+                new float3(worldB.x, y, worldB.y),
+                isHorizontal));
+        }
+
+        private static List<float2> RemoveConsecutiveDuplicates(List<float2> pts)
+        {
+            var result = new List<float2>();
+            foreach (var p in pts)
+            {
+                if (result.Count == 0 || math.distance(result[result.Count - 1], p) > Epsilon)
+                    result.Add(p);
+            }
+            if (result.Count > 1 && math.distance(result[0], result[result.Count - 1]) < Epsilon)
+                result.RemoveAt(result.Count - 1);
+            return result;
+        }
+
+        /// <summary>Aire signée (shoelace). Sert à détecter les polygones dégénérés.</summary>
+        private static float SignedArea(List<float2> polygon)
+        {
+            float area = 0f;
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                float2 a = polygon[i];
+                float2 b = polygon[(i + 1) % polygon.Count];
+                area += a.x * b.y - b.x * a.y;
+            }
+            return area * 0.5f;
+        }
+
+        private static List<float> DistributeEvenly(float min, float max, int count)
+        {
+            var result = new List<float>();
+            if (count <= 0) return result;
+            float step = (max - min) / (count + 1);
+            for (int i = 1; i <= count; i++)
+                result.Add(min + step * i);
+            return result;
+        }
+
+        private static List<float> DistributeFixed(float min, float max, float spacing)
+        {
+            var result = new List<float>();
+            if (spacing <= 0.5f) return result;
+            float pos = min + spacing;
+            while (pos < max - 0.5f)
+            {
+                result.Add(pos);
+                pos += spacing;
+            }
+            return result;
+        }
+    }
+}
