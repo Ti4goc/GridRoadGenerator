@@ -61,11 +61,21 @@ cohtml (React) complet ; le raccourci clavier configurable couvre l'activation.
 - Le module UI est buildé par webpack (`UI/`, cible MSBuild `BuildUI` après déploiement)
   en `GridRoadGenerator.mjs` + `.css` dans le dossier du mod.
 
+## Dépendances optionnelles
+- **[Anarchy](https://mods.paradoxplaza.com/mods/74604/Windows)** de **yenyang** :
+  si le mod est installé, le panneau affiche une rangée « Anarchy » qui active ou
+  désactive l'anarchie directement (état synchronisé avec le bouton et le raccourci
+  d'Anarchy, via ses propres bindings UI). Sans Anarchy, la rangée n'apparaît pas —
+  aucune dépendance dure, détection par assembly au chargement.
+
 ## Crédits
 Les patterns de sélection de nœuds (raycast + survol + surbrillance), de tooltips
-contextuels et d'architecture du module UI (webpack/cohtml/bindings) sont adaptés de
+contextuels, d'architecture du module UI (webpack/cohtml/bindings) et le sélecteur
+de réseau (recherche/catégories/récents) sont adaptés de
 [CS2-NetworkTools](https://github.com/lucarager/CS2-NetworkTools) de **Luca Rager
 (lucarager)**, sous licence MIT. Merci !
+L'icône de la rangée Anarchy provient d'**Unified Icon Library** (chargée par
+Anarchy lui-même, `coui://uil/`).
 
 ## Test in-game
 Lance le jeu avec `-developerMode`. Logs du mod :

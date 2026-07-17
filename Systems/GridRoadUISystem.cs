@@ -100,6 +100,10 @@ namespace GridRoadGenerator.Systems
             AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB", HandlePickPrefab));
             AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO", () => _toolSystem.SetRoadPrefab(null)));
 
+            // Mod Anarchy (tiers, optionnel) : présence détectée une fois, côté TS la
+            // rangée lit/déclenche directement les bindings cohtml d'Anarchy lui-même.
+            AddBinding(new ValueBinding<bool>(BindingGroup, "ANARCHY_AVAILABLE", IsAnarchyLoaded()));
+
             AddBinding(new TriggerBinding<int>(BindingGroup, "SET_MODE", value =>
             {
                 _settings.Mode = (SpacingMode)math.clamp(value, 0, 1);
@@ -152,6 +156,22 @@ namespace GridRoadGenerator.Systems
                 RebuildPickerEntries((PickerType)_lastPickerType);
                 _pickerDataBinding.Update();
             }
+        }
+
+        /// <summary>
+        /// Vrai si l'assembly du mod Anarchy est chargée. Détection par nom, sans
+        /// référence dure : aucun crash ni warning si le mod est absent.
+        /// </summary>
+        private static bool IsAnarchyLoaded()
+        {
+            foreach (System.Reflection.Assembly assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (assembly.GetName().Name == "Anarchy")
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // ------------------------------------------------------------------

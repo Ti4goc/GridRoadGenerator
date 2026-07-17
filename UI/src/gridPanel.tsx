@@ -9,6 +9,8 @@ import styles from "./gridPanel.module.scss";
 import { PrefabPicker } from "./prefabPicker";
 import { VC, VF, VT } from "./vanilla";
 import {
+    anarchyAvailable$,
+    anarchyEnabled$,
     canApply$,
     clearSelection,
     columns$,
@@ -24,6 +26,7 @@ import {
     setRows,
     setSpacing,
     spacing$,
+    toggleAnarchy,
     toolActive$,
 } from "bindings";
 
@@ -77,6 +80,8 @@ export const GridPanel = () => {
     const spacing = useValue(spacing$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
+    const anarchyAvailable = useValue(anarchyAvailable$);
+    const anarchyEnabled = useValue(anarchyEnabled$);
     const [pickerOpen, setPickerOpen] = useState(false);
     const [panelPosition, setPanelPosition] = useState<PanelPosition>(loadPanelPosition);
     const panelRef = useRef<HTMLDivElement>(null);
@@ -225,6 +230,26 @@ export const GridPanel = () => {
                         </button>
                     </VC.Section>
                 </div>
+
+                {/* Anarchy (mod tiers optionnel) : rangée visible seulement s'il est
+                    chargé ; état et toggle passent par les bindings d'Anarchy lui-même,
+                    donc synchronisés avec son bouton toolbar et son raccourci. */}
+                {anarchyAvailable && (
+                    <div className={styles.vanillaRow}>
+                        <VC.Section focusKey={VF.FOCUS_DISABLED} title="Anarchy">
+                            <VC.ToolButton
+                                src="coui://uil/Standard/Anarchy.svg"
+                                selected={anarchyEnabled}
+                                multiSelect={false}
+                                disabled={false}
+                                focusKey={VF.FOCUS_DISABLED}
+                                tooltip={translate("GridRoadGenerator.UI.AnarchyTooltip", "Toggle Anarchy")}
+                                onSelect={toggleAnarchy}
+                                className={VT.toolButton.button}
+                            />
+                        </VC.Section>
+                    </div>
+                )}
 
                 {/* Actions : bouton primaire natif + bouton secondaire natif. */}
                 <div className={styles.actions}>

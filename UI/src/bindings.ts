@@ -23,6 +23,7 @@ export const spacing$ = bindValue<number>(mod.id, "SPACING", 60);
 export const roadPrefabName$ = bindValue<string>(mod.id, "ROAD_PREFAB_NAME", "");
 export const roadPrefabIcon$ = bindValue<string>(mod.id, "ROAD_PREFAB_ICON", "");
 export const roadPrefabAuto$ = bindValue<boolean>(mod.id, "ROAD_PREFAB_AUTO", true);
+export const anarchyAvailable$ = bindValue<boolean>(mod.id, "ANARCHY_AVAILABLE", false);
 export const pickerType$ = bindValue<number>(mod.id, "PICKER_TYPE", 0);
 export const pickerData$ = bindValue<PrefabEntry[]>(mod.id, "PICKER_DATA", []);
 export const recentPrefabs$ = bindValue<PrefabEntry[]>(mod.id, "RECENT_PREFABS", []);
@@ -36,5 +37,11 @@ export const generateGrid = () => trigger(mod.id, "GENERATE");
 export const clearSelection = () => trigger(mod.id, "CLEAR_SELECTION");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");
 export const setPickerType = (value: number) => trigger(mod.id, "SET_PICKER_TYPE", value);
+
+// Bindings du mod Anarchy lui-même (groupe "Anarchy", noms relevés dans son
+// bundle UI). Lus/déclenchés uniquement quand ANARCHY_AVAILABLE est vrai :
+// sur un binding absent, bindValue reste simplement à sa valeur de repli.
+export const anarchyEnabled$ = bindValue<boolean>("Anarchy", "AnarchyEnabled", false);
+export const toggleAnarchy = () => trigger("Anarchy", "AnarchyToggled");
 export const pickPrefab = (entity: Entity) => trigger(mod.id, "PICK_PREFAB", entity);
 export const pickAuto = () => trigger(mod.id, "PICK_AUTO");
