@@ -155,11 +155,20 @@ namespace GridRoadGenerator.Systems
 
             try
             {
-                // Échap ou bouton "Tout annuler" : reset complet.
+                // Échap : annule la sélection en cours (1er appui) ; sans sélection,
+                // désactive l'outil — le panneau se ferme et le bouton toolbar se
+                // relâche via TOOL_ACTIVE (même cadence que les outils vanilla).
+                // Le bouton "Tout annuler" du panneau ne fait que vider la sélection.
                 if (_clearRequested || cancelAction.WasPressedThisFrame())
                 {
+                    bool escapePressed = !_clearRequested;
                     _clearRequested = false;
+                    bool hadSelection = _selectedNodes.Count > 0;
                     ResetState();
+                    if (escapePressed && !hadSelection)
+                    {
+                        m_ToolSystem.activeTool = m_DefaultToolSystem;
+                    }
                     return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                 }
 
