@@ -1,7 +1,7 @@
 // Structure de panneau et intégration des composants vanilla adaptées de
 // CS2-NetworkTools (c) Luca Rager, licence MIT
 // https://github.com/lucarager/CS2-NetworkTools
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
 import { Button } from "cs2/ui";
@@ -30,6 +30,41 @@ import {
 const MODE_FIT = 0;
 const MODE_FIXED = 1;
 
+// ------------------------------------------------------------------
+// Panneau déplaçable : drag par la barre de titre, position persistée
+// (localStorage cohtml : survit aux ouvertures et aux sessions de jeu).
+// Le Panel draggable de cs2/ui n'expose pas la position finale, d'où
+// cette implémentation manuelle, pattern courant des mods CS2.
+// ------------------------------------------------------------------
+
+const PANEL_POSITION_KEY = "GridRoadGenerator.panelPosition";
+const DEFAULT_POSITION = { x: 12, y: 220 };
+/// Marge (px) de panneau qui doit toujours rester visible à l'écran.
+const MIN_VISIBLE = 60;
+
+type PanelPosition = { x: number; y: number };
+
+const clampToScreen = (x: number, y: number, panelWidth: number): PanelPosition => ({
+    x: Math.min(Math.max(x, MIN_VISIBLE - panelWidth), window.innerWidth - MIN_VISIBLE),
+    y: Math.min(Math.max(y, 0), window.innerHeight - MIN_VISIBLE),
+});
+
+const loadPanelPosition = (): PanelPosition => {
+    try {
+        const raw = localStorage.getItem(PANEL_POSITION_KEY);
+        if (raw) {
+            const pos = JSON.parse(raw);
+            if (typeof pos.x === "number" && typeof pos.y === "number") {
+                // Reclampe au chargement (la résolution a pu changer entre deux sessions).
+                return clampToScreen(Math.max(pos.x, 0), pos.y, 0);
+            }
+        }
+    } catch {
+        // localStorage indisponible ou contenu corrompu : position par défaut.
+    }
+    return DEFAULT_POSITION;
+};
+
 export const GridPanel = () => {
     const { translate } = useLocalization();
     const toolActive = useValue(toolActive$);
@@ -43,10 +78,38 @@ export const GridPanel = () => {
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
     const [pickerOpen, setPickerOpen] = useState(false);
+    const [panelPosition, setPanelPosition] = useState<PanelPosition>(loadPanelPosition);
+    const panelRef = useRef<HTMLDivElement>(null);
 
     if (!toolActive) {
         return null;
     }
+
+    const startDrag = (event: React.MouseEvent) => {
+        const rect = panelRef.current?.getBoundingClientRect();
+        if (!rect) {
+            return;
+        }
+        const offsetX = event.clientX - rect.left;
+        const offsetY = event.clientY - rect.top;
+
+        const positionFrom = (ev: MouseEvent) =>
+            clampToScreen(ev.clientX - offsetX, ev.clientY - offsetY, rect.width);
+        const onMove = (ev: MouseEvent) => setPanelPosition(positionFrom(ev));
+        const onUp = (ev: MouseEvent) => {
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onUp);
+            const final = positionFrom(ev);
+            setPanelPosition(final);
+            try {
+                localStorage.setItem(PANEL_POSITION_KEY, JSON.stringify(final));
+            } catch {
+                // Pas de persistance possible : la position reste valable pour la session.
+            }
+        };
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onUp);
+    };
 
     const fitMode = mode === MODE_FIT;
     // Nom localisé du prefab, comme le fait le jeu (fallback : nom brut).
@@ -55,8 +118,11 @@ export const GridPanel = () => {
         : "—";
 
     return (
-        <div className={styles.panel}>
-            <div className={styles.header}>
+        <div
+            ref={panelRef}
+            className={styles.panel}
+            style={{ left: `${panelPosition.x}px`, top: `${panelPosition.y}px` }}>
+            <div className={styles.header} onMouseDown={startDrag}>
                 {translate("GridRoadGenerator.UI.Title", "Grid Road Generator")}
             </div>
 

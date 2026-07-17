@@ -10,10 +10,9 @@ $input-bg-color: rgba(0, 0, 0, 0.15);
 $input-border-color: rgba(255, 255, 255, 0.2);
 $input-border-hover-color: rgba(255, 255, 255, 0.35);
 
+// top/left sont posés en style inline (position draggable persistée).
 .panel {
     position: absolute;
-    top: 220rem;
-    left: 12rem;
     width: 300rem;
     background-color: rgba(24, 24, 37, 0.75);
     backdrop-filter: var(--panelBlur);
@@ -25,10 +24,12 @@ $input-border-hover-color: rgba(255, 255, 255, 0.35);
     overflow: hidden;
 }
 
+// Barre de titre : poignée de déplacement du panneau.
 .header {
-    padding: $panel-padding-y $panel-padding-x 0;
+    padding: $panel-padding-y $panel-padding-x 8rem;
     font-weight: 600;
     color: white;
+    cursor: move;
 }
 
 .content {
