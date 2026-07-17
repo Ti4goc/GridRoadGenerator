@@ -15,6 +15,9 @@ import {
     canApply$,
     clearSelection,
     columns$,
+    culDeSacDepth$,
+    culDeSacMode$,
+    culDeSacRatio$,
     generateGrid,
     mode$,
     nodeCount$,
@@ -24,10 +27,15 @@ import {
     rows$,
     setAngleOffset,
     setColumns,
+    setCulDeSacDepth,
+    setCulDeSacMode,
+    setCulDeSacRatio,
     setMode,
     setRows,
     setSpacing,
+    setStaggered,
     spacing$,
+    staggered$,
     toggleAnarchy,
     toolActive$,
 } from "bindings";
@@ -81,6 +89,10 @@ export const GridPanel = () => {
     const rows = useValue(rows$);
     const spacing = useValue(spacing$);
     const angleOffset = useValue(angleOffset$);
+    const culDeSacMode = useValue(culDeSacMode$);
+    const culDeSacDepth = useValue(culDeSacDepth$);
+    const staggered = useValue(staggered$);
+    const culDeSacRatio = useValue(culDeSacRatio$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
     const anarchyAvailable = useValue(anarchyAvailable$);
@@ -215,6 +227,60 @@ export const GridPanel = () => {
                         />
                         <span className={styles.unitLabel}>°</span>
                     </div>
+                </div>
+
+                {/* Culs-de-sac : quartier pavillonnaire (collectrices traversantes,
+                    résidentielles en impasse). Sliders et toggle Quinconce grisés
+                    tant que le mode est désactivé. */}
+                <div className={styles.vanillaRow}>
+                    <VC.Section
+                        focusKey={VF.FOCUS_DISABLED}
+                        title={translate("GridRoadGenerator.UI.CulDeSac", "Cul-de-sac")}>
+                        <VC.ToggleField
+                            value={culDeSacMode}
+                            disabled={false}
+                            onChange={(value: boolean) => setCulDeSacMode(value)}
+                        />
+                    </VC.Section>
+                </div>
+                <div className={styles.vanillaRow}>
+                    <div className={styles.vanillaField}>
+                        <VC.FloatSliderField
+                            label={translate("GridRoadGenerator.UI.CulDeSacDepth", "Depth")}
+                            value={culDeSacDepth}
+                            min={50}
+                            max={90}
+                            fractionDigits={0}
+                            disabled={!culDeSacMode}
+                            onChange={(value: number) => setCulDeSacDepth(value)}
+                        />
+                        <span className={styles.unitLabel}>%</span>
+                    </div>
+                </div>
+                <div className={styles.vanillaRow}>
+                    <div className={styles.vanillaField}>
+                        <VC.FloatSliderField
+                            label={translate("GridRoadGenerator.UI.CulDeSacRatio", "Frequency")}
+                            value={culDeSacRatio}
+                            min={0}
+                            max={100}
+                            fractionDigits={0}
+                            disabled={!culDeSacMode}
+                            onChange={(value: number) => setCulDeSacRatio(value)}
+                        />
+                        <span className={styles.unitLabel}>%</span>
+                    </div>
+                </div>
+                <div className={styles.vanillaRow}>
+                    <VC.Section
+                        focusKey={VF.FOCUS_DISABLED}
+                        title={translate("GridRoadGenerator.UI.Staggered", "Staggered")}>
+                        <VC.ToggleField
+                            value={staggered}
+                            disabled={!culDeSacMode}
+                            onChange={(value: boolean) => setStaggered(value)}
+                        />
+                    </VC.Section>
                 </div>
 
                 {/* Compteur de nœuds : rangée native label / valeur. */}

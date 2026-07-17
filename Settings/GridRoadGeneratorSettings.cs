@@ -12,12 +12,13 @@ namespace GridRoadGenerator.Settings
     /// actions d'input du mod via RegisterKeyBindings() (appelé dans Mod.OnLoad).
     /// </summary>
     [FileLocation("ModsSettings/GridRoadGenerator/GridRoadGenerator")]
-    [SettingsUIGroupOrder(GroupMode, GroupGrid, GroupKeybindings)]
-    [SettingsUIShowGroupName(GroupMode, GroupGrid, GroupKeybindings)]
+    [SettingsUIGroupOrder(GroupMode, GroupGrid, GroupCulDeSac, GroupKeybindings)]
+    [SettingsUIShowGroupName(GroupMode, GroupGrid, GroupCulDeSac, GroupKeybindings)]
     public class GridRoadGeneratorSettings : ModSetting
     {
         public const string GroupMode = "Mode";
         public const string GroupGrid = "Grid";
+        public const string GroupCulDeSac = "CulDeSac";
         public const string GroupKeybindings = "Keybindings";
 
         /// <summary>Nom de l'action qui active/désactive l'outil (Ctrl+G par défaut).</summary>
@@ -49,6 +50,21 @@ namespace GridRoadGenerator.Settings
         [SettingsUISection(GroupGrid)]
         public float AngleOffsetDegrees { get; set; }
 
+        [SettingsUISection(GroupCulDeSac)]
+        public bool CulDeSacMode { get; set; }
+
+        /// <summary>Stocké en fraction (0.5–0.9) ; affiché en pourcentage (50–90 %) dans Options > Mods.</summary>
+        [SettingsUISlider(min = 50f, max = 90f, step = 1f, unit = "percentage", scalarMultiplier = 100f)]
+        [SettingsUISection(GroupCulDeSac)]
+        public float CulDeSacDepth { get; set; }
+
+        [SettingsUISection(GroupCulDeSac)]
+        public bool Staggered { get; set; }
+
+        [SettingsUISlider(min = 0f, max = 100f, step = 5f, unit = "percentage")]
+        [SettingsUISection(GroupCulDeSac)]
+        public float CulDeSacRatio { get; set; }
+
         /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
         /// "TypePrefab:Nom" (ex. "RoadPrefab:Small Road"). Vide = mode auto
@@ -74,6 +90,10 @@ namespace GridRoadGenerator.Settings
             Rows = d.Rows;
             SpacingMeters = d.SpacingMeters;
             AngleOffsetDegrees = d.AngleOffsetDegrees;
+            CulDeSacMode = d.CulDeSacMode;
+            CulDeSacDepth = d.CulDeSacDepth;
+            Staggered = d.Staggered;
+            CulDeSacRatio = d.CulDeSacRatio;
             RoadPrefabName = string.Empty;
         }
 
@@ -83,7 +103,11 @@ namespace GridRoadGenerator.Settings
             Columns = Columns,
             Rows = Rows,
             SpacingMeters = SpacingMeters,
-            AngleOffsetDegrees = AngleOffsetDegrees
+            AngleOffsetDegrees = AngleOffsetDegrees,
+            CulDeSacMode = CulDeSacMode,
+            CulDeSacDepth = CulDeSacDepth,
+            Staggered = Staggered,
+            CulDeSacRatio = CulDeSacRatio
         };
     }
 }

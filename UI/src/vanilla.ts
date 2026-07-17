@@ -33,6 +33,12 @@ const modulePaths: ModulePath[] = [
         path: "game-ui/common/scrolling/scrollable.tsx",
         components: ["Scrollable"],
     },
+    {
+        // Toggle natif (widget de l'éditeur, utilisé en jeu par NetworkTools pour
+        // ses options booléennes) : mode culs-de-sac, quinconce.
+        path: "game-ui/editor/widgets/fields/toggle-field.tsx",
+        components: ["ToggleField"],
+    },
 ];
 
 const themePaths: ThemePath[] = [

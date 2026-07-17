@@ -39,13 +39,30 @@ namespace GridRoadGenerator.Core
         /// <summary>Rotation additionnelle (degrés, -90..+90) de la grille par rapport à l'arête la plus longue du polygone.</summary>
         public float AngleOffsetDegrees;
 
+        /// <summary>
+        /// Mode quartier pavillonnaire : les lignes perpendiculaires à l'axe principal
+        /// (les "colonnes") deviennent des impasses au lieu de collectrices traversantes.
+        /// Les lignes parallèles à l'axe principal (les "rangées") restent inchangées.
+        /// </summary>
+        public bool CulDeSacMode;
+        /// <summary>Profondeur de l'impasse (0.5–0.9), fraction de la longueur réelle (clippée) du tronçon entre deux collectrices.</summary>
+        public float CulDeSacDepth;
+        /// <summary>Alterne l'origine des impasses entre la collectrice du haut et celle du bas d'un tronçon à l'autre.</summary>
+        public bool Staggered;
+        /// <summary>Fréquence des impasses (0–100 %) : motif déterministe "une sur N", pas aléatoire.</summary>
+        public float CulDeSacRatio;
+
         public static GridParameters Default => new GridParameters
         {
             Mode = SpacingMode.FitToArea,
             Rows = 3,
             Columns = 3,
             SpacingMeters = 60f,
-            AngleOffsetDegrees = 0f
+            AngleOffsetDegrees = 0f,
+            CulDeSacMode = false,
+            CulDeSacDepth = 0.75f,
+            Staggered = true,
+            CulDeSacRatio = 100f
         };
     }
 
@@ -159,7 +176,7 @@ namespace GridRoadGenerator.Core
             foreach (var v in vPositions)
                 vLines.Add(new GridLine { Position = v, Intervals = ClipLineToPolygon(local, axisIsU: false, position: v) });
 
-            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y);
+            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters);
         }
 
         // ------------------------------------------------------------------
@@ -175,7 +192,7 @@ namespace GridRoadGenerator.Core
         /// rejoignent sont bit-à-bit identiques, condition de la fusion en un seul nœud.
         /// </summary>
         private static List<RoadSegmentDef> BuildSubSegments(List<GridLine> uLines, List<GridLine> vLines,
-            float2 origin, float2 uDir, float2 vDir, float y)
+            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters)
         {
             var uSplits = new List<(float t, float3 world)>[uLines.Count];
             var vSplits = new List<(float t, float3 world)>[vLines.Count];
@@ -198,10 +215,13 @@ namespace GridRoadGenerator.Core
             }
 
             var segments = new List<RoadSegmentDef>();
+            // Culs-de-sac : EmitLine n'applique le mode que pour axisIsU=true (les
+            // "colonnes", perpendiculaires à l'axe principal). Les collectrices
+            // (v-lines) restent toujours des traversées complètes.
             for (int i = 0; i < uLines.Count; i++)
-                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y);
+                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters);
             for (int i = 0; i < vLines.Count; i++)
-                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y);
+                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters);
             return segments;
         }
 
@@ -222,44 +242,124 @@ namespace GridRoadGenerator.Core
         /// consécutives. Un croisement à moins de JoinTolerance d'une extrémité de
         /// l'intervalle remplace cette extrémité (jonction en T : le point monde partagé
         /// du croisement est réutilisé). Les tronçons &lt; MinSegmentLength sont éliminés.
+        ///
+        /// Mode culs-de-sac (axisIsU=true uniquement, parameters.CulDeSacMode) : chaque
+        /// tronçon entre deux points consécutifs de la chaîne ("bloc") est, selon un motif
+        /// déterministe "une fois sur N" (CulDeSacRatio), soit laissé traversant comme
+        /// d'habitude, soit remplacé par une impasse partant d'une seule extrémité du bloc
+        /// (alternée haut/bas si Staggered) et s'arrêtant à CulDeSacDepth de sa longueur.
+        /// Un bloc dont l'extrémité de départ choisie n'est PAS une vraie collectrice (pur
+        /// point de clipping au bord du polygone, jamais une entrée de `splits`) est
+        /// supprimé plutôt que de créer une impasse suspendue dans le vide.
         /// </summary>
         private static void EmitLine(List<RoadSegmentDef> segments, GridLine line,
-            List<(float t, float3 world)> splits, bool axisIsU, float2 origin, float2 uDir, float2 vDir, float y)
+            List<(float t, float3 world)> splits, bool axisIsU, float2 origin, float2 uDir, float2 vDir, float y,
+            GridParameters parameters)
         {
             splits.Sort((a, b) => a.t.CompareTo(b.t));
+            bool culDeSac = axisIsU && parameters.CulDeSacMode;
+            int blockIndex = 0;
 
             foreach (var interval in line.Intervals)
             {
                 float tA = interval.x;
                 float tB = interval.y;
-                float3 worldA = axisIsU
-                    ? ToWorld(origin, uDir, vDir, line.Position, tA, y)
-                    : ToWorld(origin, uDir, vDir, tA, line.Position, y);
-                float3 worldB = axisIsU
-                    ? ToWorld(origin, uDir, vDir, line.Position, tB, y)
-                    : ToWorld(origin, uDir, vDir, tB, line.Position, y);
+                float3 worldA = InterpolateAlongLine(line, axisIsU, tA, origin, uDir, vDir, y);
+                float3 worldB = InterpolateAlongLine(line, axisIsU, tB, origin, uDir, vDir, y);
 
-                var chain = new List<(float t, float3 world)> { (tA, worldA) };
+                // isCollector : vrai seulement si ce point de chaîne provient d'un
+                // croisement réel (splits), faux pour une pure extrémité de clipping
+                // au bord du polygone (aucune route existante à cet endroit).
+                var chain = new List<(float t, float3 world, bool isCollector)> { (tA, worldA, false) };
+                bool lastIsCollector = false;
                 foreach (var split in splits)
                 {
                     if (split.t < tA - JoinTolerance || split.t > tB + JoinTolerance)
                         continue; // croisement d'un autre intervalle de la même ligne
                     if (split.t <= tA + JoinTolerance)
-                        chain[0] = (tA, split.world);
+                        chain[0] = (tA, split.world, true);
                     else if (split.t >= tB - JoinTolerance)
+                    {
                         worldB = split.world;
+                        lastIsCollector = true;
+                    }
                     else
-                        chain.Add(split);
+                        chain.Add((split.t, split.world, true));
                 }
-                chain.Add((tB, worldB));
+                chain.Add((tB, worldB, lastIsCollector));
 
                 for (int i = 0; i + 1 < chain.Count; i++)
                 {
                     if (chain[i + 1].t - chain[i].t < MinSegmentLength)
-                        continue; // tronçon trop court
-                    segments.Add(new RoadSegmentDef(chain[i].world, chain[i + 1].world, isHorizontal: !axisIsU));
+                        continue; // bloc trop court
+
+                    if (!culDeSac)
+                    {
+                        segments.Add(new RoadSegmentDef(chain[i].world, chain[i + 1].world, isHorizontal: !axisIsU));
+                        continue;
+                    }
+
+                    EmitCulDeSacBlock(segments, line, chain[i], chain[i + 1], blockIndex, parameters,
+                        origin, uDir, vDir, y);
+                    blockIndex++;
                 }
             }
+        }
+
+        /// <summary>
+        /// Un seul bloc en mode culs-de-sac : décide (motif déterministe CulDeSacRatio)
+        /// s'il reste traversant ou devient une impasse, choisit l'extrémité de départ
+        /// (alternance Staggered), et émet l'impasse si son départ est une vraie
+        /// collectrice — sinon le bloc est simplement omis.
+        /// </summary>
+        private static void EmitCulDeSacBlock(List<RoadSegmentDef> segments, GridLine line,
+            (float t, float3 world, bool isCollector) a, (float t, float3 world, bool isCollector) b,
+            int blockIndex, GridParameters parameters, float2 origin, float2 uDir, float2 vDir, float y)
+        {
+            if (!IsCulDeSacBlock(blockIndex, parameters.CulDeSacRatio))
+            {
+                // Hors motif : bloc traversant normal, comme sans le mode.
+                segments.Add(new RoadSegmentDef(a.world, b.world, isHorizontal: false));
+                return;
+            }
+
+            // Alternance haut/bas : les blocs pairs partent de a, les impairs de b.
+            bool startFromA = !parameters.Staggered || blockIndex % 2 == 0;
+            var start = startFromA ? a : b;
+            var end = startFromA ? b : a;
+
+            if (!start.isCollector)
+            {
+                return; // départ hors polygone/collectrice réelle : impasse supprimée
+            }
+
+            float depth = math.clamp(parameters.CulDeSacDepth, 0.5f, 0.9f);
+            float stubT = start.t + (end.t - start.t) * depth;
+            if (math.abs(stubT - start.t) < MinSegmentLength)
+            {
+                return; // impasse trop courte pour être une route viable
+            }
+
+            float3 stubWorld = InterpolateAlongLine(line, axisIsU: true, stubT, origin, uDir, vDir, y);
+            segments.Add(new RoadSegmentDef(start.world, stubWorld, isHorizontal: false));
+        }
+
+        /// <summary>Motif déterministe "une fois sur N" : N = round(100/ratio), jamais aléatoire.</summary>
+        private static bool IsCulDeSacBlock(int blockIndex, float ratioPercent)
+        {
+            if (ratioPercent <= 0f) return false;
+            if (ratioPercent >= 100f) return true;
+            int n = math.max(1, (int)math.round(100f / ratioPercent));
+            return blockIndex % n == 0;
+        }
+
+        /// <summary>Point monde à la coordonnée t le long d'une ligne de grille (u=const si axisIsU, sinon v=const).</summary>
+        private static float3 InterpolateAlongLine(GridLine line, bool axisIsU, float t,
+            float2 origin, float2 uDir, float2 vDir, float y)
+        {
+            return axisIsU
+                ? ToWorld(origin, uDir, vDir, line.Position, t, y)
+                : ToWorld(origin, uDir, vDir, t, line.Position, y);
         }
 
         /// <summary>Convertit un point local (u, v) en point monde (X, y, Z).</summary>

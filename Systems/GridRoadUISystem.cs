@@ -39,6 +39,10 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<int> _rowsBinding;
         private ValueBinding<float> _spacingBinding;
         private ValueBinding<float> _angleOffsetBinding;
+        private ValueBinding<bool> _culDeSacModeBinding;
+        private ValueBinding<float> _culDeSacDepthBinding;
+        private ValueBinding<bool> _staggeredBinding;
+        private ValueBinding<float> _culDeSacRatioBinding;
         private ValueBinding<string> _roadPrefabNameBinding;
         private ValueBinding<string> _roadPrefabIconBinding;
         private ValueBinding<bool> _roadPrefabAutoBinding;
@@ -84,6 +88,12 @@ namespace GridRoadGenerator.Systems
             AddBinding(_rowsBinding = new ValueBinding<int>(BindingGroup, "ROWS", _settings.Rows));
             AddBinding(_spacingBinding = new ValueBinding<float>(BindingGroup, "SPACING", _settings.SpacingMeters));
             AddBinding(_angleOffsetBinding = new ValueBinding<float>(BindingGroup, "ANGLE_OFFSET", _settings.AngleOffsetDegrees));
+            AddBinding(_culDeSacModeBinding = new ValueBinding<bool>(BindingGroup, "CULDESAC_MODE", _settings.CulDeSacMode));
+            // Exposée en pourcentage (50-90) côté UI, comme le slider Options > Mods ;
+            // stockée en fraction (0.5-0.9) dans les settings pour matcher GridParameters.
+            AddBinding(_culDeSacDepthBinding = new ValueBinding<float>(BindingGroup, "CULDESAC_DEPTH", _settings.CulDeSacDepth * 100f));
+            AddBinding(_staggeredBinding = new ValueBinding<bool>(BindingGroup, "STAGGERED", _settings.Staggered));
+            AddBinding(_culDeSacRatioBinding = new ValueBinding<float>(BindingGroup, "CULDESAC_RATIO", _settings.CulDeSacRatio));
 
             // Prefab de réseau utilisé par la grille (rangée du panneau, ouvre le sélecteur).
             AddBinding(_roadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_NAME", string.Empty));
@@ -131,6 +141,27 @@ namespace GridRoadGenerator.Systems
                 _settings.AngleOffsetDegrees = math.clamp(value, -90f, 90f);
                 _settings.ApplyAndSave();
             }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_CULDESAC_MODE", value =>
+            {
+                _settings.CulDeSacMode = value;
+                _settings.ApplyAndSave();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_CULDESAC_DEPTH", value =>
+            {
+                // value reçu en pourcentage (50-90) depuis le panneau, converti en fraction.
+                _settings.CulDeSacDepth = math.clamp(value / 100f, 0.5f, 0.9f);
+                _settings.ApplyAndSave();
+            }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_STAGGERED", value =>
+            {
+                _settings.Staggered = value;
+                _settings.ApplyAndSave();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_CULDESAC_RATIO", value =>
+            {
+                _settings.CulDeSacRatio = math.clamp(value, 0f, 100f);
+                _settings.ApplyAndSave();
+            }));
 
             // Actions du panneau.
             AddBinding(new TriggerBinding(BindingGroup, "GENERATE", () => _toolSystem.RequestApply()));
@@ -151,6 +182,10 @@ namespace GridRoadGenerator.Systems
             _rowsBinding.Update(_settings.Rows);
             _spacingBinding.Update(_settings.SpacingMeters);
             _angleOffsetBinding.Update(_settings.AngleOffsetDegrees);
+            _culDeSacModeBinding.Update(_settings.CulDeSacMode);
+            _culDeSacDepthBinding.Update(_settings.CulDeSacDepth * 100f);
+            _staggeredBinding.Update(_settings.Staggered);
+            _culDeSacRatioBinding.Update(_settings.CulDeSacRatio);
 
             PrefabBase roadPrefab = _toolSystem.GetPrefab();
             _roadPrefabNameBinding.Update(roadPrefab != null ? roadPrefab.name : string.Empty);
