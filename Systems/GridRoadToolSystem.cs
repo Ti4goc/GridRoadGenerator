@@ -52,6 +52,8 @@ namespace GridRoadGenerator.Systems
         private bool _applyRequested;
         private bool _clearRequested;
         private bool _invalidLogged;
+        /// <summary>Empêche le spam du log d'omission de nœuds trop proches (MinNodeDistance) : un avis par sélection.</summary>
+        private bool _omittedNodesLogged;
         private Entity _lastClickedNode = Entity.Null;
         private float _lastClickTime = -1f;
         private readonly List<Entity> _pathScratch = new List<Entity>();
@@ -463,6 +465,7 @@ namespace GridRoadGenerator.Systems
             PerimeterInvalid = false;
             CanApply = false;
             _invalidLogged = false;
+            _omittedNodesLogged = false;
             PerimeterDetectionFailed = false;
         }
 
@@ -590,7 +593,12 @@ namespace GridRoadGenerator.Systems
             List<RoadSegmentDef> segments;
             try
             {
-                segments = GridGenerator.GenerateGrid(_selectedPositions, _settings.ToGridParameters());
+                segments = GridGenerator.GenerateGrid(_selectedPositions, _settings.ToGridParameters(), out int omittedNodeCount);
+                if (omittedNodeCount > 0 && !_omittedNodesLogged)
+                {
+                    _omittedNodesLogged = true;
+                    Mod.Log.Info($"{omittedNodeCount} croisement(s) omis (nœuds trop proches, < {GridGenerator.MinNodeDistance} m).");
+                }
             }
             catch (Exception e)
             {

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using GridRoadGenerator.Core;
@@ -475,6 +476,172 @@ namespace GridRoadGenerator.Tests
                 float length = math.distance(segment.Start.xz, segment.End.xz);
                 Assert.InRange(length, 50f - 1f, 90f + 1f); // 0.5..0.9 * bloc de 100 m
             }
+        }
+    }
+
+    /// <summary>
+    /// Vérifie MinNodeDistance : un nœud généré (croisement, ou bout d'impasse) qui
+    /// tomberait à moins de MinNodeDistance d'un autre nœud déjà établi est purement
+    /// omis, jamais fusionné ni décalé.
+    ///
+    /// La quasi-coïncidence la plus simple à provoquer de façon déterministe est une
+    /// impasse dont la profondeur (proche de la borne haute 90 %) laisse un bloc court
+    /// se terminer à moins de MinNodeDistance de la collectrice qu'elle approche sans
+    /// jamais l'atteindre : bloc de 70 m à 90 % de profondeur ⇒ écart de 7 m &lt; 8 m.
+    /// </summary>
+    public class GridGeneratorMinNodeDistanceTests
+    {
+        private static readonly List<float3> SquareNodes = new List<float3>
+        {
+            new float3(0f, 0f, 0f),
+            new float3(300f, 0f, 0f),
+            new float3(300f, 0f, 300f),
+            new float3(0f, 0f, 300f),
+        };
+
+        [Fact]
+        public void NormalGrid_NoOmission()
+        {
+            var parameters = new GridParameters
+            {
+                Mode = SpacingMode.FitToArea,
+                Rows = 3,
+                Columns = 3,
+                SpacingMeters = 60f,
+            };
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters, out int omittedNodeCount);
+
+            Assert.Equal(0, omittedNodeCount);
+            Assert.Equal(24, segments.Count); // identique au test de régression sans MinNodeDistance
+        }
+
+        [Fact]
+        public void CulDeSacStubTooCloseToTargetCollector_IsOmittedNotShortened()
+        {
+            // Rows=3 (collectrices tous les 70 m sur une bande [80,290] volontairement
+            // hors-grille — on force plutôt la géométrie via FixedSpacing) : plus simple,
+            // on compose directement un rectangle où l'espacement des collectrices vaut
+            // exactement 70 m pour isoler un seul bloc du bon gabarit.
+            var nodes = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(300f, 0f, 0f),
+                new float3(300f, 0f, 210f), // 3 x 70 m
+                new float3(0f, 0f, 210f),
+            };
+            var parameters = new GridParameters
+            {
+                Mode = SpacingMode.FixedSpacing,
+                Columns = 1,
+                Rows = 1,
+                SpacingMeters = 70f, // collectrices à v=70 et v=140
+                CulDeSacMode = true,
+                CulDeSacDepth = 0.9f, // profondeur max : écart de 10 % du bloc = 7 m
+                Staggered = true,
+                CulDeSacRatio = 100f,
+            };
+
+            var segments = GridGenerator.GenerateGrid(nodes, parameters, out int omittedNodeCount);
+            var columns = segments.Where(s => !s.IsHorizontal).ToList();
+
+            // Bloc [0,70] (bord, départ non-collectrice) : supprimé comme avant.
+            // Bloc [70,140] : impair ⇒ part de la collectrice v=140 vers v=70,
+            // s'arrêterait à 140+(70-140)*0.9=77, à 7 m de la collectrice v=70
+            // (< MinNodeDistance=8) ⇒ omis pour quasi-coïncidence, PAS raccourci.
+            // Bloc [140,210] : pair ⇒ part de v=140 vers v=210 (bord, non-collecteur),
+            // s'arrête à 140+(210-140)*0.9=203, 7 m du bord — le bord n'étant pas un
+            // nœud "déjà établi", ce bloc-ci N'EST PAS concerné par MinNodeDistance.
+            Assert.True(omittedNodeCount >= 1, "Le bloc [70,140] aurait dû être omis pour quasi-coïncidence.");
+
+            // Aucun segment de colonne ne doit s'arrêter à moins de MinNodeDistance
+            // d'une collectrice sans être en réalité fusionné avec elle (même point
+            // bit-exact) : pas de quasi-doublon flottant.
+            var collectorPositions = new[] { new float2(150f, 70f), new float2(150f, 140f) };
+            foreach (var segment in columns)
+            {
+                foreach (float2 collector in collectorPositions)
+                {
+                    float distToStart = math.distance(segment.Start.xz, collector);
+                    float distToEnd = math.distance(segment.End.xz, collector);
+                    // Soit confondu (segment qui rejoint réellement la collectrice),
+                    // soit largement au-delà de MinNodeDistance — jamais entre les deux.
+                    Assert.True(distToStart < 0.5f || distToStart >= GridGenerator.MinNodeDistance - 0.01f,
+                        $"Extrémité de départ à {distToStart} m d'une collectrice : ni fusionnée, ni assez loin.");
+                    Assert.True(distToEnd < 0.5f || distToEnd >= GridGenerator.MinNodeDistance - 0.01f,
+                        $"Extrémité d'arrivée à {distToEnd} m d'une collectrice : ni fusionnée, ni assez loin.");
+                }
+            }
+        }
+
+        [Fact]
+        public void NearCoincidence_NeverCrashesAndRestOfGridStaysWellFormed()
+        {
+            // Grille dense sur un polygone tourné à angle oblique, avec culs-de-sac :
+            // combine plusieurs sources possibles de quasi-coïncidence (croisements
+            // rapprochés, impasses profondes) sans qu'aucune n'entraîne de plantage,
+            // de doublon, ni de segment sous MinSegmentLength.
+            var nodes = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(280f, 0f, 90f),
+                new float3(190f, 0f, 370f),
+                new float3(-90f, 0f, 280f),
+            };
+            var parameters = new GridParameters
+            {
+                Mode = SpacingMode.FitToArea,
+                Columns = 6,
+                Rows = 4,
+                SpacingMeters = 60f,
+                AngleOffsetDegrees = 33f,
+                CulDeSacMode = true,
+                CulDeSacDepth = 0.9f,
+                Staggered = true,
+                CulDeSacRatio = 100f,
+            };
+
+            List<RoadSegmentDef> segments = null;
+            Exception thrown = null;
+            try
+            {
+                segments = GridGenerator.GenerateGrid(nodes, parameters, out int omittedNodeCount);
+            }
+            catch (Exception e)
+            {
+                thrown = e;
+            }
+
+            Assert.Null(thrown);
+            Assert.NotNull(segments);
+
+            // Pas de doublon : toutes les extrémités identiques doivent être EXACTEMENT
+            // les mêmes floats (fusion valide), jamais deux points distincts séparés de
+            // moins de MinNodeDistance (ce serait la quasi-coïncidence non nettoyée).
+            var endpoints = segments.SelectMany(s => new[] { s.Start, s.End }).Distinct().ToList();
+            for (int i = 0; i < endpoints.Count; i++)
+            {
+                for (int j = i + 1; j < endpoints.Count; j++)
+                {
+                    float distance = math.distance(endpoints[i].xz, endpoints[j].xz);
+                    Assert.True(distance >= GridGenerator.MinNodeDistance - 0.5f,
+                        $"Deux nœuds distincts quasi confondus non nettoyés : {endpoints[i]} vs {endpoints[j]} ({distance} m).");
+                }
+            }
+
+            foreach (var segment in segments)
+            {
+                float length = math.distance(segment.Start.xz, segment.End.xz);
+                Assert.True(length >= MinAcceptableLength(parameters),
+                    $"Segment sous la longueur minimale acceptable : {length} m.");
+            }
+        }
+
+        private static float MinAcceptableLength(GridParameters parameters)
+        {
+            // Une impasse peut être aussi courte que MinSegmentLength ; une traversée
+            // normale aussi. On garde une marge de sécurité modeste sur l'assertion.
+            return GridGenerator.MinSegmentLength - 0.5f;
         }
     }
 }

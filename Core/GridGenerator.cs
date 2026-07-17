@@ -98,6 +98,14 @@ namespace GridRoadGenerator.Core
         /// <summary>Longueur minimale d'un segment généré, en mètres (en dessous, pas une route viable).</summary>
         public const float MinSegmentLength = 8f;
 
+        /// <summary>
+        /// Distance minimale (m) entre deux nœuds générés distincts (croisements entre
+        /// eux). En dessous, le croisement le plus tardif (ordre de balayage colonnes
+        /// puis rangées) est purement omis plutôt que fusionné ou décalé — un nœud
+        /// omis proprement vaut mieux qu'une intersection dégénérée en jeu.
+        /// </summary>
+        public const float MinNodeDistance = 8f;
+
         private const float Epsilon = 1e-4f;
 
         /// <summary>
@@ -115,8 +123,18 @@ namespace GridRoadGenerator.Core
             public List<float2> Intervals;
         }
 
+        /// <summary>Surcharge pratique quand le diagnostic d'omission n'est pas nécessaire (ex. tests existants).</summary>
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
+            => GenerateGrid(selectedNodePositions, parameters, out _);
+
+        /// <summary>
+        /// Génère la grille. omittedNodeCount compte les croisements omis pour cause de
+        /// proximité excessive avec un autre nœud généré (MinNodeDistance) — 0 si aucun.
+        /// </summary>
+        public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
+            GridParameters parameters, out int omittedNodeCount)
         {
+            omittedNodeCount = 0;
             if (selectedNodePositions == null || selectedNodePositions.Count < 2)
                 throw new ArgumentException("Il faut au moins 2 nœuds sélectionnés.");
 
@@ -176,7 +194,7 @@ namespace GridRoadGenerator.Core
             foreach (var v in vPositions)
                 vLines.Add(new GridLine { Position = v, Intervals = ClipLineToPolygon(local, axisIsU: false, position: v) });
 
-            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters);
+            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount);
         }
 
         // ------------------------------------------------------------------
@@ -190,14 +208,23 @@ namespace GridRoadGenerator.Core
         /// entre croisements consécutifs. Le float3 monde de chaque croisement est calculé
         /// une seule fois et réutilisé tel quel par les deux lignes : les extrémités qui se
         /// rejoignent sont bit-à-bit identiques, condition de la fusion en un seul nœud.
+        ///
+        /// Un nouveau croisement à moins de MinNodeDistance d'un croisement DÉJÀ accepté
+        /// (nécessairement sur une paire de lignes différente : deux croisements sur la
+        /// même paire seraient le même point) est purement omis — ni fusionné, ni décalé —
+        /// pour éviter une intersection dégénérée en jeu. Balayage colonnes puis rangées,
+        /// donc déterministe : c'est toujours le croisement le plus tardif qui cède.
         /// </summary>
         private static List<RoadSegmentDef> BuildSubSegments(List<GridLine> uLines, List<GridLine> vLines,
-            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters)
+            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters, out int omittedNodeCount)
         {
             var uSplits = new List<(float t, float3 world)>[uLines.Count];
             var vSplits = new List<(float t, float3 world)>[vLines.Count];
             for (int i = 0; i < uLines.Count; i++) uSplits[i] = new List<(float, float3)>();
             for (int i = 0; i < vLines.Count; i++) vSplits[i] = new List<(float, float3)>();
+
+            var acceptedWorldPoints = new List<float3>();
+            omittedNodeCount = 0;
 
             for (int iu = 0; iu < uLines.Count; iu++)
             {
@@ -209,6 +236,23 @@ namespace GridRoadGenerator.Core
                         continue;
 
                     float3 world = ToWorld(origin, uDir, vDir, u, v, y);
+
+                    bool tooClose = false;
+                    foreach (float3 accepted in acceptedWorldPoints)
+                    {
+                        if (math.distance(accepted.xz, world.xz) < MinNodeDistance)
+                        {
+                            tooClose = true;
+                            break;
+                        }
+                    }
+                    if (tooClose)
+                    {
+                        omittedNodeCount++;
+                        continue; // omission propre : ni fusion, ni décalage
+                    }
+
+                    acceptedWorldPoints.Add(world);
                     uSplits[iu].Add((v, world));
                     vSplits[iv].Add((u, world));
                 }
@@ -219,9 +263,9 @@ namespace GridRoadGenerator.Core
             // "colonnes", perpendiculaires à l'axe principal). Les collectrices
             // (v-lines) restent toujours des traversées complètes.
             for (int i = 0; i < uLines.Count; i++)
-                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters);
+                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters, ref omittedNodeCount);
             for (int i = 0; i < vLines.Count; i++)
-                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters);
+                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters, ref omittedNodeCount);
             return segments;
         }
 
@@ -254,7 +298,7 @@ namespace GridRoadGenerator.Core
         /// </summary>
         private static void EmitLine(List<RoadSegmentDef> segments, GridLine line,
             List<(float t, float3 world)> splits, bool axisIsU, float2 origin, float2 uDir, float2 vDir, float y,
-            GridParameters parameters)
+            GridParameters parameters, ref int omittedNodeCount)
         {
             splits.Sort((a, b) => a.t.CompareTo(b.t));
             bool culDeSac = axisIsU && parameters.CulDeSacMode;
@@ -300,7 +344,7 @@ namespace GridRoadGenerator.Core
                     }
 
                     EmitCulDeSacBlock(segments, line, chain[i], chain[i + 1], blockIndex, parameters,
-                        origin, uDir, vDir, y);
+                        origin, uDir, vDir, y, ref omittedNodeCount);
                     blockIndex++;
                 }
             }
@@ -310,11 +354,15 @@ namespace GridRoadGenerator.Core
         /// Un seul bloc en mode culs-de-sac : décide (motif déterministe CulDeSacRatio)
         /// s'il reste traversant ou devient une impasse, choisit l'extrémité de départ
         /// (alternance Staggered), et émet l'impasse si son départ est une vraie
-        /// collectrice — sinon le bloc est simplement omis.
+        /// collectrice — sinon le bloc est simplement omis. Une impasse dont le bout
+        /// libre tombe à moins de MinNodeDistance de la collectrice visée (profondeur
+        /// proche de 1 sur un bloc court) est elle aussi omise : ce serait un nœud
+        /// quasiment confondu avec une intersection déjà existante.
         /// </summary>
         private static void EmitCulDeSacBlock(List<RoadSegmentDef> segments, GridLine line,
             (float t, float3 world, bool isCollector) a, (float t, float3 world, bool isCollector) b,
-            int blockIndex, GridParameters parameters, float2 origin, float2 uDir, float2 vDir, float y)
+            int blockIndex, GridParameters parameters, float2 origin, float2 uDir, float2 vDir, float y,
+            ref int omittedNodeCount)
         {
             if (!IsCulDeSacBlock(blockIndex, parameters.CulDeSacRatio))
             {
@@ -341,6 +389,12 @@ namespace GridRoadGenerator.Core
             }
 
             float3 stubWorld = InterpolateAlongLine(line, axisIsU: true, stubT, origin, uDir, vDir, y);
+            if (math.distance(stubWorld.xz, end.world.xz) < MinNodeDistance)
+            {
+                omittedNodeCount++;
+                return; // le bout de l'impasse serait quasi confondu avec la collectrice visée
+            }
+
             segments.Add(new RoadSegmentDef(start.world, stubWorld, isHorizontal: false));
         }
 
