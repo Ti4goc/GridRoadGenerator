@@ -1,3 +1,5 @@
+// Patterns de sélection (survol/surbrillance/résolution de nœud) adaptés de
+// CS2-NetworkTools (c) Luca Rager, licence MIT — https://github.com/lucarager/CS2-NetworkTools
 using System;
 using System.Collections.Generic;
 using Colossal.Entities;
@@ -17,20 +19,20 @@ using Unity.Mathematics;
 namespace GridRoadGenerator.Systems
 {
     /// <summary>
-    /// Outil personnalisé : le joueur clique sur des nœuds de route existants pour définir
-    /// le périmètre (polygone quelconque, dans l'ordre de clic), puis valide (Entrée) pour
-    /// générer la grille interne.
+    /// Outil personnalisé : le joueur survole un nœud de route (surbrillance), clique pour
+    /// l'ajouter au périmètre (polygone dans l'ordre de clic), puis valide (Entrée ou bouton
+    /// du panneau) pour générer la grille interne.
     ///
-    /// Placement : l'outil pilote le pipeline natif de construction réseau, exactement comme
-    /// NetToolSystem. À chaque changement de sélection il (re)crée des entités de définition
-    /// (CreationDefinition + NetCourse + Updated) via le ToolOutputBarrier ; le jeu en dérive
-    /// des entités Temp qui servent d'aperçu fantôme (avec validation de collision native,
-    /// gestion des croisements par CourseSplitSystem, etc.). À la validation, applyMode =
-    /// ApplyMode.Apply concrétise les Temp de la frame précédente — même mécanique qu'un
-    /// clic-glisser du joueur avec l'outil route.
+    /// Placement : pipeline natif de construction réseau, comme NetToolSystem. À chaque frame
+    /// de prévisualisation, les définitions (CreationDefinition + NetCourse + Updated) sont
+    /// détruites puis recréées via le ToolOutputBarrier avec applyMode = Clear — la cadence
+    /// exacte du NetTool vanilla, ce qui garantit qu'aucune entité Temp ne s'empile. À la
+    /// validation, applyMode = Apply concrétise les Temp de la frame précédente.
     /// </summary>
     public partial class GridRoadToolSystem : ToolBaseSystem
     {
+        /// <summary>Distance max (m) entre le point survolé sur une arête et un nœud pour le sélectionner.</summary>
+        private const float MaxSelectDistance = 16f;
         /// <summary>Distance (m) sous laquelle une extrémité de segment est raccordée à un nœud sélectionné.</summary>
         private const float NodeSnapDistance = 4f;
         /// <summary>Distance (m) sous laquelle une extrémité de segment est raccordée à une route du périmètre.</summary>
@@ -40,7 +42,19 @@ namespace GridRoadGenerator.Systems
 
         private readonly List<Entity> _selectedNodes = new List<Entity>();
         private readonly List<float3> _selectedPositions = new List<float3>();
-        private bool _selectionDirty;
+        private Entity _hoveredNode = Entity.Null;
+        private bool _applyRequested;
+        private bool _clearRequested;
+        private bool _invalidLogged;
+
+        /// <summary>Nombre de nœuds actuellement sélectionnés (lu par l'UI et les tooltips).</summary>
+        public int NodeCount => _selectedNodes.Count;
+        /// <summary>Vrai si une grille prévisualisée existe (définitions créées à la dernière frame).</summary>
+        public bool HasPreview { get; private set; }
+        /// <summary>Vrai si le périmètre sélectionné ne produit aucune grille (polygone dégénéré).</summary>
+        public bool PerimeterInvalid { get; private set; }
+        /// <summary>Vrai si la grille prévisualisée peut être construite (pas d'erreur de placement).</summary>
+        public bool CanApply { get; private set; }
 
         private ProxyAction _confirmAction;
         private GridRoadGeneratorSettings _settings;
@@ -70,25 +84,19 @@ namespace GridRoadGenerator.Systems
             m_DefinitionQuery = GetDefinitionQuery();
 
             _settings = Mod.Instance.Settings;
-            // Action déclarée par la propriété ProxyBinding correspondante des settings
-            // (enregistrée par Settings.RegisterKeyBindings() dans Mod.OnLoad).
             _confirmAction = _settings.GetAction(GridRoadGeneratorSettings.ActionConfirmGrid);
         }
 
-        /// <summary>Le prefab affiché par l'UI pour cet outil : celui qui sera réellement posé.</summary>
         public override PrefabBase GetPrefab() => GetRoadPrefab();
 
-        /// <summary>
-        /// L'outil ne s'active pas via la sélection d'un prefab dans la barre d'outils
-        /// (uniquement via son raccourci) : toujours false pour ne pas intercepter le NetTool.
-        /// </summary>
+        /// <summary>L'outil ne s'active que par son raccourci ou le panneau, jamais via un prefab.</summary>
         public override bool TrySetPrefab(PrefabBase prefab) => false;
 
         public override void InitializeRaycast()
         {
             base.InitializeRaycast();
 
-            // On ne veut détecter que les réseaux routiers existants (nœuds inclus via SubElements).
+            // Réseaux routiers uniquement, nœuds ciblables via SubElements.
             m_ToolRaycastSystem.typeMask = TypeMask.Net;
             m_ToolRaycastSystem.netLayerMask = Layer.Road;
             m_ToolRaycastSystem.raycastFlags |= RaycastFlags.SubElements;
@@ -97,7 +105,7 @@ namespace GridRoadGenerator.Systems
         protected override void OnStartRunning()
         {
             base.OnStartRunning();
-            ClearSelection();
+            ResetState();
             applyAction.shouldBeEnabled = true;
             secondaryApplyAction.shouldBeEnabled = true;
             cancelAction.shouldBeEnabled = true;
@@ -109,7 +117,7 @@ namespace GridRoadGenerator.Systems
 
         protected override void OnStopRunning()
         {
-            ClearSelection();
+            ResetState();
             if (_confirmAction != null)
             {
                 _confirmAction.shouldBeEnabled = false;
@@ -119,119 +127,153 @@ namespace GridRoadGenerator.Systems
             base.OnStopRunning();
         }
 
-        /// <summary>Active/désactive l'outil (appelé par le raccourci clavier global du mod).</summary>
+        /// <summary>Active/désactive l'outil (raccourci clavier global ou panneau UI).</summary>
         public void ToggleTool()
         {
-            if (m_ToolSystem.activeTool == this)
-            {
-                m_ToolSystem.activeTool = m_DefaultToolSystem;
-            }
-            else
-            {
-                m_ToolSystem.activeTool = this;
-            }
+            m_ToolSystem.activeTool = m_ToolSystem.activeTool == this ? (ToolBaseSystem)m_DefaultToolSystem : this;
         }
+
+        /// <summary>Demande la construction de la grille prévisualisée (bouton "Générer" du panneau).</summary>
+        public void RequestApply() => _applyRequested = true;
+
+        /// <summary>Demande l'annulation de toute la sélection (bouton "Tout annuler" du panneau).</summary>
+        public void RequestClear() => _clearRequested = true;
 
         protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
-            applyMode = ApplyMode.None;
+            // Cadence vanilla du NetTool : par défaut on repart de zéro chaque frame
+            // (Temp détruits + régénérés depuis les définitions recréées ci-dessous).
+            applyMode = ApplyMode.Clear;
 
             try
             {
-                // Échap : annule la sélection en cours et efface l'aperçu.
-                if (cancelAction.WasPressedThisFrame())
+                // Échap ou bouton "Tout annuler" : reset complet.
+                if (_clearRequested || cancelAction.WasPressedThisFrame())
                 {
-                    ClearSelection();
-                    applyMode = ApplyMode.Clear;
+                    _clearRequested = false;
+                    ResetState();
                     return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                 }
 
-                // Entrée : concrétise l'aperçu fantôme de la frame précédente.
-                // (!_selectionDirty : l'aperçu doit être à jour avec la sélection.)
-                if (!_selectionDirty && _confirmAction != null && _confirmAction.WasPressedThisFrame()
-                    && _selectedPositions.Count >= 2)
+                // Entrée ou bouton "Générer" : concrétise l'aperçu de la frame précédente.
+                bool confirm = _applyRequested || (_confirmAction != null && _confirmAction.WasPressedThisFrame());
+                _applyRequested = false;
+                if (confirm && HasPreview)
                 {
                     if (GetAllowApply() && !m_DefinitionQuery.IsEmptyIgnoreFilter)
                     {
                         applyMode = ApplyMode.Apply;
-                        ClearSelection();
+                        ResetState();
                         return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                     }
                     Mod.Log.Warn("Grille refusée : l'aperçu contient des erreurs de placement (collisions, pente...). Ajuste le périmètre ou l'espacement.");
-                    return inputDeps;
                 }
 
-                // Clic gauche : sélectionne/désélectionne le nœud sous le curseur.
-                if (applyAction.WasPressedThisFrame())
+                // Survol : surbrillance du nœud sous le curseur.
+                Entity hovered = ResolveHoveredNode();
+                if (hovered != _hoveredNode)
                 {
-                    TryToggleNodeUnderCursor();
+                    if (!_selectedNodes.Contains(_hoveredNode))
+                    {
+                        SetHighlight(_hoveredNode, false);
+                    }
+                    SetHighlight(hovered, true);
+                    _hoveredNode = hovered;
+                }
+
+                // Clic gauche : sélection/désélection du nœud survolé.
+                if (applyAction.WasPressedThisFrame() && _hoveredNode != Entity.Null)
+                {
+                    ToggleNodeSelection(_hoveredNode);
                 }
 
                 // Clic droit : retire le dernier nœud sélectionné.
                 if (secondaryApplyAction.WasPressedThisFrame() && _selectedNodes.Count > 0)
                 {
-                    SetHighlight(_selectedNodes[_selectedNodes.Count - 1], false);
+                    Entity last = _selectedNodes[_selectedNodes.Count - 1];
                     _selectedNodes.RemoveAt(_selectedNodes.Count - 1);
                     _selectedPositions.RemoveAt(_selectedPositions.Count - 1);
-                    _selectionDirty = true;
-                }
-
-                // Sélection modifiée : on reconstruit l'aperçu (définitions -> Temp fantômes).
-                if (_selectionDirty)
-                {
-                    _selectionDirty = false;
-                    applyMode = ApplyMode.Clear;
-                    inputDeps = DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
-                    if (_selectedPositions.Count >= 2)
+                    if (last != _hoveredNode)
                     {
-                        CreateGridDefinitions();
+                        SetHighlight(last, false);
                     }
                 }
+
+                // Reconstruction de l'aperçu (chaque frame, comme le NetTool — pas d'empilement).
+                inputDeps = DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
+                HasPreview = false;
+                PerimeterInvalid = false;
+                if (_selectedPositions.Count >= 2)
+                {
+                    int created = CreateGridDefinitions();
+                    HasPreview = created > 0;
+                    PerimeterInvalid = created == 0;
+                }
+                if (PerimeterInvalid && !_invalidLogged)
+                {
+                    _invalidLogged = true;
+                    Mod.Log.Info("Périmètre dégénéré (aire trop petite ou points alignés) : aucune grille générée.");
+                }
+                else if (!PerimeterInvalid)
+                {
+                    _invalidLogged = false;
+                }
+                CanApply = HasPreview && GetAllowApply();
             }
             catch (Exception e)
             {
                 // Jamais de crash du jeu : on log, on nettoie, et l'outil reste utilisable.
                 Mod.Log.Error(e, "Erreur dans GridRoadToolSystem, sélection annulée.");
-                ClearSelection();
-                applyMode = ApplyMode.Clear;
+                ResetState();
             }
 
             return inputDeps;
         }
 
         // ------------------------------------------------------------------
-        // Sélection des nœuds
+        // Survol et sélection des nœuds
         // ------------------------------------------------------------------
 
-        private void TryToggleNodeUnderCursor()
+        /// <summary>
+        /// Résout le nœud sous le curseur, à la manière de NetworkTools : si le raycast touche
+        /// directement un nœud on le prend ; s'il touche une arête, on prend le nœud d'extrémité
+        /// le plus proche du point survolé sur la courbe (hit.m_Position), dans la limite de
+        /// MaxSelectDistance. La position stockée vient toujours du composant Node, jamais du
+        /// point d'impact du rayon.
+        /// </summary>
+        private Entity ResolveHoveredNode()
         {
             if (!GetRaycastResult(out Entity entity, out RaycastHit hit))
             {
-                return;
+                return Entity.Null;
             }
 
-            Entity node = Entity.Null;
             if (EntityManager.HasComponent<Game.Net.Node>(entity))
             {
-                node = entity;
+                return entity;
             }
-            else if (hit.m_HitEntity != entity && EntityManager.HasComponent<Game.Net.Node>(hit.m_HitEntity))
+            if (hit.m_HitEntity != entity && EntityManager.HasComponent<Game.Net.Node>(hit.m_HitEntity))
             {
-                node = hit.m_HitEntity;
+                return hit.m_HitEntity;
             }
-            else if (EntityManager.TryGetComponent(entity, out Edge edge))
+            if (EntityManager.TryGetComponent(entity, out Edge edge)
+                && EntityManager.TryGetComponent(edge.m_Start, out Game.Net.Node startNode)
+                && EntityManager.TryGetComponent(edge.m_End, out Game.Net.Node endNode))
             {
-                // Clic sur une arête : on prend le nœud d'extrémité le plus proche du curseur.
-                if (EntityManager.TryGetComponent(edge.m_Start, out Game.Net.Node startNode)
-                    && EntityManager.TryGetComponent(edge.m_End, out Game.Net.Node endNode))
+                float distToStart = math.distance(hit.m_Position, startNode.m_Position);
+                float distToEnd = math.distance(hit.m_Position, endNode.m_Position);
+                Entity closest = distToStart <= distToEnd ? edge.m_Start : edge.m_End;
+                if (math.min(distToStart, distToEnd) < MaxSelectDistance)
                 {
-                    node = math.distancesq(hit.m_HitPosition.xz, startNode.m_Position.xz)
-                        <= math.distancesq(hit.m_HitPosition.xz, endNode.m_Position.xz)
-                        ? edge.m_Start : edge.m_End;
+                    return closest;
                 }
             }
+            return Entity.Null;
+        }
 
-            if (node == Entity.Null || !EntityManager.TryGetComponent(node, out Game.Net.Node nodeData))
+        private void ToggleNodeSelection(Entity node)
+        {
+            if (!EntityManager.TryGetComponent(node, out Game.Net.Node nodeData))
             {
                 return;
             }
@@ -239,34 +281,42 @@ namespace GridRoadGenerator.Systems
             int index = _selectedNodes.IndexOf(node);
             if (index >= 0)
             {
-                // Re-clic sur un nœud déjà sélectionné : désélection.
-                SetHighlight(node, false);
                 _selectedNodes.RemoveAt(index);
                 _selectedPositions.RemoveAt(index);
+                if (node != _hoveredNode)
+                {
+                    SetHighlight(node, false);
+                }
             }
             else
             {
                 _selectedNodes.Add(node);
+                // Position exacte du nœud (composant Node), pas le point d'impact du raycast.
                 _selectedPositions.Add(nodeData.m_Position);
                 SetHighlight(node, true);
             }
-            _selectionDirty = true;
         }
 
-        private void ClearSelection()
+        private void ResetState()
         {
             foreach (Entity node in _selectedNodes)
             {
                 SetHighlight(node, false);
             }
+            SetHighlight(_hoveredNode, false);
+            _hoveredNode = Entity.Null;
             _selectedNodes.Clear();
             _selectedPositions.Clear();
-            _selectionDirty = false;
+            _applyRequested = false;
+            HasPreview = false;
+            PerimeterInvalid = false;
+            CanApply = false;
+            _invalidLogged = false;
         }
 
         private void SetHighlight(Entity entity, bool highlighted)
         {
-            if (!EntityManager.Exists(entity))
+            if (entity == Entity.Null || !EntityManager.Exists(entity))
             {
                 return;
             }
@@ -320,17 +370,17 @@ namespace GridRoadGenerator.Systems
 
         /// <summary>
         /// Génère la grille (logique pure de Core) et crée pour chaque segment une entité de
-        /// définition CreationDefinition + NetCourse, comme NetToolSystem le fait lors d'un
-        /// tracé manuel. Le jeu transforme ces définitions en entités Temp (aperçu), découpe
-        /// les croisements (CourseSplitSystem) et crée les intersections avec le périmètre.
+        /// définition CreationDefinition + NetCourse, comme NetToolSystem lors d'un tracé
+        /// manuel. Le jeu en dérive les Temp (aperçu), découpe les croisements
+        /// (CourseSplitSystem) et crée les intersections avec le périmètre.
+        /// Retourne le nombre de segments créés (0 = polygone dégénéré ou trop petit).
         /// </summary>
-        private void CreateGridDefinitions()
+        private int CreateGridDefinitions()
         {
             PrefabBase roadPrefab = GetRoadPrefab();
             if (roadPrefab == null)
             {
-                Mod.Log.Warn("Aucun prefab de route disponible : grille non générée.");
-                return;
+                return 0;
             }
 
             List<RoadSegmentDef> segments;
@@ -341,11 +391,11 @@ namespace GridRoadGenerator.Systems
             catch (Exception e)
             {
                 Mod.Log.Warn($"Génération de grille impossible : {e.Message}");
-                return;
+                return 0;
             }
             if (segments.Count == 0)
             {
-                return;
+                return 0;
             }
 
             Entity prefabEntity = m_PrefabSystem.GetEntity(roadPrefab);
@@ -353,6 +403,7 @@ namespace GridRoadGenerator.Systems
             List<PerimeterEdge> perimeter = BuildPerimeterEdges();
             EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
             Unity.Mathematics.Random random = RandomSeed.Next().GetRandom(0);
+            int created = 0;
 
             foreach (RoadSegmentDef segment in segments)
             {
@@ -387,7 +438,9 @@ namespace GridRoadGenerator.Systems
                 });
                 commandBuffer.AddComponent(definition, default(Updated));
                 commandBuffer.AddComponent(definition, course);
+                created++;
             }
+            return created;
         }
 
         /// <summary>
@@ -424,7 +477,6 @@ namespace GridRoadGenerator.Systems
                 }
                 if (EntityManager.TryGetComponent(edge.m_Entity, out Edge edgeData))
                 {
-                    // Extrémité d'arête : on raccorde directement au nœud correspondant.
                     if (t <= 0.01f)
                     {
                         coursePos.m_Entity = edgeData.m_Start;

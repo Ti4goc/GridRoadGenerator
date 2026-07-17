@@ -35,6 +35,17 @@ namespace GridRoadGenerator.Localization
 
         public string ConfirmGridLabel;
         public string ConfirmGridDesc;
+
+        // Panneau UI in-game
+        public string UINodesSelected;
+        public string UIGenerate;
+        public string UIClearAll;
+
+        // Tooltips contextuels près du curseur
+        public string TooltipSelectNode;
+        public string TooltipRemoveLast;
+        public string TooltipConfirm;
+        public string TooltipInvalidPerimeter;
     }
 
     public static class Translations
@@ -85,6 +96,25 @@ namespace GridRoadGenerator.Localization
 
                 // Nom de la map d'input du mod (jamais traduit : nom du mod).
                 { s.GetBindingMapLocaleID(), ModName },
+
+                // Clés plates du panneau UI in-game (lues par translate() côté React).
+                // Les libellés mode/colonnes/lignes/espacement réutilisent ceux des Options.
+                { "GridRoadGenerator.UI.Title", ModName },
+                { "GridRoadGenerator.UI.Mode", t.ModeLabel },
+                { "GridRoadGenerator.UI.ModeFit", t.EnumFitToArea },
+                { "GridRoadGenerator.UI.ModeFixed", t.EnumFixedSpacing },
+                { "GridRoadGenerator.UI.Columns", t.ColumnsLabel },
+                { "GridRoadGenerator.UI.Rows", t.RowsLabel },
+                { "GridRoadGenerator.UI.Spacing", t.SpacingLabel },
+                { "GridRoadGenerator.UI.NodesSelected", t.UINodesSelected },
+                { "GridRoadGenerator.UI.Generate", t.UIGenerate },
+                { "GridRoadGenerator.UI.ClearAll", t.UIClearAll },
+
+                // Tooltips contextuels près du curseur.
+                { "GridRoadGenerator.Tooltip.SelectNode", t.TooltipSelectNode },
+                { "GridRoadGenerator.Tooltip.RemoveLast", t.TooltipRemoveLast },
+                { "GridRoadGenerator.Tooltip.Confirm", t.TooltipConfirm },
+                { "GridRoadGenerator.Tooltip.InvalidPerimeter", t.TooltipInvalidPerimeter },
             };
         }
 
@@ -115,7 +145,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Toggle grid tool",
                 ToggleToolDesc = "Activates or deactivates the grid road tool. Then click road nodes to outline the perimeter.",
                 ConfirmGridLabel = "Confirm grid",
-                ConfirmGridDesc = "Builds the previewed grid inside the selected perimeter."
+                ConfirmGridDesc = "Builds the previewed grid inside the selected perimeter.",
+                UINodesSelected = "Selected nodes",
+                UIGenerate = "Generate grid",
+                UIClearAll = "Clear all",
+                TooltipSelectNode = "Select a road node to outline the perimeter",
+                TooltipRemoveLast = "Right-click to remove the last node",
+                TooltipConfirm = "Press Enter or click Generate to build the grid",
+                TooltipInvalidPerimeter = "Invalid perimeter (area too small or nodes aligned)"
             },
 
             ["fr-FR"] = new LocaleStrings
@@ -136,7 +173,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Activer l'outil de grille",
                 ToggleToolDesc = "Active ou désactive l'outil de grille. Clique ensuite sur des nœuds de route pour tracer le périmètre.",
                 ConfirmGridLabel = "Valider la grille",
-                ConfirmGridDesc = "Construit la grille prévisualisée à l'intérieur du périmètre sélectionné."
+                ConfirmGridDesc = "Construit la grille prévisualisée à l'intérieur du périmètre sélectionné.",
+                UINodesSelected = "Nœuds sélectionnés",
+                UIGenerate = "Générer la grille",
+                UIClearAll = "Tout annuler",
+                TooltipSelectNode = "Sélectionne un nœud de route pour tracer le périmètre",
+                TooltipRemoveLast = "Clic droit pour retirer le dernier nœud",
+                TooltipConfirm = "Appuie sur Entrée ou clique sur Générer pour construire la grille",
+                TooltipInvalidPerimeter = "Périmètre invalide (aire trop petite ou nœuds alignés)"
             },
 
             ["de-DE"] = new LocaleStrings
@@ -157,7 +201,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Rasterwerkzeug umschalten",
                 ToggleToolDesc = "Aktiviert oder deaktiviert das Rasterwerkzeug. Klicke dann auf Straßenknoten, um den Umriss festzulegen.",
                 ConfirmGridLabel = "Raster bestätigen",
-                ConfirmGridDesc = "Baut das in der Vorschau angezeigte Raster innerhalb des gewählten Umrisses."
+                ConfirmGridDesc = "Baut das in der Vorschau angezeigte Raster innerhalb des gewählten Umrisses.",
+                UINodesSelected = "Ausgewählte Knoten",
+                UIGenerate = "Raster erzeugen",
+                UIClearAll = "Alles abbrechen",
+                TooltipSelectNode = "Wähle einen Straßenknoten, um den Umriss festzulegen",
+                TooltipRemoveLast = "Rechtsklick entfernt den letzten Knoten",
+                TooltipConfirm = "Drücke Eingabe oder klicke auf Erzeugen, um das Raster zu bauen",
+                TooltipInvalidPerimeter = "Ungültiger Umriss (Fläche zu klein oder Knoten auf einer Linie)"
             },
 
             ["es-ES"] = new LocaleStrings
@@ -178,7 +229,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Alternar herramienta de cuadrícula",
                 ToggleToolDesc = "Activa o desactiva la herramienta de cuadrícula. Luego haz clic en nodos de carretera para delimitar el perímetro.",
                 ConfirmGridLabel = "Confirmar cuadrícula",
-                ConfirmGridDesc = "Construye la cuadrícula previsualizada dentro del perímetro seleccionado."
+                ConfirmGridDesc = "Construye la cuadrícula previsualizada dentro del perímetro seleccionado.",
+                UINodesSelected = "Nodos seleccionados",
+                UIGenerate = "Generar cuadrícula",
+                UIClearAll = "Cancelar todo",
+                TooltipSelectNode = "Selecciona un nodo de carretera para delimitar el perímetro",
+                TooltipRemoveLast = "Clic derecho para quitar el último nodo",
+                TooltipConfirm = "Pulsa Intro o haz clic en Generar para construir la cuadrícula",
+                TooltipInvalidPerimeter = "Perímetro no válido (área demasiado pequeña o nodos alineados)"
             },
 
             ["it-IT"] = new LocaleStrings
@@ -199,7 +257,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Attiva/disattiva strumento griglia",
                 ToggleToolDesc = "Attiva o disattiva lo strumento griglia. Poi clicca sui nodi stradali per delimitare il perimetro.",
                 ConfirmGridLabel = "Conferma griglia",
-                ConfirmGridDesc = "Costruisce la griglia in anteprima all'interno del perimetro selezionato."
+                ConfirmGridDesc = "Costruisce la griglia in anteprima all'interno del perimetro selezionato.",
+                UINodesSelected = "Nodi selezionati",
+                UIGenerate = "Genera griglia",
+                UIClearAll = "Annulla tutto",
+                TooltipSelectNode = "Seleziona un nodo stradale per delimitare il perimetro",
+                TooltipRemoveLast = "Clic destro per rimuovere l'ultimo nodo",
+                TooltipConfirm = "Premi Invio o clicca su Genera per costruire la griglia",
+                TooltipInvalidPerimeter = "Perimetro non valido (area troppo piccola o nodi allineati)"
             },
 
             ["pl-PL"] = new LocaleStrings
@@ -220,7 +285,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Przełącz narzędzie siatki",
                 ToggleToolDesc = "Włącza lub wyłącza narzędzie siatki dróg. Następnie klikaj węzły dróg, aby wyznaczyć obwód.",
                 ConfirmGridLabel = "Zatwierdź siatkę",
-                ConfirmGridDesc = "Buduje podglądaną siatkę wewnątrz wybranego obwodu."
+                ConfirmGridDesc = "Buduje podglądaną siatkę wewnątrz wybranego obwodu.",
+                UINodesSelected = "Zaznaczone węzły",
+                UIGenerate = "Generuj siatkę",
+                UIClearAll = "Anuluj wszystko",
+                TooltipSelectNode = "Zaznacz węzeł drogi, aby wyznaczyć obwód",
+                TooltipRemoveLast = "Kliknij prawym przyciskiem, aby usunąć ostatni węzeł",
+                TooltipConfirm = "Naciśnij Enter lub kliknij Generuj, aby zbudować siatkę",
+                TooltipInvalidPerimeter = "Nieprawidłowy obwód (zbyt mała powierzchnia lub węzły w jednej linii)"
             },
 
             ["pt-BR"] = new LocaleStrings
@@ -241,7 +313,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Alternar ferramenta de grade",
                 ToggleToolDesc = "Ativa ou desativa a ferramenta de grade. Depois clique nos nós de rua para delimitar o perímetro.",
                 ConfirmGridLabel = "Confirmar grade",
-                ConfirmGridDesc = "Constrói a grade pré-visualizada dentro do perímetro selecionado."
+                ConfirmGridDesc = "Constrói a grade pré-visualizada dentro do perímetro selecionado.",
+                UINodesSelected = "Nós selecionados",
+                UIGenerate = "Gerar grade",
+                UIClearAll = "Cancelar tudo",
+                TooltipSelectNode = "Selecione um nó de rua para delimitar o perímetro",
+                TooltipRemoveLast = "Clique com o botão direito para remover o último nó",
+                TooltipConfirm = "Pressione Enter ou clique em Gerar para construir a grade",
+                TooltipInvalidPerimeter = "Perímetro inválido (área muito pequena ou nós alinhados)"
             },
 
             ["ru-RU"] = new LocaleStrings
@@ -262,7 +341,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Переключить инструмент сетки",
                 ToggleToolDesc = "Включает или выключает инструмент сетки дорог. Затем щёлкайте по узлам дорог, чтобы очертить периметр.",
                 ConfirmGridLabel = "Подтвердить сетку",
-                ConfirmGridDesc = "Строит показанную в предпросмотре сетку внутри выбранного периметра."
+                ConfirmGridDesc = "Строит показанную в предпросмотре сетку внутри выбранного периметра.",
+                UINodesSelected = "Выбрано узлов",
+                UIGenerate = "Создать сетку",
+                UIClearAll = "Отменить всё",
+                TooltipSelectNode = "Выберите узел дороги, чтобы очертить периметр",
+                TooltipRemoveLast = "Правый клик — убрать последний узел",
+                TooltipConfirm = "Нажмите Enter или кнопку «Создать», чтобы построить сетку",
+                TooltipInvalidPerimeter = "Недопустимый периметр (слишком малая площадь или узлы на одной линии)"
             },
 
             ["ja-JP"] = new LocaleStrings
@@ -283,7 +369,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "グリッドツールの切り替え",
                 ToggleToolDesc = "グリッド道路ツールを有効/無効にします。その後、道路のノードをクリックして外周を指定します。",
                 ConfirmGridLabel = "グリッドを確定",
-                ConfirmGridDesc = "選択した外周の内側に、プレビュー中のグリッドを建設します。"
+                ConfirmGridDesc = "選択した外周の内側に、プレビュー中のグリッドを建設します。",
+                UINodesSelected = "選択中のノード",
+                UIGenerate = "グリッドを生成",
+                UIClearAll = "すべて取り消す",
+                TooltipSelectNode = "道路のノードをクリックして外周を指定します",
+                TooltipRemoveLast = "右クリックで最後のノードを削除します",
+                TooltipConfirm = "Enter キーまたは「生成」でグリッドを建設します",
+                TooltipInvalidPerimeter = "無効な外周です（面積が小さすぎるか、ノードが一直線上にあります）"
             },
 
             ["ko-KR"] = new LocaleStrings
@@ -304,7 +397,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "그리드 도구 전환",
                 ToggleToolDesc = "그리드 도로 도구를 켜거나 끕니다. 그런 다음 도로 노드를 클릭해 경계를 지정하세요.",
                 ConfirmGridLabel = "그리드 확정",
-                ConfirmGridDesc = "선택한 경계 안에 미리 보기 중인 그리드를 건설합니다."
+                ConfirmGridDesc = "선택한 경계 안에 미리 보기 중인 그리드를 건설합니다.",
+                UINodesSelected = "선택한 노드",
+                UIGenerate = "그리드 생성",
+                UIClearAll = "모두 취소",
+                TooltipSelectNode = "도로 노드를 클릭해 경계를 지정하세요",
+                TooltipRemoveLast = "우클릭으로 마지막 노드를 제거합니다",
+                TooltipConfirm = "Enter 키 또는 생성 버튼으로 그리드를 건설합니다",
+                TooltipInvalidPerimeter = "잘못된 경계입니다(면적이 너무 작거나 노드가 일직선에 있음)"
             },
 
             ["zh-HANS"] = new LocaleStrings
@@ -325,7 +425,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "切换网格工具",
                 ToggleToolDesc = "启用或停用网格道路工具。然后点击道路节点以圈定周界。",
                 ConfirmGridLabel = "确认网格",
-                ConfirmGridDesc = "在所选周界内建造预览中的网格。"
+                ConfirmGridDesc = "在所选周界内建造预览中的网格。",
+                UINodesSelected = "已选节点",
+                UIGenerate = "生成网格",
+                UIClearAll = "全部取消",
+                TooltipSelectNode = "点击道路节点以圈定周界",
+                TooltipRemoveLast = "右键点击移除最后一个节点",
+                TooltipConfirm = "按回车键或点击“生成”建造网格",
+                TooltipInvalidPerimeter = "周界无效（面积过小或节点共线）"
             },
 
             ["zh-HANT"] = new LocaleStrings
@@ -346,7 +453,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "切換網格工具",
                 ToggleToolDesc = "啟用或停用網格道路工具。然後點擊道路節點以圈定周界。",
                 ConfirmGridLabel = "確認網格",
-                ConfirmGridDesc = "在所選周界內建造預覽中的網格。"
+                ConfirmGridDesc = "在所選周界內建造預覽中的網格。",
+                UINodesSelected = "已選節點",
+                UIGenerate = "生成網格",
+                UIClearAll = "全部取消",
+                TooltipSelectNode = "點擊道路節點以圈定周界",
+                TooltipRemoveLast = "按右鍵移除最後一個節點",
+                TooltipConfirm = "按 Enter 鍵或點擊「生成」建造網格",
+                TooltipInvalidPerimeter = "周界無效（面積過小或節點共線）"
             },
 
             // ============ LANGUES COMMUNAUTAIRES ============
@@ -370,7 +484,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Ativar/desativar ferramenta de grelha",
                 ToggleToolDesc = "Liga ou desliga a ferramenta de grelha. Depois clica nos nós de estrada para delimitares o perímetro.",
                 ConfirmGridLabel = "Confirmar grelha",
-                ConfirmGridDesc = "Constrói a grelha pré-visualizada dentro do perímetro que selecionaste."
+                ConfirmGridDesc = "Constrói a grelha pré-visualizada dentro do perímetro que selecionaste.",
+                UINodesSelected = "Nós selecionados",
+                UIGenerate = "Gerar grelha",
+                UIClearAll = "Cancelar tudo",
+                TooltipSelectNode = "Clica num nó de estrada para delimitares o perímetro",
+                TooltipRemoveLast = "Clica com o botão direito para retirares o último nó",
+                TooltipConfirm = "Carrega em Enter ou clica em gerar para construíres a grelha",
+                TooltipInvalidPerimeter = "Perímetro inválido (área demasiado pequena ou nós alinhados)"
             },
 
             ["uk-UA"] = new LocaleStrings
@@ -391,7 +512,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Перемкнути інструмент сітки",
                 ToggleToolDesc = "Вмикає або вимикає інструмент сітки доріг. Далі клацай по вузлах доріг, щоб окреслити периметр.",
                 ConfirmGridLabel = "Підтвердити сітку",
-                ConfirmGridDesc = "Будує сітку з попереднього перегляду всередині вибраного периметра."
+                ConfirmGridDesc = "Будує сітку з попереднього перегляду всередині вибраного периметра.",
+                UINodesSelected = "Вибрано вузлів",
+                UIGenerate = "Створити сітку",
+                UIClearAll = "Скасувати все",
+                TooltipSelectNode = "Клацни вузол дороги, щоб окреслити периметр",
+                TooltipRemoveLast = "Правий клік — прибрати останній вузол",
+                TooltipConfirm = "Натисни Enter або кнопку «Створити», щоб побудувати сітку",
+                TooltipInvalidPerimeter = "Недійсний периметр (замала площа або вузли на одній лінії)"
             },
 
             ["th-TH"] = new LocaleStrings
@@ -412,7 +540,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "สลับเครื่องมือตาราง",
                 ToggleToolDesc = "เปิดหรือปิดเครื่องมือถนนแบบตาราง จากนั้นคลิกที่จุดเชื่อมถนนเพื่อกำหนดขอบเขต",
                 ConfirmGridLabel = "ยืนยันตาราง",
-                ConfirmGridDesc = "สร้างตารางที่แสดงตัวอย่างไว้ภายในขอบเขตที่เลือก"
+                ConfirmGridDesc = "สร้างตารางที่แสดงตัวอย่างไว้ภายในขอบเขตที่เลือก",
+                UINodesSelected = "จุดเชื่อมที่เลือก",
+                UIGenerate = "สร้างตาราง",
+                UIClearAll = "ยกเลิกทั้งหมด",
+                TooltipSelectNode = "คลิกจุดเชื่อมถนนเพื่อกำหนดขอบเขต",
+                TooltipRemoveLast = "คลิกขวาเพื่อลบจุดเชื่อมล่าสุด",
+                TooltipConfirm = "กด Enter หรือคลิกสร้างเพื่อก่อสร้างตาราง",
+                TooltipInvalidPerimeter = "ขอบเขตไม่ถูกต้อง (พื้นที่เล็กเกินไปหรือจุดเชื่อมอยู่ในแนวเดียวกัน)"
             },
 
             ["vi-VN"] = new LocaleStrings
@@ -433,7 +568,14 @@ namespace GridRoadGenerator.Localization
                 ToggleToolLabel = "Bật/tắt công cụ lưới",
                 ToggleToolDesc = "Bật hoặc tắt công cụ đường lưới. Sau đó nhấp vào các nút giao đường để khoanh vùng chu vi.",
                 ConfirmGridLabel = "Xác nhận lưới",
-                ConfirmGridDesc = "Xây dựng lưới đang xem trước bên trong chu vi đã chọn."
+                ConfirmGridDesc = "Xây dựng lưới đang xem trước bên trong chu vi đã chọn.",
+                UINodesSelected = "Nút đã chọn",
+                UIGenerate = "Tạo lưới",
+                UIClearAll = "Hủy tất cả",
+                TooltipSelectNode = "Nhấp vào nút giao đường để khoanh vùng chu vi",
+                TooltipRemoveLast = "Nhấp chuột phải để bỏ nút cuối cùng",
+                TooltipConfirm = "Nhấn Enter hoặc bấm Tạo lưới để xây dựng",
+                TooltipInvalidPerimeter = "Chu vi không hợp lệ (diện tích quá nhỏ hoặc các nút thẳng hàng)"
             },
         };
     }
