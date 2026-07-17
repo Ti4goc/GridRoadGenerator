@@ -38,6 +38,7 @@ namespace GridRoadGenerator
             updateSystem.UpdateAt<GridRoadToolSystem>(SystemUpdatePhase.ToolUpdate);
             updateSystem.UpdateAt<GridRoadUISystem>(SystemUpdatePhase.UIUpdate);
             updateSystem.UpdateAt<GridRoadTooltipSystem>(SystemUpdatePhase.UITooltip);
+            updateSystem.UpdateAt<GridRoadOverlaySystem>(SystemUpdatePhase.Rendering);
             _toolSystem = updateSystem.World.GetOrCreateSystemManaged<GridRoadToolSystem>();
 
             // Raccourci global (Ctrl+G par défaut) : active/désactive l'outil.

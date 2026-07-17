@@ -49,6 +49,12 @@ namespace GridRoadGenerator.Systems
 
         /// <summary>Nombre de nœuds actuellement sélectionnés (lu par l'UI et les tooltips).</summary>
         public int NodeCount => _selectedNodes.Count;
+        /// <summary>Nœuds sélectionnés, dans l'ordre de clic (lus par le rendu overlay).</summary>
+        public IReadOnlyList<Entity> SelectedNodes => _selectedNodes;
+        /// <summary>Positions des nœuds sélectionnés, dans l'ordre de clic (lues par le rendu overlay).</summary>
+        public IReadOnlyList<float3> SelectedPositions => _selectedPositions;
+        /// <summary>Nœud actuellement survolé et sélectionnable (Entity.Null sinon).</summary>
+        public Entity HoveredNode => _hoveredNode;
         /// <summary>Vrai si une grille prévisualisée existe (définitions créées à la dernière frame).</summary>
         public bool HasPreview { get; private set; }
         /// <summary>Vrai si le périmètre sélectionné ne produit aucune grille (polygone dégénéré).</summary>
