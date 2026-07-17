@@ -64,6 +64,8 @@ namespace GridRoadGenerator.Localization
         public string TooltipRemoveLast;
         public string TooltipConfirm;
         public string TooltipInvalidPerimeter;
+        /// <summary>Double-clic sur un nœud qui n'appartient à aucune boucle fermée du réseau.</summary>
+        public string TooltipPerimeterDetectionFailed;
     }
 
     public static class Translations
@@ -145,6 +147,7 @@ namespace GridRoadGenerator.Localization
                 { "GridRoadGenerator.Tooltip.RemoveLast", t.TooltipRemoveLast },
                 { "GridRoadGenerator.Tooltip.Confirm", t.TooltipConfirm },
                 { "GridRoadGenerator.Tooltip.InvalidPerimeter", t.TooltipInvalidPerimeter },
+                { "GridRoadGenerator.Tooltip.PerimeterDetectionFailed", t.TooltipPerimeterDetectionFailed },
             };
         }
 
@@ -194,7 +197,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Select a road node to outline the perimeter",
                 TooltipRemoveLast = "Right-click to remove the last node",
                 TooltipConfirm = "Press Enter or click Generate to build the grid",
-                TooltipInvalidPerimeter = "Invalid perimeter (area too small or nodes aligned)"
+                TooltipInvalidPerimeter = "Invalid perimeter (area too small or nodes aligned)",
+                TooltipPerimeterDetectionFailed = "Perimeter not detected, continue selecting manually"
             },
 
             ["fr-FR"] = new LocaleStrings
@@ -234,7 +238,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Sélectionne un nœud de route pour tracer le périmètre",
                 TooltipRemoveLast = "Clic droit pour retirer le dernier nœud",
                 TooltipConfirm = "Appuie sur Entrée ou clique sur Générer pour construire la grille",
-                TooltipInvalidPerimeter = "Périmètre invalide (aire trop petite ou nœuds alignés)"
+                TooltipInvalidPerimeter = "Périmètre invalide (aire trop petite ou nœuds alignés)",
+                TooltipPerimeterDetectionFailed = "Périmètre non détecté, continue la sélection manuellement"
             },
 
             ["de-DE"] = new LocaleStrings
@@ -274,7 +279,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Wähle einen Straßenknoten, um den Umriss festzulegen",
                 TooltipRemoveLast = "Rechtsklick entfernt den letzten Knoten",
                 TooltipConfirm = "Drücke Eingabe oder klicke auf Erzeugen, um das Raster zu bauen",
-                TooltipInvalidPerimeter = "Ungültiger Umriss (Fläche zu klein oder Knoten auf einer Linie)"
+                TooltipInvalidPerimeter = "Ungültiger Umriss (Fläche zu klein oder Knoten auf einer Linie)",
+                TooltipPerimeterDetectionFailed = "Umriss nicht erkannt, wähle manuell weiter aus"
             },
 
             ["es-ES"] = new LocaleStrings
@@ -314,7 +320,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Selecciona un nodo de carretera para delimitar el perímetro",
                 TooltipRemoveLast = "Clic derecho para quitar el último nodo",
                 TooltipConfirm = "Pulsa Intro o haz clic en Generar para construir la cuadrícula",
-                TooltipInvalidPerimeter = "Perímetro no válido (área demasiado pequeña o nodos alineados)"
+                TooltipInvalidPerimeter = "Perímetro no válido (área demasiado pequeña o nodos alineados)",
+                TooltipPerimeterDetectionFailed = "Perímetro no detectado, continúa seleccionando manualmente"
             },
 
             ["it-IT"] = new LocaleStrings
@@ -354,7 +361,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Seleziona un nodo stradale per delimitare il perimetro",
                 TooltipRemoveLast = "Clic destro per rimuovere l'ultimo nodo",
                 TooltipConfirm = "Premi Invio o clicca su Genera per costruire la griglia",
-                TooltipInvalidPerimeter = "Perimetro non valido (area troppo piccola o nodi allineati)"
+                TooltipInvalidPerimeter = "Perimetro non valido (area troppo piccola o nodi allineati)",
+                TooltipPerimeterDetectionFailed = "Perimetro non rilevato, continua la selezione manualmente"
             },
 
             ["pl-PL"] = new LocaleStrings
@@ -394,7 +402,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Zaznacz węzeł drogi, aby wyznaczyć obwód",
                 TooltipRemoveLast = "Kliknij prawym przyciskiem, aby usunąć ostatni węzeł",
                 TooltipConfirm = "Naciśnij Enter lub kliknij Generuj, aby zbudować siatkę",
-                TooltipInvalidPerimeter = "Nieprawidłowy obwód (zbyt mała powierzchnia lub węzły w jednej linii)"
+                TooltipInvalidPerimeter = "Nieprawidłowy obwód (zbyt mała powierzchnia lub węzły w jednej linii)",
+                TooltipPerimeterDetectionFailed = "Obwód nie wykryty, kontynuuj zaznaczanie ręcznie"
             },
 
             ["pt-BR"] = new LocaleStrings
@@ -434,7 +443,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Selecione um nó de rua para delimitar o perímetro",
                 TooltipRemoveLast = "Clique com o botão direito para remover o último nó",
                 TooltipConfirm = "Pressione Enter ou clique em Gerar para construir a grade",
-                TooltipInvalidPerimeter = "Perímetro inválido (área muito pequena ou nós alinhados)"
+                TooltipInvalidPerimeter = "Perímetro inválido (área muito pequena ou nós alinhados)",
+                TooltipPerimeterDetectionFailed = "Perímetro não detectado, continue selecionando manualmente"
             },
 
             ["ru-RU"] = new LocaleStrings
@@ -474,7 +484,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Выберите узел дороги, чтобы очертить периметр",
                 TooltipRemoveLast = "Правый клик — убрать последний узел",
                 TooltipConfirm = "Нажмите Enter или кнопку «Создать», чтобы построить сетку",
-                TooltipInvalidPerimeter = "Недопустимый периметр (слишком малая площадь или узлы на одной линии)"
+                TooltipInvalidPerimeter = "Недопустимый периметр (слишком малая площадь или узлы на одной линии)",
+                TooltipPerimeterDetectionFailed = "Периметр не обнаружен, продолжите выбор вручную"
             },
 
             ["ja-JP"] = new LocaleStrings
@@ -514,7 +525,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "道路のノードをクリックして外周を指定します",
                 TooltipRemoveLast = "右クリックで最後のノードを削除します",
                 TooltipConfirm = "Enter キーまたは「生成」でグリッドを建設します",
-                TooltipInvalidPerimeter = "無効な外周です（面積が小さすぎるか、ノードが一直線上にあります）"
+                TooltipInvalidPerimeter = "無効な外周です（面積が小さすぎるか、ノードが一直線上にあります）",
+                TooltipPerimeterDetectionFailed = "外周を検出できませんでした。手動での選択を続けてください"
             },
 
             ["ko-KR"] = new LocaleStrings
@@ -554,7 +566,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "도로 노드를 클릭해 경계를 지정하세요",
                 TooltipRemoveLast = "우클릭으로 마지막 노드를 제거합니다",
                 TooltipConfirm = "Enter 키 또는 생성 버튼으로 그리드를 건설합니다",
-                TooltipInvalidPerimeter = "잘못된 경계입니다(면적이 너무 작거나 노드가 일직선에 있음)"
+                TooltipInvalidPerimeter = "잘못된 경계입니다(면적이 너무 작거나 노드가 일직선에 있음)",
+                TooltipPerimeterDetectionFailed = "경계를 감지하지 못했습니다. 수동으로 계속 선택하세요"
             },
 
             ["zh-HANS"] = new LocaleStrings
@@ -594,7 +607,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "点击道路节点以圈定周界",
                 TooltipRemoveLast = "右键点击移除最后一个节点",
                 TooltipConfirm = "按回车键或点击“生成”建造网格",
-                TooltipInvalidPerimeter = "周界无效（面积过小或节点共线）"
+                TooltipInvalidPerimeter = "周界无效（面积过小或节点共线）",
+                TooltipPerimeterDetectionFailed = "未检测到周界，请继续手动选择"
             },
 
             ["zh-HANT"] = new LocaleStrings
@@ -634,7 +648,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "點擊道路節點以圈定周界",
                 TooltipRemoveLast = "按右鍵移除最後一個節點",
                 TooltipConfirm = "按 Enter 鍵或點擊「生成」建造網格",
-                TooltipInvalidPerimeter = "周界無效（面積過小或節點共線）"
+                TooltipInvalidPerimeter = "周界無效（面積過小或節點共線）",
+                TooltipPerimeterDetectionFailed = "未偵測到周界，請繼續手動選擇"
             },
 
             // ============ LANGUES COMMUNAUTAIRES ============
@@ -677,7 +692,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Clica num nó de estrada para delimitares o perímetro",
                 TooltipRemoveLast = "Clica com o botão direito para retirares o último nó",
                 TooltipConfirm = "Carrega em Enter ou clica em gerar para construíres a grelha",
-                TooltipInvalidPerimeter = "Perímetro inválido (área demasiado pequena ou nós alinhados)"
+                TooltipInvalidPerimeter = "Perímetro inválido (área demasiado pequena ou nós alinhados)",
+                TooltipPerimeterDetectionFailed = "Perímetro não detetado, continua a seleção manualmente"
             },
 
             ["uk-UA"] = new LocaleStrings
@@ -717,7 +733,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Клацни вузол дороги, щоб окреслити периметр",
                 TooltipRemoveLast = "Правий клік — прибрати останній вузол",
                 TooltipConfirm = "Натисни Enter або кнопку «Створити», щоб побудувати сітку",
-                TooltipInvalidPerimeter = "Недійсний периметр (замала площа або вузли на одній лінії)"
+                TooltipInvalidPerimeter = "Недійсний периметр (замала площа або вузли на одній лінії)",
+                TooltipPerimeterDetectionFailed = "Периметр не виявлено, продовжуй вибір вручну"
             },
 
             ["th-TH"] = new LocaleStrings
@@ -757,7 +774,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "คลิกจุดเชื่อมถนนเพื่อกำหนดขอบเขต",
                 TooltipRemoveLast = "คลิกขวาเพื่อลบจุดเชื่อมล่าสุด",
                 TooltipConfirm = "กด Enter หรือคลิกสร้างเพื่อก่อสร้างตาราง",
-                TooltipInvalidPerimeter = "ขอบเขตไม่ถูกต้อง (พื้นที่เล็กเกินไปหรือจุดเชื่อมอยู่ในแนวเดียวกัน)"
+                TooltipInvalidPerimeter = "ขอบเขตไม่ถูกต้อง (พื้นที่เล็กเกินไปหรือจุดเชื่อมอยู่ในแนวเดียวกัน)",
+                TooltipPerimeterDetectionFailed = "ตรวจไม่พบขอบเขต โปรดเลือกต่อด้วยตนเอง"
             },
 
             ["vi-VN"] = new LocaleStrings
@@ -797,7 +815,8 @@ namespace GridRoadGenerator.Localization
                 TooltipSelectNode = "Nhấp vào nút giao đường để khoanh vùng chu vi",
                 TooltipRemoveLast = "Nhấp chuột phải để bỏ nút cuối cùng",
                 TooltipConfirm = "Nhấn Enter hoặc bấm Tạo lưới để xây dựng",
-                TooltipInvalidPerimeter = "Chu vi không hợp lệ (diện tích quá nhỏ hoặc các nút thẳng hàng)"
+                TooltipInvalidPerimeter = "Chu vi không hợp lệ (diện tích quá nhỏ hoặc các nút thẳng hàng)",
+                TooltipPerimeterDetectionFailed = "Không phát hiện được chu vi, hãy tiếp tục chọn thủ công"
             },
         };
     }

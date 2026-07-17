@@ -37,6 +37,12 @@ namespace GridRoadGenerator.Systems
         private const float NodeSnapDistance = 4f;
         /// <summary>Distance (m) sous laquelle une extrémité de segment est raccordée à une route du périmètre.</summary>
         private const float EdgeSnapDistance = 4f;
+        /// <summary>Fenêtre (s) entre deux clics sur le même nœud pour détecter un double-clic.</summary>
+        private const float DoubleClickWindow = 0.35f;
+        /// <summary>Garde-fou : nombre max de nœuds visités par la recherche de chemin entre deux clics.</summary>
+        private const int MaxPathfindNodes = 2000;
+        /// <summary>Garde-fou : nombre max de nœuds du contour détecté au double-clic.</summary>
+        private const int MaxPerimeterNodes = 50;
 
         public override string toolID => "Grid Road Tool";
 
@@ -46,6 +52,12 @@ namespace GridRoadGenerator.Systems
         private bool _applyRequested;
         private bool _clearRequested;
         private bool _invalidLogged;
+        private Entity _lastClickedNode = Entity.Null;
+        private float _lastClickTime = -1f;
+        private readonly List<Entity> _pathScratch = new List<Entity>();
+
+        /// <summary>Vrai si le dernier double-clic n'a pas trouvé de contour fermé (affiché en tooltip).</summary>
+        public bool PerimeterDetectionFailed { get; private set; }
 
         /// <summary>Nombre de nœuds actuellement sélectionnés (lu par l'UI et les tooltips).</summary>
         public int NodeCount => _selectedNodes.Count;
@@ -198,10 +210,24 @@ namespace GridRoadGenerator.Systems
                     _hoveredNode = hovered;
                 }
 
-                // Clic gauche : sélection/désélection du nœud survolé.
+                // Clic gauche : sélection/désélection du nœud survolé. Un double-clic sur
+                // le premier nœud sélectionné tente de détecter le contour fermé complet.
                 if (applyAction.WasPressedThisFrame() && _hoveredNode != Entity.Null)
                 {
-                    ToggleNodeSelection(_hoveredNode);
+                    float now = UnityEngine.Time.unscaledTime;
+                    bool isDoubleClick = _hoveredNode == _lastClickedNode && (now - _lastClickTime) <= DoubleClickWindow;
+                    _lastClickedNode = _hoveredNode;
+                    _lastClickTime = now;
+                    PerimeterDetectionFailed = false;
+
+                    if (isDoubleClick && _selectedNodes.Count > 0 && _hoveredNode == _selectedNodes[0])
+                    {
+                        TryAutoSelectPerimeter();
+                    }
+                    else
+                    {
+                        ToggleNodeSelection(_hoveredNode);
+                    }
                 }
 
                 // Clic droit : retire le dernier nœud sélectionné.
@@ -304,13 +330,121 @@ namespace GridRoadGenerator.Systems
                 {
                     SetHighlight(node, false);
                 }
+                return;
             }
-            else
+
+            // S'il existe un chemin sur le réseau EXISTANT entre le dernier nœud
+            // sélectionné et celui-ci, insère les nœuds intermédiaires dans l'ordre
+            // (comme si le joueur avait cliqué dessus un par un). Réseaux déconnectés :
+            // comportement direct conservé (ajoute simplement le nœud cliqué).
+            if (_selectedNodes.Count > 0
+                && NetworkGraphAlgorithms.FindShortestPath(new EcsNetworkGraph(EntityManager),
+                    _selectedNodes[_selectedNodes.Count - 1], node, _pathScratch, MaxPathfindNodes))
             {
+                for (int i = 1; i < _pathScratch.Count; i++)
+                {
+                    Entity pathNode = _pathScratch[i];
+                    if (_selectedNodes.Contains(pathNode)
+                        || !EntityManager.TryGetComponent(pathNode, out Game.Net.Node pathNodeData))
+                    {
+                        continue;
+                    }
+                    _selectedNodes.Add(pathNode);
+                    _selectedPositions.Add(pathNodeData.m_Position);
+                    SetHighlight(pathNode, true);
+                }
+                return;
+            }
+
+            _selectedNodes.Add(node);
+            // Position exacte du nœud (composant Node), pas le point d'impact du raycast.
+            _selectedPositions.Add(nodeData.m_Position);
+            SetHighlight(node, true);
+        }
+
+        /// <summary>
+        /// Double-clic sur le premier nœud sélectionné : tente de détecter le contour
+        /// fermé du réseau à partir de ce point (suivi de la face, "hug the right
+        /// wall") et remplace toute la sélection par les nœuds du contour dans
+        /// l'ordre. Échec propre (aucun crash, aucun blocage) si le point de départ
+        /// n'appartient à aucune boucle fermée : la sélection en cours est conservée
+        /// et PerimeterDetectionFailed est levé pour le tooltip contextuel.
+        /// </summary>
+        private void TryAutoSelectPerimeter()
+        {
+            var loop = new List<Entity>();
+            if (!NetworkGraphAlgorithms.TraceBoundary(new EcsNetworkGraph(EntityManager),
+                _selectedNodes[0], loop, MaxPerimeterNodes))
+            {
+                PerimeterDetectionFailed = true;
+                Mod.Log.Info("Périmètre non détecté depuis ce nœud : continue la sélection manuellement.");
+                return;
+            }
+
+            foreach (Entity node in _selectedNodes)
+            {
+                if (node != loop[0])
+                {
+                    SetHighlight(node, false);
+                }
+            }
+            _selectedNodes.Clear();
+            _selectedPositions.Clear();
+            foreach (Entity node in loop)
+            {
+                if (!EntityManager.TryGetComponent(node, out Game.Net.Node nodeData))
+                {
+                    continue;
+                }
                 _selectedNodes.Add(node);
-                // Position exacte du nœud (composant Node), pas le point d'impact du raycast.
                 _selectedPositions.Add(nodeData.m_Position);
                 SetHighlight(node, true);
+            }
+        }
+
+        /// <summary>
+        /// Adaptateur ECS de l'abstraction de graphe pure (Core/NetworkGraph.cs) : lit
+        /// les arêtes sortantes d'un nœud via ConnectedEdge/Edge/Curve, en coût
+        /// (longueur réelle de l'arête) et direction (dans le plan XZ, pour le suivi
+        /// de contour). Une nouvelle liste à chaque appel — pas d'état partagé.
+        /// </summary>
+        private readonly struct EcsNetworkGraph : INetworkGraph<Entity>
+        {
+            private readonly EntityManager _entityManager;
+
+            public EcsNetworkGraph(EntityManager entityManager) => _entityManager = entityManager;
+
+            public IReadOnlyList<GraphEdge<Entity>> GetNeighbors(Entity node)
+            {
+                var result = new List<GraphEdge<Entity>>();
+                if (!_entityManager.TryGetComponent(node, out Game.Net.Node nodeData)
+                    || !_entityManager.TryGetBuffer(node, true, out DynamicBuffer<ConnectedEdge> connectedEdges))
+                {
+                    return result;
+                }
+
+                for (int i = 0; i < connectedEdges.Length; i++)
+                {
+                    Entity edgeEntity = connectedEdges[i].m_Edge;
+                    if (!_entityManager.TryGetComponent(edgeEntity, out Edge edge))
+                    {
+                        continue;
+                    }
+                    Entity neighbor = edge.m_Start == node ? edge.m_End : edge.m_Start;
+                    if (neighbor == node || !_entityManager.TryGetComponent(neighbor, out Game.Net.Node neighborData))
+                    {
+                        continue; // arête dégénérée ou voisin invalide, ignorée
+                    }
+
+                    float cost = _entityManager.TryGetComponent(edgeEntity, out Curve curve) ? curve.m_Length : 0f;
+
+                    float2 delta = neighborData.m_Position.xz - nodeData.m_Position.xz;
+                    float length = math.length(delta);
+                    float2 direction = length > 1e-4f ? delta / length : new float2(1f, 0f);
+
+                    result.Add(new GraphEdge<Entity>(neighbor, cost, direction));
+                }
+                return result;
             }
         }
 
@@ -329,6 +463,7 @@ namespace GridRoadGenerator.Systems
             PerimeterInvalid = false;
             CanApply = false;
             _invalidLogged = false;
+            PerimeterDetectionFailed = false;
         }
 
         private void SetHighlight(Entity entity, bool highlighted)

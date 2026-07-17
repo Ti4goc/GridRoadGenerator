@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <Compile Include="..\Core\GridGenerator.cs" Link="Core\GridGenerator.cs" />
+    <Compile Include="..\Core\NetworkGraph.cs" Link="Core\NetworkGraph.cs" />
   </ItemGroup>
 
   <ItemGroup>

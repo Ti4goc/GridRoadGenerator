@@ -18,6 +18,7 @@ namespace GridRoadGenerator.Systems
         private StringTooltip _removeLastTooltip;
         private StringTooltip _confirmTooltip;
         private StringTooltip _invalidTooltip;
+        private StringTooltip _perimeterDetectionFailedTooltip;
 
         protected override void OnCreate()
         {
@@ -44,6 +45,11 @@ namespace GridRoadGenerator.Systems
                 path = "gridRoadInvalid",
                 value = LocalizedString.Id("GridRoadGenerator.Tooltip.InvalidPerimeter")
             };
+            _perimeterDetectionFailedTooltip = new StringTooltip
+            {
+                path = "gridRoadPerimeterDetectionFailed",
+                value = LocalizedString.Id("GridRoadGenerator.Tooltip.PerimeterDetectionFailed")
+            };
         }
 
         protected override void OnUpdate()
@@ -65,6 +71,10 @@ namespace GridRoadGenerator.Systems
             else if (tool.PerimeterInvalid)
             {
                 AddMouseTooltip(_invalidTooltip);
+            }
+            if (tool.PerimeterDetectionFailed)
+            {
+                AddMouseTooltip(_perimeterDetectionFailedTooltip);
             }
         }
     }
