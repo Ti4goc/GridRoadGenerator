@@ -119,11 +119,28 @@ $input-border-hover-color: rgba(255, 255, 255, 0.35);
     color: #ff8080;
 }
 
+// Rangée du réseau : cliquable, ouvre le sélecteur.
 .prefabRow {
     display: flex;
     flex-direction: row;
     align-items: center;
     min-width: 0;
+    padding: 2rem 6rem;
+    border-radius: 4rem;
+    background: transparent;
+    border: none;
+    color: white;
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+    }
+}
+
+.prefabChevron {
+    margin-left: 6rem;
+    color: #ffffff80;
+    font-size: var(--fontSizeM);
 }
 
 .prefabIcon {

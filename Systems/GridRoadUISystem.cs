@@ -1,11 +1,15 @@
 // Pattern de bindings cohtml adapté de CS2-NetworkTools (c) Luca Rager,
 // licence MIT — https://github.com/lucarager/CS2-NetworkTools
+using System.Collections.Generic;
+using Colossal.Entities;
 using Colossal.UI.Binding;
 using Game.Prefabs;
 using Game.Tools;
 using Game.UI;
 using GridRoadGenerator.Core;
 using GridRoadGenerator.Settings;
+using Unity.Collections;
+using Unity.Entities;
 using Unity.Mathematics;
 
 namespace GridRoadGenerator.Systems
@@ -36,6 +40,28 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<float> _spacingBinding;
         private ValueBinding<string> _roadPrefabNameBinding;
         private ValueBinding<string> _roadPrefabIconBinding;
+        private ValueBinding<bool> _roadPrefabAutoBinding;
+
+        // Sélecteur de réseau (pattern PrefabSelectionUISystem de CS2-NetworkTools, MIT).
+        private ValueBinding<int> _pickerTypeBinding;
+        private RawValueBinding _pickerDataBinding;
+        private RawValueBinding _recentPrefabsBinding;
+        private PrefabSystem _prefabSystem;
+        private int _lastPickerType = -1;
+        private readonly List<(Entity entity, string name, string icon)> _pickerEntries
+            = new List<(Entity, string, string)>();
+        /// <summary>Réseaux choisis récemment (session en cours), du plus récent au plus ancien.</summary>
+        private readonly List<Entity> _recentPrefabs = new List<Entity>();
+        private const int MaxRecentPrefabs = 5;
+
+        /// <summary>Onglets du sélecteur ; les valeurs doivent correspondre au TS (prefabPicker.tsx).</summary>
+        private enum PickerType
+        {
+            Road = 0,
+            Path = 1,
+            Rail = 2,
+            Waterway = 3
+        }
 
         protected override void OnCreate()
         {
@@ -57,9 +83,22 @@ namespace GridRoadGenerator.Systems
             AddBinding(_rowsBinding = new ValueBinding<int>(BindingGroup, "ROWS", _settings.Rows));
             AddBinding(_spacingBinding = new ValueBinding<float>(BindingGroup, "SPACING", _settings.SpacingMeters));
 
-            // Prefab de route utilisé par la grille (rangée en lecture seule du panneau).
+            // Prefab de réseau utilisé par la grille (rangée du panneau, ouvre le sélecteur).
             AddBinding(_roadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_NAME", string.Empty));
             AddBinding(_roadPrefabIconBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_ICON", string.Empty));
+            AddBinding(_roadPrefabAutoBinding = new ValueBinding<bool>(BindingGroup, "ROAD_PREFAB_AUTO", true));
+
+            // Sélecteur de réseau : onglet actif, liste des prefabs, récents, choix.
+            _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
+            AddBinding(_pickerTypeBinding = new ValueBinding<int>(BindingGroup, "PICKER_TYPE", (int)PickerType.Road));
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_PICKER_TYPE", value =>
+            {
+                _pickerTypeBinding.Update(math.clamp(value, 0, 3));
+            }));
+            AddBinding(_pickerDataBinding = new RawValueBinding(BindingGroup, "PICKER_DATA", WritePickerEntries));
+            AddBinding(_recentPrefabsBinding = new RawValueBinding(BindingGroup, "RECENT_PREFABS", WriteRecentPrefabs));
+            AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB", HandlePickPrefab));
+            AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO", () => _toolSystem.SetRoadPrefab(null)));
 
             AddBinding(new TriggerBinding<int>(BindingGroup, "SET_MODE", value =>
             {
@@ -104,6 +143,140 @@ namespace GridRoadGenerator.Systems
             PrefabBase roadPrefab = _toolSystem.GetPrefab();
             _roadPrefabNameBinding.Update(roadPrefab != null ? roadPrefab.name : string.Empty);
             _roadPrefabIconBinding.Update(roadPrefab != null ? ImageSystem.GetThumbnail(roadPrefab) ?? string.Empty : string.Empty);
+            _roadPrefabAutoBinding.Update(_toolSystem.RoadPrefabIsAuto);
+
+            // Reconstruit la liste du sélecteur quand l'onglet change (coûteux, donc jamais par frame).
+            if (_lastPickerType != _pickerTypeBinding.value)
+            {
+                _lastPickerType = _pickerTypeBinding.value;
+                RebuildPickerEntries((PickerType)_lastPickerType);
+                _pickerDataBinding.Update();
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Sélecteur de réseau
+        // ------------------------------------------------------------------
+
+        private void HandlePickPrefab(Entity entity)
+        {
+            if (!_prefabSystem.TryGetPrefab(entity, out PrefabBase prefab) || prefab == null)
+            {
+                return;
+            }
+            _toolSystem.SetRoadPrefab(prefab);
+
+            // Tête de liste des récents, sans doublon, plafonnée.
+            _recentPrefabs.Remove(entity);
+            _recentPrefabs.Insert(0, entity);
+            if (_recentPrefabs.Count > MaxRecentPrefabs)
+            {
+                _recentPrefabs.RemoveAt(_recentPrefabs.Count - 1);
+            }
+            _recentPrefabsBinding.Update();
+        }
+
+        /// <summary>
+        /// Liste les prefabs de réseau de l'onglet demandé, triés comme le menu du jeu
+        /// (priorité du groupe UI puis de l'élément — même heuristique que NetworkTools).
+        /// </summary>
+        private void RebuildPickerEntries(PickerType type)
+        {
+            _pickerEntries.Clear();
+
+            EntityQuery query;
+            switch (type)
+            {
+                case PickerType.Path:
+                    query = GetEntityQuery(ComponentType.ReadOnly<PathwayData>());
+                    break;
+                case PickerType.Rail:
+                    query = GetEntityQuery(ComponentType.ReadOnly<TrackData>());
+                    break;
+                case PickerType.Waterway:
+                    query = GetEntityQuery(ComponentType.ReadOnly<WaterwayData>());
+                    break;
+                default:
+                    query = GetEntityQuery(ComponentType.ReadOnly<RoadData>());
+                    break;
+            }
+
+            var sortable = new List<(int groupPriority, int itemPriority, Entity entity, string name, string icon)>();
+            using (NativeArray<Entity> entities = query.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity entity in entities)
+                {
+                    if (!_prefabSystem.TryGetPrefab(entity, out PrefabBase prefab) || prefab == null)
+                    {
+                        continue;
+                    }
+                    (int groupPriority, int itemPriority) = GetUIPriority(entity);
+                    sortable.Add((groupPriority, itemPriority, entity, prefab.name, ImageSystem.GetThumbnail(prefab) ?? string.Empty));
+                }
+            }
+            sortable.Sort((a, b) =>
+            {
+                int byGroup = a.groupPriority.CompareTo(b.groupPriority);
+                return byGroup != 0 ? byGroup : a.itemPriority.CompareTo(b.itemPriority);
+            });
+            foreach (var item in sortable)
+            {
+                _pickerEntries.Add((item.entity, item.name, item.icon));
+            }
+        }
+
+        private (int groupPriority, int itemPriority) GetUIPriority(Entity entity)
+        {
+            if (!EntityManager.TryGetComponent(entity, out UIObjectData uiData))
+            {
+                return (int.MaxValue, int.MaxValue);
+            }
+            if (uiData.m_Group != Entity.Null
+                && EntityManager.TryGetComponent(uiData.m_Group, out UIObjectData groupData))
+            {
+                return (groupData.m_Priority, uiData.m_Priority);
+            }
+            return (int.MaxValue, uiData.m_Priority);
+        }
+
+        private void WritePickerEntries(IJsonWriter writer)
+        {
+            writer.ArrayBegin(_pickerEntries.Count);
+            foreach (var entry in _pickerEntries)
+            {
+                WritePrefabEntry(writer, entry.entity, entry.name, entry.icon);
+            }
+            writer.ArrayEnd();
+        }
+
+        private void WriteRecentPrefabs(IJsonWriter writer)
+        {
+            var valid = new List<(Entity entity, string name, string icon)>();
+            foreach (Entity entity in _recentPrefabs)
+            {
+                if (_prefabSystem.TryGetPrefab(entity, out PrefabBase prefab) && prefab != null)
+                {
+                    valid.Add((entity, prefab.name, ImageSystem.GetThumbnail(prefab) ?? string.Empty));
+                }
+            }
+            writer.ArrayBegin(valid.Count);
+            foreach (var entry in valid)
+            {
+                WritePrefabEntry(writer, entry.entity, entry.name, entry.icon);
+            }
+            writer.ArrayEnd();
+        }
+
+        private static void WritePrefabEntry(IJsonWriter writer, Entity entity, string name, string icon)
+        {
+            writer.TypeBegin("GridRoadGenerator.PrefabEntry");
+            writer.PropertyName("Entity");
+            writer.Write(entity);
+            writer.PropertyName("Name");
+            writer.Write(name);
+            writer.PropertyName("Icon");
+            writer.Write(icon);
+            writer.TypeEnd();
         }
     }
 }

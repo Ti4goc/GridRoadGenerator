@@ -1,11 +1,12 @@
 // Structure de panneau et intégration des composants vanilla adaptées de
 // CS2-NetworkTools (c) Luca Rager, licence MIT
 // https://github.com/lucarager/CS2-NetworkTools
-import React from "react";
+import React, { useState } from "react";
 import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
 import { Button } from "cs2/ui";
 import styles from "./gridPanel.module.scss";
+import { PrefabPicker } from "./prefabPicker";
 import { VC, VF, VT } from "./vanilla";
 import {
     canApply$,
@@ -41,6 +42,7 @@ export const GridPanel = () => {
     const spacing = useValue(spacing$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
+    const [pickerOpen, setPickerOpen] = useState(false);
 
     if (!toolActive) {
         return null;
@@ -143,15 +145,18 @@ export const GridPanel = () => {
                     </VC.Section>
                 </div>
 
-                {/* Prefab de route utilisé (NetTool ou fallback), lecture seule. */}
+                {/* Réseau utilisé pour la grille : clic = ouvre le sélecteur. */}
                 <div className={styles.vanillaRow}>
                     <VC.Section
                         focusKey={VF.FOCUS_DISABLED}
                         title={translate("GridRoadGenerator.UI.RoadPrefab", "Road")}>
-                        <div className={styles.prefabRow}>
+                        <button
+                            className={styles.prefabRow}
+                            onClick={() => setPickerOpen((open) => !open)}>
                             {roadPrefabIcon && <img src={roadPrefabIcon} className={styles.prefabIcon} />}
                             <span className={styles.prefabName}>{roadDisplayName}</span>
-                        </div>
+                            <span className={styles.prefabChevron}>›</span>
+                        </button>
                     </VC.Section>
                 </div>
 
@@ -169,6 +174,8 @@ export const GridPanel = () => {
                     </Button>
                 </div>
             </div>
+
+            {pickerOpen && <PrefabPicker onClose={() => setPickerOpen(false)} />}
         </div>
     );
 };

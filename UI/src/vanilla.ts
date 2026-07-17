@@ -28,6 +28,11 @@ const modulePaths: ModulePath[] = [
         path: "game-ui/editor/widgets/fields/number-slider-field.tsx",
         components: ["IntSliderField", "FloatSliderField"],
     },
+    {
+        // Zone scrollable native (liste du sélecteur de réseau).
+        path: "game-ui/common/scrolling/scrollable.tsx",
+        components: ["Scrollable"],
+    },
 ];
 
 const themePaths: ThemePath[] = [

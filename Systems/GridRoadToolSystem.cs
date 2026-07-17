@@ -72,6 +72,8 @@ namespace GridRoadGenerator.Systems
 
         private PrefabBase _fallbackPrefab;
         private bool _fallbackSearched;
+        private PrefabBase _overridePrefab;
+        private bool _overrideResolved;
 
         /// <summary>Arête du périmètre (route existante entre deux nœuds sélectionnés consécutifs).</summary>
         private struct PerimeterEdge
@@ -347,12 +349,38 @@ namespace GridRoadGenerator.Systems
         // Prefab de route
         // ------------------------------------------------------------------
 
+        /// <summary>Vrai si aucun réseau n'a été choisi explicitement (suivre l'outil route natif).</summary>
+        public bool RoadPrefabIsAuto => string.IsNullOrEmpty(_settings.RoadPrefabName);
+
         /// <summary>
-        /// Prefab utilisé pour la grille : celui actuellement sélectionné dans l'outil route
-        /// natif du joueur s'il s'agit d'une route, sinon la petite route deux voies par défaut.
+        /// Fixe le réseau utilisé pour la grille (choisi dans le sélecteur du panneau)
+        /// et le mémorise dans les settings. null = revenir au mode auto (suivre le NetTool).
+        /// </summary>
+        public void SetRoadPrefab(PrefabBase prefab)
+        {
+            _overridePrefab = prefab;
+            _overrideResolved = true;
+            _settings.RoadPrefabName = prefab != null ? $"{prefab.GetType().Name}:{prefab.name}" : string.Empty;
+            _settings.ApplyAndSave();
+        }
+
+        /// <summary>
+        /// Prefab utilisé pour la grille, par priorité : le réseau choisi explicitement
+        /// dans le sélecteur (mémorisé entre les sessions), sinon celui de l'outil route
+        /// natif s'il s'agit d'une route, sinon la petite route deux voies par défaut.
         /// </summary>
         private PrefabBase GetRoadPrefab()
         {
+            if (!_overrideResolved)
+            {
+                _overrideResolved = true;
+                _overridePrefab = ResolveSavedPrefab(_settings.RoadPrefabName);
+            }
+            if (_overridePrefab != null)
+            {
+                return _overridePrefab;
+            }
+
             PrefabBase current = m_NetToolSystem.GetPrefab();
             if (current is RoadPrefab)
             {
@@ -368,6 +396,32 @@ namespace GridRoadGenerator.Systems
                 }
             }
             return _fallbackPrefab;
+        }
+
+        /// <summary>
+        /// Résout le réseau mémorisé "TypePrefab:Nom" (ex. "RoadPrefab:Small Road").
+        /// Retourne null (mode auto) si la chaîne est vide ou le prefab introuvable
+        /// (ex. mod d'assets désinstallé) — jamais d'erreur bloquante.
+        /// </summary>
+        private PrefabBase ResolveSavedPrefab(string saved)
+        {
+            if (string.IsNullOrEmpty(saved))
+            {
+                return null;
+            }
+            int colon = saved.IndexOf(':');
+            if (colon <= 0 || colon >= saved.Length - 1)
+            {
+                return null;
+            }
+            string typeName = saved.Substring(0, colon);
+            string prefabName = saved.Substring(colon + 1);
+            if (m_PrefabSystem.TryGetPrefab(new PrefabID(typeName, prefabName), out PrefabBase prefab))
+            {
+                return prefab;
+            }
+            Mod.Log.Info($"Réseau mémorisé introuvable ({saved}), retour au mode auto.");
+            return null;
         }
 
         // ------------------------------------------------------------------

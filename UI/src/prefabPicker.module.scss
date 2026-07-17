@@ -1,0 +1,144 @@
+// Style du sélecteur de réseau, calqué sur le PrefabSearchPanel de
+// CS2-NetworkTools (c) Luca Rager, licence MIT.
+// NB : couleurs avec alpha en hex 8 digits — Dart Sass compresse rgba() en
+// hsla(), que le moteur cohtml du jeu ne sait pas parser.
+
+// Rendu à l'intérieur du panneau principal (position: absolute relative à lui) :
+// collé à sa droite, aligné sur son haut.
+.panel {
+    position: absolute;
+    top: 0;
+    left: 312rem; // largeur du panneau principal (300) + 12 d'espacement
+    width: 320rem;
+    height: 520rem;
+    background-color: #181825bf;
+    backdrop-filter: var(--panelBlur);
+    border-radius: 12rem;
+    color: white;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12rem 12rem 8rem;
+}
+
+.title {
+    font-weight: 600;
+}
+
+.closeButton {
+    width: 24rem;
+    height: 24rem;
+    border-radius: 4rem;
+    background-color: #ffffff1f;
+    color: white;
+    font-size: var(--fontSizeS);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &:hover {
+        background-color: #ffffff40;
+    }
+}
+
+.searchBar {
+    padding: 0 12rem 8rem;
+
+    input {
+        width: 100%;
+        height: 28rem;
+        padding: 4rem 8rem;
+        border-radius: 4rem;
+        background-color: #00000026;
+        border: 1rem solid #ffffff33;
+        color: white;
+        font-size: var(--fontSizeS);
+
+        &:focus {
+            border-color: #ffffff59;
+        }
+    }
+}
+
+.tabs {
+    display: flex;
+    flex-direction: row;
+    gap: 2rem;
+    padding: 0 12rem;
+}
+
+.tab {
+    flex: 1;
+    min-width: 0;
+    padding: 6rem 4rem;
+    background: transparent;
+    border-bottom: 2rem solid transparent;
+    color: #ffffff80;
+    font-size: var(--fontSizeXS);
+    text-align: center;
+
+    &:hover {
+        color: #ffffffcc;
+        background-color: #ffffff0d;
+    }
+}
+
+.tabActive {
+    color: white;
+    border-bottom-color: #9645ff;
+}
+
+.list {
+    flex: 1;
+    min-height: 0;
+    margin: 8rem 4rem 12rem 12rem;
+}
+
+.sectionLabel {
+    padding: 8rem 0 4rem;
+    font-size: var(--fontSizeXS);
+    color: #ffffff80;
+    text-transform: uppercase;
+}
+
+.listItem {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 4rem 6rem;
+    border-radius: 4rem;
+    font-size: var(--fontSizeS);
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+    }
+}
+
+.listItemActive {
+    background-color: #9645ff59;
+
+    &:hover {
+        background-color: #9645ff80;
+    }
+}
+
+.listItemIcon {
+    width: 28rem;
+    height: 28rem;
+    margin-right: 8rem;
+}
+
+.empty {
+    padding: 12rem 0;
+    color: #ffffff80;
+    font-size: var(--fontSizeS);
+}

@@ -1,7 +1,15 @@
 // Pattern de bindings adapté de CS2-NetworkTools (c) Luca Rager, licence MIT
 // https://github.com/lucarager/CS2-NetworkTools
 import { bindValue, trigger } from "cs2/api";
+import { Entity } from "cs2/utils";
 import mod from "mod.json";
+
+/// Entrée du sélecteur de réseau (miroir de GridRoadUISystem.WritePrefabEntry).
+export type PrefabEntry = {
+    Entity: Entity;
+    Name: string;
+    Icon: string;
+};
 
 // Valeurs poussées par GridRoadUISystem (C#). Les noms doivent correspondre.
 export const toolActive$ = bindValue<boolean>(mod.id, "TOOL_ACTIVE", false);
@@ -14,6 +22,10 @@ export const rows$ = bindValue<number>(mod.id, "ROWS", 3);
 export const spacing$ = bindValue<number>(mod.id, "SPACING", 60);
 export const roadPrefabName$ = bindValue<string>(mod.id, "ROAD_PREFAB_NAME", "");
 export const roadPrefabIcon$ = bindValue<string>(mod.id, "ROAD_PREFAB_ICON", "");
+export const roadPrefabAuto$ = bindValue<boolean>(mod.id, "ROAD_PREFAB_AUTO", true);
+export const pickerType$ = bindValue<number>(mod.id, "PICKER_TYPE", 0);
+export const pickerData$ = bindValue<PrefabEntry[]>(mod.id, "PICKER_DATA", []);
+export const recentPrefabs$ = bindValue<PrefabEntry[]>(mod.id, "RECENT_PREFABS", []);
 
 // Déclencheurs vers le C# (synchronisés avec Options > Mods côté C#).
 export const setMode = (value: number) => trigger(mod.id, "SET_MODE", value);
@@ -23,3 +35,6 @@ export const setSpacing = (value: number) => trigger(mod.id, "SET_SPACING", valu
 export const generateGrid = () => trigger(mod.id, "GENERATE");
 export const clearSelection = () => trigger(mod.id, "CLEAR_SELECTION");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");
+export const setPickerType = (value: number) => trigger(mod.id, "SET_PICKER_TYPE", value);
+export const pickPrefab = (entity: Entity) => trigger(mod.id, "PICK_PREFAB", entity);
+export const pickAuto = () => trigger(mod.id, "PICK_AUTO");

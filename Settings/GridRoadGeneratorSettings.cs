@@ -45,6 +45,15 @@ namespace GridRoadGenerator.Settings
         [SettingsUISection(GroupGrid)]
         public float SpacingMeters { get; set; }
 
+        /// <summary>
+        /// Réseau choisi explicitement dans le sélecteur du panneau, au format
+        /// "TypePrefab:Nom" (ex. "RoadPrefab:Small Road"). Vide = mode auto
+        /// (suivre le prefab de l'outil route natif). Persisté mais pas montré
+        /// dans les Options : se règle depuis le panneau de l'outil.
+        /// </summary>
+        [SettingsUIHidden]
+        public string RoadPrefabName { get; set; }
+
         [SettingsUIKeyboardBinding(BindingKeyboard.G, ActionToggleTool, ctrl: true)]
         [SettingsUISection(GroupKeybindings)]
         public ProxyBinding ToggleToolBinding { get; set; }
@@ -60,6 +69,7 @@ namespace GridRoadGenerator.Settings
             Columns = d.Columns;
             Rows = d.Rows;
             SpacingMeters = d.SpacingMeters;
+            RoadPrefabName = string.Empty;
         }
 
         public GridParameters ToGridParameters() => new GridParameters
