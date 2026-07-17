@@ -1,10 +1,13 @@
+using Colossal.IO.AssetDatabase;
 using Colossal.Logging;
 using Game;
+using Game.Input;
 using Game.Modding;
 using Game.SceneFlow;
 using GridRoadGenerator.Localization;
 using GridRoadGenerator.Settings;
 using GridRoadGenerator.Systems;
+using UnityEngine.InputSystem;
 
 namespace GridRoadGenerator
 {
@@ -15,6 +18,9 @@ namespace GridRoadGenerator
 
         public GridRoadGeneratorSettings Settings { get; private set; }
 
+        private GridRoadToolSystem _toolSystem;
+        private ProxyAction _toggleToolAction;
+
         public void OnLoad(UpdateSystem updateSystem)
         {
             Instance = this;
@@ -23,10 +29,39 @@ namespace GridRoadGenerator
             Settings = new GridRoadGeneratorSettings(this);
             Settings.RegisterInOptionsUI();
             AssetDatabase.global.LoadSettings(nameof(GridRoadGenerator), Settings, new GridRoadGeneratorSettings(this));
+            // Enregistre les actions d'input déclarées par les propriétés ProxyBinding des
+            // settings (ToggleTool, ConfirmGrid) — à faire avant tout GetAction().
+            Settings.RegisterKeyBindings();
 
             RegisterLocalizations();
 
             updateSystem.UpdateAt<GridRoadToolSystem>(SystemUpdatePhase.ToolUpdate);
+            _toolSystem = updateSystem.World.GetOrCreateSystemManaged<GridRoadToolSystem>();
+
+            // Raccourci global (Ctrl+G par défaut) : active/désactive l'outil.
+            _toggleToolAction = Settings.GetAction(GridRoadGeneratorSettings.ActionToggleTool);
+            _toggleToolAction.shouldBeEnabled = true;
+            _toggleToolAction.onInteraction += OnToggleToolAction;
+        }
+
+        private void OnToggleToolAction(ProxyAction action, InputActionPhase phase)
+        {
+            if (phase != InputActionPhase.Performed)
+            {
+                return;
+            }
+            try
+            {
+                // Uniquement en partie (pas dans le menu principal / l'éditeur).
+                if ((GameManager.instance.gameMode & GameMode.Game) != 0)
+                {
+                    _toolSystem?.ToggleTool();
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Error(e, "Impossible d'activer l'outil de grille.");
+            }
         }
 
         /// <summary>
@@ -59,6 +94,12 @@ namespace GridRoadGenerator
         public void OnDispose()
         {
             Log.Info("GridRoadGenerator déchargé.");
+            if (_toggleToolAction != null)
+            {
+                _toggleToolAction.onInteraction -= OnToggleToolAction;
+                _toggleToolAction.shouldBeEnabled = false;
+                _toggleToolAction = null;
+            }
             if (Settings != null)
             {
                 Settings.UnregisterInOptionsUI();

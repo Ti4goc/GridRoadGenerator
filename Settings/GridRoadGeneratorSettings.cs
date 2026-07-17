@@ -1,4 +1,5 @@
 using Colossal.IO.AssetDatabase;
+using Game.Input;
 using Game.Modding;
 using Game.Settings;
 using GridRoadGenerator.Core;
@@ -6,17 +7,23 @@ using GridRoadGenerator.Core;
 namespace GridRoadGenerator.Settings
 {
     /// <summary>
-    /// Réglages exposés dans le menu Options > Mods du jeu.
-    /// NB: les attributs [SettingsUI*] correspondent à l'API Colossal Mod Settings.
-    /// Vérifie les noms exacts dans le SDK actuel (ils ont légèrement changé selon les versions).
+    /// Réglages exposés dans le menu Options > Mods du jeu, plus les raccourcis clavier.
+    /// Les propriétés ProxyBinding sont détectées par ModSetting et enregistrées comme
+    /// actions d'input du mod via RegisterKeyBindings() (appelé dans Mod.OnLoad).
     /// </summary>
-    [FileLocation(nameof(GridRoadGenerator))]
-    [SettingsUIGroupOrder(GroupMode, GroupGrid)]
-    [SettingsUIShowGroupName(GroupMode, GroupGrid)]
+    [FileLocation("ModsSettings/GridRoadGenerator/GridRoadGenerator")]
+    [SettingsUIGroupOrder(GroupMode, GroupGrid, GroupKeybindings)]
+    [SettingsUIShowGroupName(GroupMode, GroupGrid, GroupKeybindings)]
     public class GridRoadGeneratorSettings : ModSetting
     {
         public const string GroupMode = "Mode";
         public const string GroupGrid = "Grid";
+        public const string GroupKeybindings = "Keybindings";
+
+        /// <summary>Nom de l'action qui active/désactive l'outil (Ctrl+G par défaut).</summary>
+        public const string ActionToggleTool = "ToggleTool";
+        /// <summary>Nom de l'action qui valide la sélection et pose la grille (Entrée par défaut).</summary>
+        public const string ActionConfirmGrid = "ConfirmGrid";
 
         public GridRoadGeneratorSettings(IMod mod) : base(mod)
         {
@@ -34,9 +41,17 @@ namespace GridRoadGenerator.Settings
         [SettingsUISection(GroupGrid)]
         public int Rows { get; set; }
 
-        [SettingsUISlider(min = 10f, max = 300f, step = 5f)]
+        [SettingsUISlider(min = 10f, max = 300f, step = 5f, unit = "length")]
         [SettingsUISection(GroupGrid)]
         public float SpacingMeters { get; set; }
+
+        [SettingsUIKeyboardBinding(BindingKeyboard.G, ActionToggleTool, ctrl: true)]
+        [SettingsUISection(GroupKeybindings)]
+        public ProxyBinding ToggleToolBinding { get; set; }
+
+        [SettingsUIKeyboardBinding(BindingKeyboard.Enter, ActionConfirmGrid)]
+        [SettingsUISection(GroupKeybindings)]
+        public ProxyBinding ConfirmGridBinding { get; set; }
 
         public override void SetDefaults()
         {

@@ -27,6 +27,14 @@ namespace GridRoadGenerator.Localization
 
         public string SpacingLabel;
         public string SpacingDesc;
+
+        public string GroupKeybindings;
+
+        public string ToggleToolLabel;
+        public string ToggleToolDesc;
+
+        public string ConfirmGridLabel;
+        public string ConfirmGridDesc;
     }
 
     public static class Translations
@@ -60,6 +68,23 @@ namespace GridRoadGenerator.Localization
 
                 { s.GetOptionLabelLocaleID(nameof(GridRoadGeneratorSettings.SpacingMeters)), t.SpacingLabel },
                 { s.GetOptionDescLocaleID(nameof(GridRoadGeneratorSettings.SpacingMeters)), t.SpacingDesc },
+
+                { s.GetOptionGroupLocaleID(GridRoadGeneratorSettings.GroupKeybindings), t.GroupKeybindings },
+
+                // Lignes du menu Options (une par propriété ProxyBinding).
+                { s.GetOptionLabelLocaleID(nameof(GridRoadGeneratorSettings.ToggleToolBinding)), t.ToggleToolLabel },
+                { s.GetOptionDescLocaleID(nameof(GridRoadGeneratorSettings.ToggleToolBinding)), t.ToggleToolDesc },
+                { s.GetOptionLabelLocaleID(nameof(GridRoadGeneratorSettings.ConfirmGridBinding)), t.ConfirmGridLabel },
+                { s.GetOptionDescLocaleID(nameof(GridRoadGeneratorSettings.ConfirmGridBinding)), t.ConfirmGridDesc },
+
+                // Libellés des actions dans l'écran de réassignation des touches du jeu.
+                { s.GetBindingKeyLocaleID(GridRoadGeneratorSettings.ActionToggleTool), t.ToggleToolLabel },
+                { s.GetBindingKeyLocaleID(GridRoadGeneratorSettings.ActionConfirmGrid), t.ConfirmGridLabel },
+                { s.GetBindingKeyHintLocaleID(GridRoadGeneratorSettings.ActionToggleTool), t.ToggleToolLabel },
+                { s.GetBindingKeyHintLocaleID(GridRoadGeneratorSettings.ActionConfirmGrid), t.ConfirmGridLabel },
+
+                // Nom de la map d'input du mod (jamais traduit : nom du mod).
+                { s.GetBindingMapLocaleID(), ModName },
             };
         }
 
@@ -85,7 +110,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Rows",
                 RowsDesc = "Number of horizontal roads generated inside the rectangle.",
                 SpacingLabel = "Spacing (m)",
-                SpacingDesc = "Distance in meters between roads (fixed spacing mode)."
+                SpacingDesc = "Distance in meters between roads (fixed spacing mode).",
+                GroupKeybindings = "Key bindings",
+                ToggleToolLabel = "Toggle grid tool",
+                ToggleToolDesc = "Activates or deactivates the grid road tool. Then click road nodes to outline the perimeter.",
+                ConfirmGridLabel = "Confirm grid",
+                ConfirmGridDesc = "Builds the previewed grid inside the selected perimeter."
             },
 
             ["fr-FR"] = new LocaleStrings
@@ -101,7 +131,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Lignes",
                 RowsDesc = "Nombre de routes horizontales générées dans le rectangle.",
                 SpacingLabel = "Espacement (m)",
-                SpacingDesc = "Distance en mètres entre les routes (mode espacement fixe)."
+                SpacingDesc = "Distance en mètres entre les routes (mode espacement fixe).",
+                GroupKeybindings = "Raccourcis clavier",
+                ToggleToolLabel = "Activer l'outil de grille",
+                ToggleToolDesc = "Active ou désactive l'outil de grille. Clique ensuite sur des nœuds de route pour tracer le périmètre.",
+                ConfirmGridLabel = "Valider la grille",
+                ConfirmGridDesc = "Construit la grille prévisualisée à l'intérieur du périmètre sélectionné."
             },
 
             ["de-DE"] = new LocaleStrings
@@ -117,7 +152,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Reihen",
                 RowsDesc = "Anzahl der horizontalen Straßen im Rechteck.",
                 SpacingLabel = "Abstand (m)",
-                SpacingDesc = "Abstand in Metern zwischen den Straßen (Modus „fester Abstand\")."
+                SpacingDesc = "Abstand in Metern zwischen den Straßen (Modus „fester Abstand\").",
+                GroupKeybindings = "Tastenbelegung",
+                ToggleToolLabel = "Rasterwerkzeug umschalten",
+                ToggleToolDesc = "Aktiviert oder deaktiviert das Rasterwerkzeug. Klicke dann auf Straßenknoten, um den Umriss festzulegen.",
+                ConfirmGridLabel = "Raster bestätigen",
+                ConfirmGridDesc = "Baut das in der Vorschau angezeigte Raster innerhalb des gewählten Umrisses."
             },
 
             ["es-ES"] = new LocaleStrings
@@ -133,7 +173,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Filas",
                 RowsDesc = "Número de carreteras horizontales generadas dentro del rectángulo.",
                 SpacingLabel = "Espaciado (m)",
-                SpacingDesc = "Distancia en metros entre carreteras (modo de espaciado fijo)."
+                SpacingDesc = "Distancia en metros entre carreteras (modo de espaciado fijo).",
+                GroupKeybindings = "Atajos de teclado",
+                ToggleToolLabel = "Alternar herramienta de cuadrícula",
+                ToggleToolDesc = "Activa o desactiva la herramienta de cuadrícula. Luego haz clic en nodos de carretera para delimitar el perímetro.",
+                ConfirmGridLabel = "Confirmar cuadrícula",
+                ConfirmGridDesc = "Construye la cuadrícula previsualizada dentro del perímetro seleccionado."
             },
 
             ["it-IT"] = new LocaleStrings
@@ -149,7 +194,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Righe",
                 RowsDesc = "Numero di strade orizzontali generate nel rettangolo.",
                 SpacingLabel = "Spaziatura (m)",
-                SpacingDesc = "Distanza in metri tra le strade (modalità spaziatura fissa)."
+                SpacingDesc = "Distanza in metri tra le strade (modalità spaziatura fissa).",
+                GroupKeybindings = "Scorciatoie da tastiera",
+                ToggleToolLabel = "Attiva/disattiva strumento griglia",
+                ToggleToolDesc = "Attiva o disattiva lo strumento griglia. Poi clicca sui nodi stradali per delimitare il perimetro.",
+                ConfirmGridLabel = "Conferma griglia",
+                ConfirmGridDesc = "Costruisce la griglia in anteprima all'interno del perimetro selezionato."
             },
 
             ["pl-PL"] = new LocaleStrings
@@ -165,7 +215,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Wiersze",
                 RowsDesc = "Liczba poziomych dróg generowanych w prostokącie.",
                 SpacingLabel = "Rozstaw (m)",
-                SpacingDesc = "Odległość w metrach między drogami (tryb stałego rozstawu)."
+                SpacingDesc = "Odległość w metrach między drogami (tryb stałego rozstawu).",
+                GroupKeybindings = "Skróty klawiszowe",
+                ToggleToolLabel = "Przełącz narzędzie siatki",
+                ToggleToolDesc = "Włącza lub wyłącza narzędzie siatki dróg. Następnie klikaj węzły dróg, aby wyznaczyć obwód.",
+                ConfirmGridLabel = "Zatwierdź siatkę",
+                ConfirmGridDesc = "Buduje podglądaną siatkę wewnątrz wybranego obwodu."
             },
 
             ["pt-BR"] = new LocaleStrings
@@ -181,7 +236,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Linhas",
                 RowsDesc = "Número de ruas horizontais geradas dentro do retângulo.",
                 SpacingLabel = "Espaçamento (m)",
-                SpacingDesc = "Distância em metros entre as ruas (modo de espaçamento fixo)."
+                SpacingDesc = "Distância em metros entre as ruas (modo de espaçamento fixo).",
+                GroupKeybindings = "Atalhos de teclado",
+                ToggleToolLabel = "Alternar ferramenta de grade",
+                ToggleToolDesc = "Ativa ou desativa a ferramenta de grade. Depois clique nos nós de rua para delimitar o perímetro.",
+                ConfirmGridLabel = "Confirmar grade",
+                ConfirmGridDesc = "Constrói a grade pré-visualizada dentro do perímetro selecionado."
             },
 
             ["ru-RU"] = new LocaleStrings
@@ -197,7 +257,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Ряды",
                 RowsDesc = "Число горизонтальных дорог внутри прямоугольника.",
                 SpacingLabel = "Интервал (м)",
-                SpacingDesc = "Расстояние в метрах между дорогами (режим фиксированного интервала)."
+                SpacingDesc = "Расстояние в метрах между дорогами (режим фиксированного интервала).",
+                GroupKeybindings = "Горячие клавиши",
+                ToggleToolLabel = "Переключить инструмент сетки",
+                ToggleToolDesc = "Включает или выключает инструмент сетки дорог. Затем щёлкайте по узлам дорог, чтобы очертить периметр.",
+                ConfirmGridLabel = "Подтвердить сетку",
+                ConfirmGridDesc = "Строит показанную в предпросмотре сетку внутри выбранного периметра."
             },
 
             ["ja-JP"] = new LocaleStrings
@@ -213,7 +278,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "行数",
                 RowsDesc = "矩形内に生成する横方向の道路の数。",
                 SpacingLabel = "間隔 (m)",
-                SpacingDesc = "道路間の距離（メートル、固定間隔モード）。"
+                SpacingDesc = "道路間の距離（メートル、固定間隔モード）。",
+                GroupKeybindings = "キー割り当て",
+                ToggleToolLabel = "グリッドツールの切り替え",
+                ToggleToolDesc = "グリッド道路ツールを有効/無効にします。その後、道路のノードをクリックして外周を指定します。",
+                ConfirmGridLabel = "グリッドを確定",
+                ConfirmGridDesc = "選択した外周の内側に、プレビュー中のグリッドを建設します。"
             },
 
             ["ko-KR"] = new LocaleStrings
@@ -229,7 +299,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "행",
                 RowsDesc = "사각형 안에 생성할 가로 도로의 수.",
                 SpacingLabel = "간격 (m)",
-                SpacingDesc = "도로 사이의 거리(미터, 고정 간격 모드)."
+                SpacingDesc = "도로 사이의 거리(미터, 고정 간격 모드).",
+                GroupKeybindings = "단축키",
+                ToggleToolLabel = "그리드 도구 전환",
+                ToggleToolDesc = "그리드 도로 도구를 켜거나 끕니다. 그런 다음 도로 노드를 클릭해 경계를 지정하세요.",
+                ConfirmGridLabel = "그리드 확정",
+                ConfirmGridDesc = "선택한 경계 안에 미리 보기 중인 그리드를 건설합니다."
             },
 
             ["zh-HANS"] = new LocaleStrings
@@ -245,7 +320,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "行数",
                 RowsDesc = "矩形内生成的横向道路数量。",
                 SpacingLabel = "间距（米）",
-                SpacingDesc = "道路之间的距离（米，固定间距模式）。"
+                SpacingDesc = "道路之间的距离（米，固定间距模式）。",
+                GroupKeybindings = "快捷键",
+                ToggleToolLabel = "切换网格工具",
+                ToggleToolDesc = "启用或停用网格道路工具。然后点击道路节点以圈定周界。",
+                ConfirmGridLabel = "确认网格",
+                ConfirmGridDesc = "在所选周界内建造预览中的网格。"
             },
 
             ["zh-HANT"] = new LocaleStrings
@@ -261,7 +341,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "行數",
                 RowsDesc = "矩形內生成的橫向道路數量。",
                 SpacingLabel = "間距（公尺）",
-                SpacingDesc = "道路之間的距離（公尺，固定間距模式）。"
+                SpacingDesc = "道路之間的距離（公尺，固定間距模式）。",
+                GroupKeybindings = "快捷鍵",
+                ToggleToolLabel = "切換網格工具",
+                ToggleToolDesc = "啟用或停用網格道路工具。然後點擊道路節點以圈定周界。",
+                ConfirmGridLabel = "確認網格",
+                ConfirmGridDesc = "在所選周界內建造預覽中的網格。"
             },
 
             // ============ LANGUES COMMUNAUTAIRES ============
@@ -280,7 +365,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Linhas",
                 RowsDesc = "Número de estradas horizontais geradas dentro do retângulo.",
                 SpacingLabel = "Espaçamento (m)",
-                SpacingDesc = "Distância em metros entre estradas (modo de espaçamento fixo)."
+                SpacingDesc = "Distância em metros entre estradas (modo de espaçamento fixo).",
+                GroupKeybindings = "Atalhos de teclado",
+                ToggleToolLabel = "Ativar/desativar ferramenta de grelha",
+                ToggleToolDesc = "Liga ou desliga a ferramenta de grelha. Depois clica nos nós de estrada para delimitares o perímetro.",
+                ConfirmGridLabel = "Confirmar grelha",
+                ConfirmGridDesc = "Constrói a grelha pré-visualizada dentro do perímetro que selecionaste."
             },
 
             ["uk-UA"] = new LocaleStrings
@@ -296,7 +386,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Ряди",
                 RowsDesc = "Кількість горизонтальних доріг усередині прямокутника.",
                 SpacingLabel = "Інтервал (м)",
-                SpacingDesc = "Відстань у метрах між дорогами (режим фіксованого інтервалу)."
+                SpacingDesc = "Відстань у метрах між дорогами (режим фіксованого інтервалу).",
+                GroupKeybindings = "Гарячі клавіші",
+                ToggleToolLabel = "Перемкнути інструмент сітки",
+                ToggleToolDesc = "Вмикає або вимикає інструмент сітки доріг. Далі клацай по вузлах доріг, щоб окреслити периметр.",
+                ConfirmGridLabel = "Підтвердити сітку",
+                ConfirmGridDesc = "Будує сітку з попереднього перегляду всередині вибраного периметра."
             },
 
             ["th-TH"] = new LocaleStrings
@@ -312,7 +407,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "แถว",
                 RowsDesc = "จำนวนถนนแนวนอนที่สร้างภายในสี่เหลี่ยม",
                 SpacingLabel = "ระยะห่าง (ม.)",
-                SpacingDesc = "ระยะทางเป็นเมตรระหว่างถนน (โหมดระยะห่างคงที่)"
+                SpacingDesc = "ระยะทางเป็นเมตรระหว่างถนน (โหมดระยะห่างคงที่)",
+                GroupKeybindings = "ปุ่มลัด",
+                ToggleToolLabel = "สลับเครื่องมือตาราง",
+                ToggleToolDesc = "เปิดหรือปิดเครื่องมือถนนแบบตาราง จากนั้นคลิกที่จุดเชื่อมถนนเพื่อกำหนดขอบเขต",
+                ConfirmGridLabel = "ยืนยันตาราง",
+                ConfirmGridDesc = "สร้างตารางที่แสดงตัวอย่างไว้ภายในขอบเขตที่เลือก"
             },
 
             ["vi-VN"] = new LocaleStrings
@@ -328,7 +428,12 @@ namespace GridRoadGenerator.Localization
                 RowsLabel = "Hàng",
                 RowsDesc = "Số đường ngang được tạo bên trong hình chữ nhật.",
                 SpacingLabel = "Khoảng cách (m)",
-                SpacingDesc = "Khoảng cách tính bằng mét giữa các con đường (chế độ khoảng cách cố định)."
+                SpacingDesc = "Khoảng cách tính bằng mét giữa các con đường (chế độ khoảng cách cố định).",
+                GroupKeybindings = "Phím tắt",
+                ToggleToolLabel = "Bật/tắt công cụ lưới",
+                ToggleToolDesc = "Bật hoặc tắt công cụ đường lưới. Sau đó nhấp vào các nút giao đường để khoanh vùng chu vi.",
+                ConfirmGridLabel = "Xác nhận lưới",
+                ConfirmGridDesc = "Xây dựng lưới đang xem trước bên trong chu vi đã chọn."
             },
         };
     }
