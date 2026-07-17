@@ -62,7 +62,12 @@ namespace GridRoadGenerator.Core
     ///     pair-impair (even-odd) : les intersections avec les arêtes sont triées
     ///     le long de la ligne et appariées deux à deux. Un polygone concave
     ///     produit donc naturellement plusieurs sous-segments par ligne.
-    ///  5. Les segments trop courts pour être une route sont éliminés.
+    ///  5. Les croisements internes entre lignes u et lignes v sont pré-calculés,
+    ///     et chaque ligne est émise en sous-segments entre croisements consécutifs.
+    ///     Le point monde d'un croisement est calculé UNE seule fois et partagé
+    ///     (mêmes floats) par les extrémités des sous-segments des deux lignes,
+    ///     pour que le jeu fusionne ces extrémités en un seul nœud d'intersection.
+    ///  6. Les segments trop courts pour être une route sont éliminés.
     ///
     /// Cas particulier : avec exactement 2 nœuds, ils sont traités comme les coins
     /// opposés d'un rectangle aligné sur les axes (comportement simple et prévisible).
@@ -73,6 +78,21 @@ namespace GridRoadGenerator.Core
         public const float MinSegmentLength = 8f;
 
         private const float Epsilon = 1e-4f;
+
+        /// <summary>
+        /// Tolérance (m) pour rattacher un croisement à un intervalle clippé : un croisement
+        /// à moins de cette distance d'une extrémité d'intervalle est fusionné avec elle
+        /// (jonction en T au bord du polygone) au lieu de créer un micro-segment.
+        /// </summary>
+        private const float JoinTolerance = 0.05f;
+
+        /// <summary>Ligne de grille clippée : sa position sur l'axe transverse et ses intervalles intérieurs.</summary>
+        private struct GridLine
+        {
+            public float Position;
+            /// <summary>Intervalles [x, y] le long de la ligne, triés, intérieurs au polygone.</summary>
+            public List<float2> Intervals;
+        }
 
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
         {
@@ -127,19 +147,122 @@ namespace GridRoadGenerator.Core
                 vPositions = DistributeFixed(lmin.y, lmax.y, parameters.SpacingMeters);
             }
 
-            var segments = new List<RoadSegmentDef>();
-
-            // Lignes "verticales" locales (u = const), découpées au polygone.
+            // Clipping de chaque ligne au polygone (intervalles intérieurs).
+            var uLines = new List<GridLine>(uPositions.Count);
             foreach (var u in uPositions)
-                foreach (var (a, b) in ClipLineToPolygon(local, axisIsU: true, position: u))
-                    AddSegment(segments, origin, uDir, vDir, a, b, y, isHorizontal: false);
-
-            // Lignes "horizontales" locales (v = const), découpées au polygone.
+                uLines.Add(new GridLine { Position = u, Intervals = ClipLineToPolygon(local, axisIsU: true, position: u) });
+            var vLines = new List<GridLine>(vPositions.Count);
             foreach (var v in vPositions)
-                foreach (var (a, b) in ClipLineToPolygon(local, axisIsU: false, position: v))
-                    AddSegment(segments, origin, uDir, vDir, a, b, y, isHorizontal: true);
+                vLines.Add(new GridLine { Position = v, Intervals = ClipLineToPolygon(local, axisIsU: false, position: v) });
 
+            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y);
+        }
+
+        // ------------------------------------------------------------------
+        // Pré-découpage aux croisements internes
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Calcule les croisements entre lignes u et lignes v (en coordonnées locales, la
+        /// ligne u = x croise la ligne v = z au point (x, z), retenu seulement s'il est dans
+        /// les intervalles clippés DES DEUX lignes), puis émet chaque ligne en sous-segments
+        /// entre croisements consécutifs. Le float3 monde de chaque croisement est calculé
+        /// une seule fois et réutilisé tel quel par les deux lignes : les extrémités qui se
+        /// rejoignent sont bit-à-bit identiques, condition de la fusion en un seul nœud.
+        /// </summary>
+        private static List<RoadSegmentDef> BuildSubSegments(List<GridLine> uLines, List<GridLine> vLines,
+            float2 origin, float2 uDir, float2 vDir, float y)
+        {
+            var uSplits = new List<(float t, float3 world)>[uLines.Count];
+            var vSplits = new List<(float t, float3 world)>[vLines.Count];
+            for (int i = 0; i < uLines.Count; i++) uSplits[i] = new List<(float, float3)>();
+            for (int i = 0; i < vLines.Count; i++) vSplits[i] = new List<(float, float3)>();
+
+            for (int iu = 0; iu < uLines.Count; iu++)
+            {
+                for (int iv = 0; iv < vLines.Count; iv++)
+                {
+                    float u = uLines[iu].Position;
+                    float v = vLines[iv].Position;
+                    if (!ContainsPosition(uLines[iu].Intervals, v) || !ContainsPosition(vLines[iv].Intervals, u))
+                        continue;
+
+                    float3 world = ToWorld(origin, uDir, vDir, u, v, y);
+                    uSplits[iu].Add((v, world));
+                    vSplits[iv].Add((u, world));
+                }
+            }
+
+            var segments = new List<RoadSegmentDef>();
+            for (int i = 0; i < uLines.Count; i++)
+                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y);
+            for (int i = 0; i < vLines.Count; i++)
+                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y);
             return segments;
+        }
+
+        /// <summary>Vrai si t appartient à l'un des intervalles (tolérance JoinTolerance aux bords).</summary>
+        private static bool ContainsPosition(List<float2> intervals, float t)
+        {
+            foreach (var interval in intervals)
+            {
+                if (t >= interval.x - JoinTolerance && t <= interval.y + JoinTolerance)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Émet les sous-segments d'une ligne : pour chaque intervalle clippé, la chaîne
+        /// [extrémité, croisements internes triés, extrémité] est parcourue par paires
+        /// consécutives. Un croisement à moins de JoinTolerance d'une extrémité de
+        /// l'intervalle remplace cette extrémité (jonction en T : le point monde partagé
+        /// du croisement est réutilisé). Les tronçons &lt; MinSegmentLength sont éliminés.
+        /// </summary>
+        private static void EmitLine(List<RoadSegmentDef> segments, GridLine line,
+            List<(float t, float3 world)> splits, bool axisIsU, float2 origin, float2 uDir, float2 vDir, float y)
+        {
+            splits.Sort((a, b) => a.t.CompareTo(b.t));
+
+            foreach (var interval in line.Intervals)
+            {
+                float tA = interval.x;
+                float tB = interval.y;
+                float3 worldA = axisIsU
+                    ? ToWorld(origin, uDir, vDir, line.Position, tA, y)
+                    : ToWorld(origin, uDir, vDir, tA, line.Position, y);
+                float3 worldB = axisIsU
+                    ? ToWorld(origin, uDir, vDir, line.Position, tB, y)
+                    : ToWorld(origin, uDir, vDir, tB, line.Position, y);
+
+                var chain = new List<(float t, float3 world)> { (tA, worldA) };
+                foreach (var split in splits)
+                {
+                    if (split.t < tA - JoinTolerance || split.t > tB + JoinTolerance)
+                        continue; // croisement d'un autre intervalle de la même ligne
+                    if (split.t <= tA + JoinTolerance)
+                        chain[0] = (tA, split.world);
+                    else if (split.t >= tB - JoinTolerance)
+                        worldB = split.world;
+                    else
+                        chain.Add(split);
+                }
+                chain.Add((tB, worldB));
+
+                for (int i = 0; i + 1 < chain.Count; i++)
+                {
+                    if (chain[i + 1].t - chain[i].t < MinSegmentLength)
+                        continue; // tronçon trop court
+                    segments.Add(new RoadSegmentDef(chain[i].world, chain[i + 1].world, isHorizontal: !axisIsU));
+                }
+            }
+        }
+
+        /// <summary>Convertit un point local (u, v) en point monde (X, y, Z).</summary>
+        private static float3 ToWorld(float2 origin, float2 uDir, float2 vDir, float u, float v, float y)
+        {
+            float2 world = origin + u * uDir + v * vDir;
+            return new float3(world.x, y, world.y);
         }
 
         // ------------------------------------------------------------------
@@ -179,10 +302,11 @@ namespace GridRoadGenerator.Core
 
         /// <summary>
         /// Découpe la droite (u = position) ou (v = position) aux frontières du
-        /// polygone (en coordonnées locales). Retourne la liste des intervalles
-        /// INTÉRIEURS au polygone, sous forme de paires de coordonnées locales.
+        /// polygone (en coordonnées locales). Retourne les intervalles INTÉRIEURS
+        /// au polygone : chaque float2 est [début, fin] le long de la droite
+        /// (coordonnée v si axisIsU, u sinon), triés croissants.
         /// </summary>
-        private static List<(float2 a, float2 b)> ClipLineToPolygon(List<float2> local, bool axisIsU, float position)
+        private static List<float2> ClipLineToPolygon(List<float2> local, bool axisIsU, float position)
         {
             // Intersections de la droite avec chaque arête, exprimées par la
             // coordonnée le long de la droite (t = v si axisIsU, sinon t = u).
@@ -215,7 +339,7 @@ namespace GridRoadGenerator.Core
 
             crossings.Sort();
 
-            var result = new List<(float2, float2)>();
+            var result = new List<float2>();
             // Appariement pair-impair : [entrée, sortie], [entrée, sortie], ...
             for (int i = 0; i + 1 < crossings.Count; i += 2)
             {
@@ -223,9 +347,7 @@ namespace GridRoadGenerator.Core
                 float tB = crossings[i + 1];
                 if (tB - tA < MinSegmentLength) continue; // tronçon trop court
 
-                float2 a = axisIsU ? new float2(position, tA) : new float2(tA, position);
-                float2 b = axisIsU ? new float2(position, tB) : new float2(tB, position);
-                result.Add((a, b));
+                result.Add(new float2(tA, tB));
             }
 
             return result;
@@ -234,17 +356,6 @@ namespace GridRoadGenerator.Core
         // ------------------------------------------------------------------
         // Utilitaires
         // ------------------------------------------------------------------
-
-        private static void AddSegment(List<RoadSegmentDef> segments, float2 origin, float2 uDir, float2 vDir,
-            float2 localA, float2 localB, float y, bool isHorizontal)
-        {
-            float2 worldA = origin + localA.x * uDir + localA.y * vDir;
-            float2 worldB = origin + localB.x * uDir + localB.y * vDir;
-            segments.Add(new RoadSegmentDef(
-                new float3(worldA.x, y, worldA.y),
-                new float3(worldB.x, y, worldB.y),
-                isHorizontal));
-        }
 
         private static List<float2> RemoveConsecutiveDuplicates(List<float2> pts)
         {

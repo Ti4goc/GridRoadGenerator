@@ -20,6 +20,9 @@
     <!-- Mods open-source de référence (non versionnés, non compilés). -->
     <Compile Remove="reference\**" />
     <None Remove="reference\**" />
+    <!-- Tests unitaires : projet séparé (Tests/), jamais compilés dans la DLL du mod. -->
+    <Compile Remove="Tests\**" />
+    <None Remove="Tests\**" />
     <!-- Module UI (TypeScript) : buildé par webpack, pas par MSBuild. -->
     <None Remove="UI\node_modules\**" />
     <Content Remove="UI\node_modules\**" />
