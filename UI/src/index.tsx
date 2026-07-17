@@ -2,8 +2,11 @@
 // https://github.com/lucarager/CS2-NetworkTools
 import { ModRegistrar } from "cs2/modding";
 import { GridPanel } from "./gridPanel";
+import { initializeVanilla } from "./vanilla";
 
 const register: ModRegistrar = (moduleRegistry) => {
+    // Résout les composants/thèmes vanilla du jeu avant tout rendu du panneau.
+    initializeVanilla(moduleRegistry);
     // Le panneau se rend lui-même invisible tant que l'outil n'est pas actif.
     moduleRegistry.append("Game", GridPanel);
 };

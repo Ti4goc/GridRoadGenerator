@@ -1,6 +1,7 @@
 // Pattern de bindings cohtml adapté de CS2-NetworkTools (c) Luca Rager,
 // licence MIT — https://github.com/lucarager/CS2-NetworkTools
 using Colossal.UI.Binding;
+using Game.Prefabs;
 using Game.Tools;
 using Game.UI;
 using GridRoadGenerator.Core;
@@ -33,6 +34,8 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<int> _columnsBinding;
         private ValueBinding<int> _rowsBinding;
         private ValueBinding<float> _spacingBinding;
+        private ValueBinding<string> _roadPrefabNameBinding;
+        private ValueBinding<string> _roadPrefabIconBinding;
 
         protected override void OnCreate()
         {
@@ -53,6 +56,10 @@ namespace GridRoadGenerator.Systems
             AddBinding(_columnsBinding = new ValueBinding<int>(BindingGroup, "COLUMNS", _settings.Columns));
             AddBinding(_rowsBinding = new ValueBinding<int>(BindingGroup, "ROWS", _settings.Rows));
             AddBinding(_spacingBinding = new ValueBinding<float>(BindingGroup, "SPACING", _settings.SpacingMeters));
+
+            // Prefab de route utilisé par la grille (rangée en lecture seule du panneau).
+            AddBinding(_roadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_NAME", string.Empty));
+            AddBinding(_roadPrefabIconBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_ICON", string.Empty));
 
             AddBinding(new TriggerBinding<int>(BindingGroup, "SET_MODE", value =>
             {
@@ -93,6 +100,10 @@ namespace GridRoadGenerator.Systems
             _columnsBinding.Update(_settings.Columns);
             _rowsBinding.Update(_settings.Rows);
             _spacingBinding.Update(_settings.SpacingMeters);
+
+            PrefabBase roadPrefab = _toolSystem.GetPrefab();
+            _roadPrefabNameBinding.Update(roadPrefab != null ? roadPrefab.name : string.Empty);
+            _roadPrefabIconBinding.Update(roadPrefab != null ? ImageSystem.GetThumbnail(roadPrefab) ?? string.Empty : string.Empty);
         }
     }
 }

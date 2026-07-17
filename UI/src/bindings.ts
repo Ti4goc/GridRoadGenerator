@@ -12,6 +12,8 @@ export const mode$ = bindValue<number>(mod.id, "MODE", 0);
 export const columns$ = bindValue<number>(mod.id, "COLUMNS", 3);
 export const rows$ = bindValue<number>(mod.id, "ROWS", 3);
 export const spacing$ = bindValue<number>(mod.id, "SPACING", 60);
+export const roadPrefabName$ = bindValue<string>(mod.id, "ROAD_PREFAB_NAME", "");
+export const roadPrefabIcon$ = bindValue<string>(mod.id, "ROAD_PREFAB_ICON", "");
 
 // Déclencheurs vers le C# (synchronisés avec Options > Mods côté C#).
 export const setMode = (value: number) => trigger(mod.id, "SET_MODE", value);

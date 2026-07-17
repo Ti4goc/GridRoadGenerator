@@ -1,128 +1,160 @@
-// Style du panneau latéral, inspiré des panneaux de CS2-NetworkTools
+// Style du panneau calqué sur les panneaux de CS2-NetworkTools
 // (c) Luca Rager, licence MIT — https://github.com/lucarager/CS2-NetworkTools
+// Seul reste ici le SCSS minimal d'habillage : le contenu des rangées est rendu
+// par les composants vanilla du jeu (Section, ToolButton, sliders de l'éditeur),
+// avec les mêmes compensations d'intégration que NetworkTools (.vanillaField).
+
+$panel-padding-x: 12rem;
+$panel-padding-y: 12rem;
+$input-bg-color: rgba(0, 0, 0, 0.15);
+$input-border-color: rgba(255, 255, 255, 0.2);
+$input-border-hover-color: rgba(255, 255, 255, 0.35);
+
 .panel {
     position: absolute;
     top: 220rem;
     left: 12rem;
-    width: 260rem;
-    padding: 8rem;
-    border-radius: 6rem;
-    background-color: rgba(24, 33, 51, 0.92);
+    width: 300rem;
+    background-color: rgba(24, 24, 37, 0.75);
+    backdrop-filter: var(--panelBlur);
+    border-radius: 12rem;
     color: white;
     pointer-events: auto;
     display: flex;
     flex-direction: column;
-    row-gap: 8rem;
+    overflow: hidden;
 }
 
-.title {
-    font-size: 16rem;
-    font-weight: bold;
-    text-align: center;
-    padding-bottom: 4rem;
-    border-bottom: 1rem solid rgba(255, 255, 255, 0.2);
+.header {
+    padding: $panel-padding-y $panel-padding-x 0;
+    font-weight: 600;
+    color: white;
 }
 
-.row {
+.content {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    column-gap: 6rem;
+    flex-direction: column;
+    padding: $panel-padding-y $panel-padding-x;
 }
 
-.label {
-    flex: 1;
-    font-size: 14rem;
-    opacity: 0.9;
-}
-
-.value {
-    min-width: 48rem;
-    text-align: center;
-    font-size: 14rem;
-}
-
-.stepButton {
-    width: 26rem;
-    height: 26rem;
-    border-radius: 4rem;
-    background-color: rgba(255, 255, 255, 0.12);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16rem;
-    cursor: pointer;
-
-    &:hover {
-        background-color: rgba(255, 255, 255, 0.25);
+.vanillaRow {
+    & + .vanillaRow {
+        margin-top: 8rem;
     }
-}
 
-.modeButton {
-    flex: 1;
-    padding: 4rem 6rem;
-    border-radius: 4rem;
-    background-color: rgba(255, 255, 255, 0.12);
-    text-align: center;
-    font-size: 13rem;
-    cursor: pointer;
+    // Intégration des widgets vanilla dans le panneau (mêmes compensations que
+    // NetworkTools) : label à largeur fixe à gauche, contrôle extensible à droite.
+    .vanillaField {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        position: relative;
 
-    &:hover {
-        background-color: rgba(255, 255, 255, 0.25);
+        & > * {
+            padding: 0;
+        }
+
+        [class^="label"] {
+            flex-shrink: 0;
+            flex-grow: 0;
+            flex-basis: auto;
+            overflow-x: hidden;
+            overflow-y: hidden;
+            width: 110rem;
+            margin-right: 8rem;
+            font-size: var(--fontSizeS);
+            coh-font-fit-mode: shrink;
+            font-weight: 500;
+            line-height: 1.25em;
+            white-space: pre-wrap;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        [class^="item"] > [class^="content"] > * {
+            margin-bottom: 0;
+        }
+
+        [class^="row"] {
+            justify-content: space-between;
+        }
+
+        [class^="slider-input"],
+        [class^="number-field"] {
+            font-size: var(--fontSizeS);
+            coh-font-fit-mode: shrink;
+            color: rgba(255, 255, 255, 0.85);
+            line-height: 1.25em;
+            height: 26rem;
+            padding: 3rem 5rem;
+            background-color: $input-bg-color;
+            border: 1rem solid $input-border-color;
+
+            &:hover {
+                border-color: $input-border-hover-color;
+            }
+        }
+
+        [class^="slider-input"] {
+            width: 60rem;
+            border-radius: 3rem;
+        }
+
+        // Le div racine du widget de l'éditeur doit occuper l'espace restant.
+        & > div {
+            flex: 1;
+        }
+
+        .unitLabel {
+            font-size: var(--fontSizeS);
+            line-height: 1.25em;
+            color: rgba(255, 255, 255, 0.5);
+            position: absolute;
+            right: 5rem;
+        }
     }
-}
-
-.modeButtonActive {
-    background-color: rgba(87, 160, 255, 0.55);
-
-    &:hover {
-        background-color: rgba(87, 160, 255, 0.7);
-    }
-}
-
-.rowDisabled {
-    opacity: 0.4;
-    pointer-events: none;
-}
-
-.nodeCount {
-    font-size: 13rem;
-    text-align: center;
-    opacity: 0.8;
 }
 
 .invalid {
     color: #ff8080;
 }
 
-.generateButton {
-    padding: 8rem;
-    border-radius: 4rem;
-    background-color: rgba(87, 160, 255, 0.55);
-    text-align: center;
-    font-size: 15rem;
-    font-weight: bold;
-    cursor: pointer;
-
-    &:hover {
-        background-color: rgba(87, 160, 255, 0.7);
-    }
+.prefabRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
 }
 
-.generateButtonDisabled {
-    opacity: 0.4;
-    pointer-events: none;
+.prefabIcon {
+    width: 24rem;
+    height: 24rem;
+    margin-right: 6rem;
+}
+
+.prefabName {
+    font-size: var(--fontSizeS);
+    line-height: 1.25em;
+    coh-font-fit-mode: shrink;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    white-space: nowrap;
+}
+
+.actions {
+    display: flex;
+    flex-direction: column;
+    row-gap: 6rem;
+    margin-top: 10rem;
+}
+
+.applyButton {
+    padding: 5rem 8rem;
+    font-size: var(--fontSizeS);
+    font-weight: 600;
 }
 
 .clearButton {
-    padding: 6rem;
-    border-radius: 4rem;
-    background-color: rgba(255, 255, 255, 0.12);
-    text-align: center;
-    font-size: 13rem;
-    cursor: pointer;
-
-    &:hover {
-        background-color: rgba(255, 120, 120, 0.4);
-    }
+    padding: 5rem 8rem;
+    font-size: var(--fontSizeS);
 }
