@@ -17,7 +17,21 @@
     <!-- Sources décompilées de Game.dll : référence d'API uniquement, jamais compilées. -->
     <Compile Remove="decompiled\**" />
     <None Remove="decompiled\**" />
+    <!-- Mods open-source de référence (non versionnés, non compilés). -->
+    <Compile Remove="reference\**" />
+    <None Remove="reference\**" />
+    <!-- Module UI (TypeScript) : buildé par webpack, pas par MSBuild. -->
+    <None Remove="UI\node_modules\**" />
+    <Content Remove="UI\node_modules\**" />
   </ItemGroup>
+
+  <!-- Build du module UI (React/cohtml) après le déploiement de la DLL : webpack écrit
+       GridRoadGenerator.mjs + .css directement dans le dossier Mods déployé.
+       Pattern repris de CS2-NetworkTools (c) Luca Rager, MIT. -->
+  <Target Name="BuildUI" AfterTargets="DeployWIP">
+    <Message Text="[BuildUI] npm run build (UI/)" Importance="high" />
+    <Exec Command="npm run build" WorkingDirectory="$(ProjectDir)UI" />
+  </Target>
 
   <ItemGroup>
     <Reference Include="Game"><Private>False</Private></Reference>

@@ -4,3 +4,5 @@ decompiled/
 *.user
 .vs/
 Library/
+reference/
+UI/node_modules/

@@ -1,0 +1,128 @@
+// Style du panneau latéral, inspiré des panneaux de CS2-NetworkTools
+// (c) Luca Rager, licence MIT — https://github.com/lucarager/CS2-NetworkTools
+.panel {
+    position: absolute;
+    top: 220rem;
+    left: 12rem;
+    width: 260rem;
+    padding: 8rem;
+    border-radius: 6rem;
+    background-color: rgba(24, 33, 51, 0.92);
+    color: white;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    row-gap: 8rem;
+}
+
+.title {
+    font-size: 16rem;
+    font-weight: bold;
+    text-align: center;
+    padding-bottom: 4rem;
+    border-bottom: 1rem solid rgba(255, 255, 255, 0.2);
+}
+
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    column-gap: 6rem;
+}
+
+.label {
+    flex: 1;
+    font-size: 14rem;
+    opacity: 0.9;
+}
+
+.value {
+    min-width: 48rem;
+    text-align: center;
+    font-size: 14rem;
+}
+
+.stepButton {
+    width: 26rem;
+    height: 26rem;
+    border-radius: 4rem;
+    background-color: rgba(255, 255, 255, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16rem;
+    cursor: pointer;
+
+    &:hover {
+        background-color: rgba(255, 255, 255, 0.25);
+    }
+}
+
+.modeButton {
+    flex: 1;
+    padding: 4rem 6rem;
+    border-radius: 4rem;
+    background-color: rgba(255, 255, 255, 0.12);
+    text-align: center;
+    font-size: 13rem;
+    cursor: pointer;
+
+    &:hover {
+        background-color: rgba(255, 255, 255, 0.25);
+    }
+}
+
+.modeButtonActive {
+    background-color: rgba(87, 160, 255, 0.55);
+
+    &:hover {
+        background-color: rgba(87, 160, 255, 0.7);
+    }
+}
+
+.rowDisabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+.nodeCount {
+    font-size: 13rem;
+    text-align: center;
+    opacity: 0.8;
+}
+
+.invalid {
+    color: #ff8080;
+}
+
+.generateButton {
+    padding: 8rem;
+    border-radius: 4rem;
+    background-color: rgba(87, 160, 255, 0.55);
+    text-align: center;
+    font-size: 15rem;
+    font-weight: bold;
+    cursor: pointer;
+
+    &:hover {
+        background-color: rgba(87, 160, 255, 0.7);
+    }
+}
+
+.generateButtonDisabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+.clearButton {
+    padding: 6rem;
+    border-radius: 4rem;
+    background-color: rgba(255, 255, 255, 0.12);
+    text-align: center;
+    font-size: 13rem;
+    cursor: pointer;
+
+    &:hover {
+        background-color: rgba(255, 120, 120, 0.4);
+    }
+}
