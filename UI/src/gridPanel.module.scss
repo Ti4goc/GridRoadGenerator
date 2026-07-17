@@ -1,50 +1,91 @@
-// Style du panneau calqué sur les panneaux de CS2-NetworkTools
-// (c) Luca Rager, licence MIT — https://github.com/lucarager/CS2-NetworkTools
-// Seul reste ici le SCSS minimal d'habillage : le contenu des rangées est rendu
-// par les composants vanilla du jeu (Section, ToolButton, sliders de l'éditeur),
-// avec les mêmes compensations d'intégration que NetworkTools (.vanillaField).
+// Panneau sur le chrome InfoView natif (Panel/InfoSection/InfoRow de cs2/ui) :
+// le fond, les bordures, l'opacité, l'espacement et le style des en-têtes de
+// section viennent du thème Panel natif lui-même, pas de valeurs approchées ici.
+// Ne reste en SCSS custom que : le positionnement/drag du wrapper (Panel natif
+// n'expose pas de callback de position finale), l'en-tête composé à la main
+// (icône + titre + chevron replier, sans équivalent Panel tout fait), et les
+// compensations d'intégration des widgets vanilla de l'éditeur (sliders), déjà
+// éprouvées et reprises telles quelles.
 
-$panel-padding-x: 12rem;
-$panel-padding-y: 12rem;
 $input-bg-color: rgba(0, 0, 0, 0.15);
 $input-border-color: rgba(255, 255, 255, 0.2);
 $input-border-hover-color: rgba(255, 255, 255, 0.35);
 
-// top/left sont posés en style inline (position draggable persistée).
-.panel {
+// Wrapper positionné en absolu (drag manuel) ; le Panel natif à l'intérieur
+// n'a aucun style de position/fond propre à lui — tout vient de son thème.
+.panelWrapper {
     position: absolute;
     width: 300rem;
-    background-color: rgba(24, 24, 37, 0.75);
-    backdrop-filter: var(--panelBlur);
-    border-radius: 12rem;
-    color: white;
     pointer-events: auto;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
 }
 
-// Barre de titre : poignée de déplacement du panneau.
+.panel {
+    width: 100%;
+}
+
+// En-tête composé : icône de grille + titre majuscules + chevron replier.
+// Poignée de déplacement (drag) sur toute la zone, sauf le bouton chevron
+// (stopPropagation) et le bouton de fermeture natif du Panel (en dehors de
+// ce slot `header`, rendu par Panel lui-même via son propre thème).
 .header {
-    padding: $panel-padding-y $panel-padding-x 8rem;
-    font-weight: 600;
-    color: white;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
     cursor: move;
+    width: 100%;
 }
 
-.content {
-    display: flex;
-    flex-direction: column;
-    padding: $panel-padding-y $panel-padding-x;
+.headerIcon {
+    width: 18rem;
+    height: 18rem;
+    margin-right: 6rem;
+    flex-shrink: 0;
 }
+
+.headerTitle {
+    flex: 1;
+    letter-spacing: 0.05em;
+}
+
+.collapseButton {
+    width: 22rem;
+    height: 22rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.collapseIcon {
+    width: 12rem;
+    height: 12rem;
+    transition: transform 0.15s;
+}
+
+.collapseIconCollapsed {
+    width: 12rem;
+    height: 12rem;
+    transform: rotate(-90deg);
+}
+
+.invalid {
+    color: #ff8080;
+}
+
+// ------------------------------------------------------------------
+// Sliders de l'éditeur (Colonnes/Lignes/Espacement/Angle/Profondeur/
+// Fréquence) : gardent leur propre libellé interne plutôt qu'un InfoRow
+// séparé (éviterait un double-libellé), avec les mêmes compensations
+// d'intégration que CS2-NetworkTools pour les faire tenir dans le
+// panneau.
+// ------------------------------------------------------------------
 
 .vanillaRow {
-    & + .vanillaRow {
-        margin-top: 8rem;
-    }
+    margin: 4rem 0;
 
-    // Intégration des widgets vanilla dans le panneau (mêmes compensations que
-    // NetworkTools) : label à largeur fixe à gauche, contrôle extensible à droite.
     .vanillaField {
         width: 100%;
         display: flex;
@@ -101,7 +142,6 @@ $input-border-hover-color: rgba(255, 255, 255, 0.35);
             border-radius: 3rem;
         }
 
-        // Le div racine du widget de l'éditeur doit occuper l'espace restant.
         & > div {
             flex: 1;
         }
@@ -114,10 +154,6 @@ $input-border-hover-color: rgba(255, 255, 255, 0.35);
             right: 5rem;
         }
     }
-}
-
-.invalid {
-    color: #ff8080;
 }
 
 // Rangée du réseau : cliquable, ouvre le sélecteur.
@@ -163,7 +199,7 @@ $input-border-hover-color: rgba(255, 255, 255, 0.35);
     display: flex;
     flex-direction: column;
     row-gap: 6rem;
-    margin-top: 10rem;
+    margin: 10rem 12rem 12rem;
 }
 
 .applyButton {
