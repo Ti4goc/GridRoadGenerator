@@ -36,13 +36,16 @@ namespace GridRoadGenerator.Core
         public int Rows;
         public int Columns;
         public float SpacingMeters;
+        /// <summary>Rotation additionnelle (degrés, -90..+90) de la grille par rapport à l'arête la plus longue du polygone.</summary>
+        public float AngleOffsetDegrees;
 
         public static GridParameters Default => new GridParameters
         {
             Mode = SpacingMode.FitToArea,
             Rows = 3,
             Columns = 3,
-            SpacingMeters = 60f
+            SpacingMeters = 60f,
+            AngleOffsetDegrees = 0f
         };
     }
 
@@ -55,7 +58,8 @@ namespace GridRoadGenerator.Core
     ///  1. Le polygone est fermé à partir des points dans l'ordre de sélection.
     ///  2. Un repère local (u, v) est construit, orienté sur l'arête la plus longue
     ///     du polygone : la grille suit ainsi la "rue principale" du périmètre,
-    ///     pas les axes du monde.
+    ///     pas les axes du monde. AngleOffsetDegrees ajoute une rotation
+    ///     supplémentaire à cette orientation (u et v tournent ensemble).
     ///  3. Des lignes de grille u = const et v = const sont générées dans la
     ///     bounding box locale, selon le mode d'espacement.
     ///  4. Chaque ligne est découpée aux frontières du polygone par la règle
@@ -120,8 +124,8 @@ namespace GridRoadGenerator.Core
             if (polygon.Count < 3 || math.abs(SignedArea(polygon)) < 1f)
                 return new List<RoadSegmentDef>(); // polygone dégénéré (points alignés/confondus)
 
-            // Repère local orienté sur l'arête la plus longue.
-            (float2 origin, float2 uDir, float2 vDir) = BuildLocalFrame(polygon);
+            // Repère local orienté sur l'arête la plus longue, plus l'angle réglable.
+            (float2 origin, float2 uDir, float2 vDir) = BuildLocalFrame(polygon, parameters.AngleOffsetDegrees);
 
             // Polygone en coordonnées locales + bounding box locale.
             var local = new List<float2>(polygon.Count);
@@ -271,9 +275,10 @@ namespace GridRoadGenerator.Core
 
         /// <summary>
         /// Construit le repère (origine, axe u, axe v) : u suit l'arête la plus
-        /// longue du polygone, v lui est perpendiculaire.
+        /// longue du polygone puis subit une rotation additionnelle d'angleOffsetDegrees
+        /// (sens trigonométrique), v lui reste perpendiculaire.
         /// </summary>
-        private static (float2 origin, float2 uDir, float2 vDir) BuildLocalFrame(List<float2> polygon)
+        private static (float2 origin, float2 uDir, float2 vDir) BuildLocalFrame(List<float2> polygon, float angleOffsetDegrees)
         {
             int bestIndex = 0;
             float bestLengthSq = -1f;
@@ -292,6 +297,15 @@ namespace GridRoadGenerator.Core
 
             float2 origin2 = polygon[bestIndex];
             float2 uDir = math.normalize(polygon[(bestIndex + 1) % polygon.Count] - origin2);
+
+            if (angleOffsetDegrees != 0f)
+            {
+                float radians = math.radians(angleOffsetDegrees);
+                float cosA = math.cos(radians);
+                float sinA = math.sin(radians);
+                uDir = new float2(uDir.x * cosA - uDir.y * sinA, uDir.x * sinA + uDir.y * cosA);
+            }
+
             float2 vDir = new float2(-uDir.y, uDir.x); // perpendiculaire (rotation +90°)
             return (origin2, uDir, vDir);
         }

@@ -11,6 +11,7 @@ import { VC, VF, VT } from "./vanilla";
 import {
     anarchyAvailable$,
     anarchyEnabled$,
+    angleOffset$,
     canApply$,
     clearSelection,
     columns$,
@@ -21,6 +22,7 @@ import {
     roadPrefabIcon$,
     roadPrefabName$,
     rows$,
+    setAngleOffset,
     setColumns,
     setMode,
     setRows,
@@ -78,6 +80,7 @@ export const GridPanel = () => {
     const columns = useValue(columns$);
     const rows = useValue(rows$);
     const spacing = useValue(spacing$);
+    const angleOffset = useValue(angleOffset$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
     const anarchyAvailable = useValue(anarchyAvailable$);
@@ -197,6 +200,20 @@ export const GridPanel = () => {
                             onChange={(value: number) => setSpacing(value)}
                         />
                         <span className={styles.unitLabel}>m</span>
+                    </div>
+                </div>
+                <div className={styles.vanillaRow}>
+                    <div className={styles.vanillaField}>
+                        <VC.FloatSliderField
+                            label={translate("GridRoadGenerator.UI.Angle", "Angle")}
+                            value={angleOffset}
+                            min={-90}
+                            max={90}
+                            fractionDigits={0}
+                            disabled={false}
+                            onChange={(value: number) => setAngleOffset(value)}
+                        />
+                        <span className={styles.unitLabel}>°</span>
                     </div>
                 </div>
 

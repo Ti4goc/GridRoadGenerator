@@ -45,6 +45,10 @@ namespace GridRoadGenerator.Settings
         [SettingsUISection(GroupGrid)]
         public float SpacingMeters { get; set; }
 
+        [SettingsUISlider(min = -90f, max = 90f, step = 1f, unit = "angle")]
+        [SettingsUISection(GroupGrid)]
+        public float AngleOffsetDegrees { get; set; }
+
         /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
         /// "TypePrefab:Nom" (ex. "RoadPrefab:Small Road"). Vide = mode auto
@@ -69,6 +73,7 @@ namespace GridRoadGenerator.Settings
             Columns = d.Columns;
             Rows = d.Rows;
             SpacingMeters = d.SpacingMeters;
+            AngleOffsetDegrees = d.AngleOffsetDegrees;
             RoadPrefabName = string.Empty;
         }
 
@@ -77,7 +82,8 @@ namespace GridRoadGenerator.Settings
             Mode = Mode,
             Columns = Columns,
             Rows = Rows,
-            SpacingMeters = SpacingMeters
+            SpacingMeters = SpacingMeters,
+            AngleOffsetDegrees = AngleOffsetDegrees
         };
     }
 }

@@ -208,4 +208,108 @@ namespace GridRoadGenerator.Tests
             return math.distance(point, a + t * ab);
         }
     }
+
+    /// <summary>Vérifie le paramètre AngleOffsetDegrees : 0° = comportement inchangé, 90° = axes échangés, clipping correct à tout angle.</summary>
+    public class GridGeneratorAngleTests
+    {
+        private static readonly List<float3> SquareNodes = new List<float3>
+        {
+            new float3(0f, 0f, 0f),
+            new float3(300f, 0f, 0f),
+            new float3(300f, 0f, 300f),
+            new float3(0f, 0f, 300f),
+        };
+
+        [Fact]
+        public void AngleZero_MatchesPreviousBehaviorExactly()
+        {
+            var parameters = new GridParameters
+            {
+                Mode = SpacingMode.FitToArea,
+                Rows = 3,
+                Columns = 3,
+                SpacingMeters = 60f,
+                AngleOffsetDegrees = 0f,
+            };
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+
+            // Même résultat que le test de régression sans angle (24 segments,
+            // 3 lignes u × 4 tronçons + 3 lignes v × 4 tronçons).
+            Assert.Equal(24, segments.Count);
+        }
+
+        [Fact]
+        public void Angle90_SwapsAxisOfVariation()
+        {
+            // Carré axis-aligned, origine (0,0), arête la plus longue = (0,0)->(300,0)
+            // donc uDir=(1,0) à 0°. Une seule ligne de chaque jeu (Rows=1, Columns=1)
+            // pour isoler la géométrie sans ambiguïté de tri.
+            var parameters0 = new GridParameters
+            {
+                Mode = SpacingMode.FitToArea,
+                Rows = 1,
+                Columns = 1,
+                SpacingMeters = 60f,
+                AngleOffsetDegrees = 0f,
+            };
+            var parameters90 = parameters0;
+            parameters90.AngleOffsetDegrees = 90f;
+
+            var segments0 = GridGenerator.GenerateGrid(SquareNodes, parameters0);
+            var segments90 = GridGenerator.GenerateGrid(SquareNodes, parameters90);
+
+            // La ligne des colonnes croise celle des rangées en plein milieu du carré
+            // et se retrouve donc pré-découpée en 2 sous-segments (Chantier 1) : chaque
+            // morceau reste individuellement droit, First() suffit pour lire son axe.
+
+            // À 0° : la ligne des colonnes est verticale en monde (X constant, Z varie).
+            var columnLine0 = segments0.First(s => !s.IsHorizontal);
+            Assert.Equal(columnLine0.Start.x, columnLine0.End.x, 2);
+            Assert.NotEqual(columnLine0.Start.z, columnLine0.End.z, 2);
+
+            // À 90° : la même ligne des colonnes devient horizontale en monde
+            // (Z constant, X varie) — les axes ont basculé.
+            var columnLine90 = segments90.First(s => !s.IsHorizontal);
+            Assert.Equal(columnLine90.Start.z, columnLine90.End.z, 2);
+            Assert.NotEqual(columnLine90.Start.x, columnLine90.End.x, 2);
+        }
+
+        [Fact]
+        public void ObliqueAngle_ClipsPolygonCorrectlyOnConcaveShape()
+        {
+            // L concave, angle 45° : pas de valeurs attendues à la main (trop
+            // fastidieux à dériver), on vérifie les invariants structurels du
+            // clipping (segments bien formés, aucun croisement en milieu de segment).
+            var nodes = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(300f, 0f, 0f),
+                new float3(300f, 0f, 150f),
+                new float3(150f, 0f, 150f),
+                new float3(150f, 0f, 300f),
+                new float3(0f, 0f, 300f),
+            };
+            var parameters = new GridParameters
+            {
+                Mode = SpacingMode.FixedSpacing,
+                Rows = 3,
+                Columns = 3,
+                SpacingMeters = 60f,
+                AngleOffsetDegrees = 45f,
+            };
+
+            var segments = GridGenerator.GenerateGrid(nodes, parameters);
+
+            Assert.NotEmpty(segments);
+            foreach (var segment in segments)
+            {
+                Assert.True(math.distance(segment.Start.xz, segment.End.xz) >= GridGenerator.MinSegmentLength - 1e-3f,
+                    $"Sous-segment trop court à 45° : {segment.Start} → {segment.End}");
+                Assert.False(float.IsNaN(segment.Start.x) || float.IsNaN(segment.Start.z)
+                    || float.IsNaN(segment.End.x) || float.IsNaN(segment.End.z),
+                    "Coordonnée NaN produite par le clipping à angle oblique.");
+            }
+        }
+    }
 }

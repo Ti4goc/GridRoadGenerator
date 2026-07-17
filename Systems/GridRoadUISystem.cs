@@ -38,6 +38,7 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<int> _columnsBinding;
         private ValueBinding<int> _rowsBinding;
         private ValueBinding<float> _spacingBinding;
+        private ValueBinding<float> _angleOffsetBinding;
         private ValueBinding<string> _roadPrefabNameBinding;
         private ValueBinding<string> _roadPrefabIconBinding;
         private ValueBinding<bool> _roadPrefabAutoBinding;
@@ -82,6 +83,7 @@ namespace GridRoadGenerator.Systems
             AddBinding(_columnsBinding = new ValueBinding<int>(BindingGroup, "COLUMNS", _settings.Columns));
             AddBinding(_rowsBinding = new ValueBinding<int>(BindingGroup, "ROWS", _settings.Rows));
             AddBinding(_spacingBinding = new ValueBinding<float>(BindingGroup, "SPACING", _settings.SpacingMeters));
+            AddBinding(_angleOffsetBinding = new ValueBinding<float>(BindingGroup, "ANGLE_OFFSET", _settings.AngleOffsetDegrees));
 
             // Prefab de réseau utilisé par la grille (rangée du panneau, ouvre le sélecteur).
             AddBinding(_roadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_NAME", string.Empty));
@@ -124,6 +126,11 @@ namespace GridRoadGenerator.Systems
                 _settings.SpacingMeters = math.clamp(value, 10f, 300f);
                 _settings.ApplyAndSave();
             }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_ANGLE_OFFSET", value =>
+            {
+                _settings.AngleOffsetDegrees = math.clamp(value, -90f, 90f);
+                _settings.ApplyAndSave();
+            }));
 
             // Actions du panneau.
             AddBinding(new TriggerBinding(BindingGroup, "GENERATE", () => _toolSystem.RequestApply()));
@@ -143,6 +150,7 @@ namespace GridRoadGenerator.Systems
             _columnsBinding.Update(_settings.Columns);
             _rowsBinding.Update(_settings.Rows);
             _spacingBinding.Update(_settings.SpacingMeters);
+            _angleOffsetBinding.Update(_settings.AngleOffsetDegrees);
 
             PrefabBase roadPrefab = _toolSystem.GetPrefab();
             _roadPrefabNameBinding.Update(roadPrefab != null ? roadPrefab.name : string.Empty);
