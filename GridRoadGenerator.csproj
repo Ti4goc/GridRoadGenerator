@@ -1,37 +1,45 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net472</TargetFramework>
-    <AssemblyName>GridRoadGenerator</AssemblyName>
+    <Configurations>Debug;Release</Configurations>
     <RootNamespace>GridRoadGenerator</RootNamespace>
-    <LangVersion>9</LangVersion>
     <Nullable>disable</Nullable>
-    <!-- Adapte ce chemin vers ton dossier d'installation CS2 + son SDK de modding -->
-    <CSIIPath Condition="'$(CSIIPath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Cities Skylines II</CSIIPath>
   </PropertyGroup>
 
+  <!-- Template officiel du toolchain de modding CS2 : Mod.props fournit TargetFramework,
+       LangVersion, les chemins de résolution des DLL du jeu et les analyzers ECS ;
+       Mod.targets fournit le post-processing (Burst) et le déploiement auto dans le
+       dossier Mods locaux. Les imports doivent venir après le premier PropertyGroup. -->
+  <Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" />
+  <Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" />
+
   <ItemGroup>
-    <!-- Références typiques nécessaires à un mod CS2. Les noms/chemins exacts des DLL
-         dépendent de ton installation ; utilise le Mod SDK officiel (paquet NuGet
-         "Cities2Modding" ou équivalent, référencé par la communauté de modding CS2)
-         plutôt que de les recopier à la main si possible. -->
-    <Reference Include="Game">
-      <HintPath>$(CSIIPath)\Cities2_Data\Managed\Game.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Colossal.Core">
-      <HintPath>$(CSIIPath)\Cities2_Data\Managed\Colossal.Core.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Unity.Entities">
-      <HintPath>$(CSIIPath)\Cities2_Data\Managed\Unity.Entities.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Unity.Mathematics">
-      <HintPath>$(CSIIPath)\Cities2_Data\Managed\Unity.Mathematics.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <!-- Ajoute ici les autres DLL du jeu nécessaires (Unity.InputSystem, Colossal.IO.AssetDatabase, etc.) -->
+    <!-- Sources décompilées de Game.dll : référence d'API uniquement, jamais compilées. -->
+    <Compile Remove="decompiled\**" />
+    <None Remove="decompiled\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Game"><Private>False</Private></Reference>
+    <Reference Include="Colossal.Core"><Private>False</Private></Reference>
+    <Reference Include="Colossal.Logging"><Private>False</Private></Reference>
+    <Reference Include="Colossal.IO.AssetDatabase"><Private>False</Private></Reference>
+    <Reference Include="Colossal.Localization"><Private>False</Private></Reference>
+    <Reference Include="Colossal.Mathematics"><Private>False</Private></Reference>
+    <Reference Include="Colossal.Collections"><Private>False</Private></Reference>
+    <Reference Include="Colossal.UI.Binding"><Private>False</Private></Reference>
+    <Reference Include="Unity.Burst"><Private>False</Private></Reference>
+    <Reference Include="Unity.Collections"><Private>False</Private></Reference>
+    <Reference Include="Unity.Entities"><Private>False</Private></Reference>
+    <Reference Include="Unity.Mathematics"><Private>False</Private></Reference>
+    <Reference Include="Unity.InputSystem"><Private>False</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><Private>False</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Properties\PublishConfiguration.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
