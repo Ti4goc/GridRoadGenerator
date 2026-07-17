@@ -21,26 +21,45 @@ avec espacement, nombre de lignes et de colonnes réglables.
   validation, appel à GridGenerator, puis pose des segments.
 - `GridRoadGeneratorMod.cs` — point d'entrée (`IMod`), enregistrement du système et des settings.
 
-## Ce qui est fonctionnel tel quel
-Toute la logique de `GridGenerator.cs` est complète et testable indépendamment du jeu.
+## État : fonctionnel
+Tout est branché sur l'API du jeu (vérifiée contre les sources décompilées de Game.dll,
+dossier `decompiled/`, non versionné) :
 
-## Ce qu'il reste à brancher (dépendant du SDK/version du jeu)
-1. **Input Actions** : déclarer les actions `SelectNode`, `ConfirmGrid`, `Cancel` dans le
-   système d'input du mod (fichier d'actions à créer, référencé par `InputManager.instance.FindAction`).
-2. **Placement réel des routes** (`PlaceRoadSegment`) : c'est la seule partie "boîte noire"
-   du squelette. Deux pistes :
-   - Piloter `NetToolSystem` par code, comme si le joueur cliquait-glissait à la souris
-     (le plus robuste dans le temps, recommandé).
-   - Créer directement les entités réseau (Edge/Node/NetCourse) via l'`EntityManager`
-     (plus rapide mais plus fragile aux mises à jour du jeu).
-   Cherche `NetCourse`, `NetToolSystem.GetAvailableSnapMask` et les exemples de mods
-   routiers existants (beaucoup de mods CS2 open-source manipulent déjà NetToolSystem)
-   sur le Discord/wiki officiel de modding CS2 pour la syntaxe exacte de ta version du jeu.
-3. **Choix du prefab de route** (`_roadPrefab`) : à remplir avec le prefab sélectionné par
-   le joueur (ex. réutiliser le prefab actuellement choisi dans le NetTool natif du jeu).
-4. **Snapping aux nœuds du périmètre** : pour que la grille se raccorde proprement aux
-   4 routes déjà sélectionnées (et pas seulement "à côté"), il faut que `PlaceRoadSegment`
-   utilise le système de snapping natif du jeu plutôt que des coordonnées brutes.
+1. **Input actions** — via le système de keybindings de `ModSetting` (propriétés
+   `ProxyBinding` + `[SettingsUIKeyboardBinding]`, réassignables dans Options) :
+   - **Ctrl+G** : activer/désactiver l'outil (action `ToggleTool`) ;
+   - **Clic gauche** : sélectionner/désélectionner un nœud (action native `Apply` de l'outil) ;
+   - **Clic droit** : retirer le dernier nœud (action native `Secondary Apply`) ;
+   - **Entrée** : valider et construire la grille (action `ConfirmGrid`) ;
+   - **Échap** : annuler la sélection (action native `Cancel`).
+2. **Placement des routes** — l'outil pilote le pipeline natif de construction réseau,
+   comme `NetToolSystem` : à chaque changement de sélection il crée des entités de
+   définition (`CreationDefinition` + `NetCourse` + `Updated`) via le `ToolOutputBarrier`.
+   Le jeu en dérive des entités Temp qui servent d'**aperçu fantôme** (validation de
+   collision native, croisements gérés par `CourseSplitSystem`, intersections réelles).
+   À la validation, `ApplyMode.Apply` concrétise l'aperçu — même mécanique qu'un
+   clic-glisser du joueur. Les hauteurs sont reprojetées sur le terrain (`TerrainSystem`).
+3. **Prefab de route** — celui sélectionné dans l'outil route natif du joueur s'il s'agit
+   d'une route, sinon la petite route deux voies ("Small Road").
+4. **Snapping au périmètre** — chaque extrémité de segment est raccordée au nœud
+   sélectionné le plus proche, ou à la route existante entre deux nœuds consécutifs
+   (split d'arête via `CoursePos.m_SplitPosition`, comme un tracé manuel terminé au
+   milieu d'une route). Les extrémités libres (mode 2 nœuds) suivent le terrain.
+5. **Feedback visuel** — nœuds sélectionnés surlignés (`Highlighted`), grille en aperçu
+   fantôme natif avant validation.
+
+Pas de bouton dans la barre d'outils pour l'instant : cela demanderait un module UI
+cohtml (React) complet ; le raccourci clavier configurable couvre l'activation.
+
+## Test in-game
+Lance le jeu avec `-developerMode`. Logs du mod :
+`%AppData%\..\LocalLow\Colossal Order\Cities Skylines II\Logs\GridRoadGenerator.log`
+(et `Player.log` pour les erreurs moteur). Vérifie au chargement : « GridRoadGenerator
+chargé. » et les lignes « Localisation enregistrée ». En partie : Ctrl+G, clique des
+nœuds de route existants dans l'ordre du périmètre, aperçu fantôme, Entrée pour
+construire. Scénarios : rectangle 4 nœuds, 2 nœuds opposés (rectangle aligné aux axes,
+extrémités libres), L concave à 6 nœuds, périmètre tourné, nœuds cliqués en zigzag
+(le polygone suit l'ordre de clic), les deux modes d'espacement dans Options > Mods.
 
 ## Localisation
 Le mod inclut 16 langues dans `Localization/Translations.cs` :
@@ -55,7 +74,18 @@ donc aucune erreur si la locale est absente — le jeu retombe sur l'anglais.
 Pour ajouter/modifier une langue : édite simplement le dictionnaire `Translations.All`.
 
 ## Compilation
-Adapte `CSIIPath` dans le `.csproj` vers ton dossier d'installation CS2, et vérifie les
-noms des DLL référencées (ils varient selon les mises à jour du jeu). Utilise de préférence
-le template de mod officiel/communautaire à jour comme base de référence pour les chemins
-et versions exactes des dépendances.
+Le `.csproj` suit le template officiel du toolchain de modding : il importe `Mod.props`
+et `Mod.targets` depuis `%CSII_TOOLPATH%` (variable définie par l'installation du
+toolchain in-game). La résolution des DLL, le post-processing Burst et le déploiement
+automatique dans `%CSII_LOCALMODSPATH%\GridRoadGenerator` sont gérés par ces imports :
+
+```
+dotnet build GridRoadGenerator.csproj
+```
+
+Le dossier `decompiled/` (sources de Game.dll décompilées via `ilspycmd`, non versionné)
+sert de référence d'API ; régénère-le après une mise à jour du jeu :
+
+```
+ilspycmd -p -o decompiled --nested-directories "%CSII_MANAGEDPATH%\Game.dll"
+```
