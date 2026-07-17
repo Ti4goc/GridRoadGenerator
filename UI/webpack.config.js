@@ -68,6 +68,13 @@ module.exports = {
                 exclude: /node_modules/,
             },
             {
+                // Icônes embarquées dans le module UI : émises dans le dossier déployé
+                // et servies par l'hôte coui://ui-mods/ (publicPath ci-dessous).
+                test: /\.(svg|png|jpg|gif)$/,
+                type: "asset/resource",
+                generator: { filename: "images/[name][ext]" },
+            },
+            {
                 test: /\.s?css$/,
                 include: path.join(__dirname, "src"),
                 use: [
