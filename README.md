@@ -51,6 +51,22 @@ dossier `decompiled/`, non versionné) :
 Pas de bouton dans la barre d'outils pour l'instant : cela demanderait un module UI
 cohtml (React) complet ; le raccourci clavier configurable couvre l'activation.
 
+## Interface en jeu
+- **Survol** d'un nœud de route = surbrillance ; **clic gauche** = ajout au périmètre
+  (re-clic = désélection) ; **clic droit** = retire le dernier ; **Échap** = tout annuler.
+- **Tooltips contextuels** près du curseur selon l'étape (sélectionner, valider, périmètre invalide).
+- **Panneau latéral** (React/cohtml, `UI/`) affiché quand l'outil est actif : mode
+  d'espacement, colonnes, lignes, espacement, "Générer la grille", "Tout annuler".
+  Les réglages sont synchronisés dans les deux sens avec Options > Mods.
+- Le module UI est buildé par webpack (`UI/`, cible MSBuild `BuildUI` après déploiement)
+  en `GridRoadGenerator.mjs` + `.css` dans le dossier du mod.
+
+## Crédits
+Les patterns de sélection de nœuds (raycast + survol + surbrillance), de tooltips
+contextuels et d'architecture du module UI (webpack/cohtml/bindings) sont adaptés de
+[CS2-NetworkTools](https://github.com/lucarager/CS2-NetworkTools) de **Luca Rager
+(lucarager)**, sous licence MIT. Merci !
+
 ## Test in-game
 Lance le jeu avec `-developerMode`. Logs du mod :
 `%AppData%\..\LocalLow\Colossal Order\Cities Skylines II\Logs\GridRoadGenerator.log`
