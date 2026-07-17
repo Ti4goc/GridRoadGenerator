@@ -258,7 +258,7 @@ export const GridPanel = () => {
                         className={styles.applyButton}
                         disabled={!canApply}
                         onSelect={generateGrid}>
-                        {translate("GridRoadGenerator.UI.Generate", "Generate grid")}
+                        {translate("GridRoadGenerator.UI.Generate", "Generate")}
                     </Button>
                     <Button variant="flat" className={styles.clearButton} onSelect={clearSelection}>
                         {translate("GridRoadGenerator.UI.ClearAll", "Clear all")}
