@@ -479,6 +479,12 @@ export const LegacyGridPanel = () => {
                         onSelect={generateGrid}>
                         {translate("GridRoadGenerator.UI.Generate", "Generate")}
                     </Button>
+                    <span className={styles.generateHint}>
+                        {translate(
+                            "GridRoadGenerator.UI.GenerateHint",
+                            "Double-click a node to auto-select the whole perimeter.",
+                        )}
+                    </span>
                 </div>
             </div>
 

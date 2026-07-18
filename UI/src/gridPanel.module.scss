@@ -243,6 +243,14 @@ $accent-violet: #9645ff;
     padding: 10rem $panel-padding-x $panel-padding-y;
 }
 
+// Indication permanente (pas une tooltip au survol) : discrète, toujours visible.
+.generateHint {
+    font-size: var(--fontSizeXS);
+    line-height: 1.3em;
+    color: #ffffff80;
+    text-align: center;
+}
+
 .applyButton {
     padding: 5rem 8rem;
     font-size: var(--fontSizeS);
