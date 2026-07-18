@@ -14,10 +14,12 @@ import {
     angleOffset$,
     canApply$,
     columns$,
+    culDeSacCapSize$,
     culDeSacCapStyle$,
     culDeSacDepth$,
     culDeSacMode$,
     culDeSacRatio$,
+    followTerrain$,
     generateGrid,
     mode$,
     nodeCount$,
@@ -27,10 +29,12 @@ import {
     rows$,
     setAngleOffset,
     setColumns,
+    setCulDeSacCapSize,
     setCulDeSacCapStyle,
     setCulDeSacDepth,
     setCulDeSacMode,
     setCulDeSacRatio,
+    setFollowTerrain,
     setMode,
     setRows,
     setSpacing,
@@ -43,6 +47,12 @@ import {
 
 const MODE_FIT = 0;
 const MODE_FIXED = 1;
+
+const CAP_SIZE_AUTO = 0;
+const CAP_SIZE_SMALL = 1;
+const CAP_SIZE_MEDIUM = 2;
+const CAP_SIZE_LARGE = 3;
+const CAP_SIZE_XL = 4;
 
 const CAP_STYLE_ASPHALT = 0;
 const CAP_STYLE_GRASS = 1;
@@ -83,6 +93,47 @@ const loadPanelPosition = (): PanelPosition => {
     return DEFAULT_POSITION;
 };
 
+// ------------------------------------------------------------------
+// Repli par section : ce panneau évite volontairement toute la famille
+// Panel/InfoRow/InfoSection/InfoSectionFoldout de cs2/ui (c'est justement
+// pourquoi il existe — filet de secours si cette famille est absente au
+// runtime, voir gridPanelSwitch.tsx), donc pas de foldout natif disponible
+// ici. Chevron manuel reprenant la même icône vanilla que le repli du
+// panneau natif, pour un look cohérent entre les deux panneaux.
+// ------------------------------------------------------------------
+
+type SectionFoldoutProps = {
+    title: React.ReactNode;
+    /// Contenu additionnel dans l'en-tête (ex. toggle d'activation) ; stoppe
+    /// lui-même la propagation du clic pour ne jamais déplier/replier la
+    /// section quand on veut juste l'actionner.
+    headerExtra?: React.ReactNode;
+    expanded: boolean;
+    onToggle: () => void;
+    children: React.ReactNode;
+};
+
+const SectionFoldout = ({ title, headerExtra, expanded, onToggle, children }: SectionFoldoutProps) => (
+    <div className={styles.foldout}>
+        <div className={styles.foldoutHeader} onClick={onToggle}>
+            <img
+                src="Media/Glyphs/ThickStrokeArrowDown.svg"
+                className={expanded ? styles.foldoutChevron : styles.foldoutChevronCollapsed}
+            />
+            <span className={styles.foldoutTitle}>{title}</span>
+            {headerExtra && (
+                <span
+                    className={styles.foldoutHeaderExtra}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}>
+                    {headerExtra}
+                </span>
+            )}
+        </div>
+        {expanded && <div className={styles.foldoutBody}>{children}</div>}
+    </div>
+);
+
 /// Panneau custom éprouvé (fonctionne en jeu, confirmé). Utilisé directement si
 /// le chrome InfoView natif n'est pas disponible/sûr — voir gridPanelSwitch.tsx.
 export const LegacyGridPanel = () => {
@@ -96,10 +147,12 @@ export const LegacyGridPanel = () => {
     const rows = useValue(rows$);
     const spacing = useValue(spacing$);
     const angleOffset = useValue(angleOffset$);
+    const followTerrain = useValue(followTerrain$);
     const culDeSacMode = useValue(culDeSacMode$);
     const culDeSacDepth = useValue(culDeSacDepth$);
     const staggered = useValue(staggered$);
     const culDeSacRatio = useValue(culDeSacRatio$);
+    const culDeSacCapSize = useValue(culDeSacCapSize$);
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
@@ -108,6 +161,9 @@ export const LegacyGridPanel = () => {
     const [pickerOpen, setPickerOpen] = useState(false);
     const [panelPosition, setPanelPosition] = useState<PanelPosition>(loadPanelPosition);
     const panelRef = useRef<HTMLDivElement>(null);
+    const [geometryExpanded, setGeometryExpanded] = useState(true);
+    const [culDeSacExpanded, setCulDeSacExpanded] = useState(true);
+    const [selectionExpanded, setSelectionExpanded] = useState(true);
 
     if (!toolActive) {
         return null;
@@ -145,6 +201,29 @@ export const LegacyGridPanel = () => {
         ? (translate(`Assets.NAME[${roadPrefabName}]`, roadPrefabName) ?? roadPrefabName)
         : "—";
 
+    // Taille et style du cercle de retournement : voir le commentaire équivalent
+    // dans gridPanelNative.tsx (même logique, panneau custom éprouvé ici).
+    const capSizeItems = [
+        { value: CAP_SIZE_AUTO, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeAuto", "Automatic (road width)") },
+        { value: CAP_SIZE_SMALL, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeSmall", "Small") },
+        { value: CAP_SIZE_MEDIUM, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeMedium", "Medium") },
+        { value: CAP_SIZE_LARGE, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeLarge", "Large") },
+        ...(culDeSacCapStyle !== CAP_STYLE_ASPHALT
+            ? [{ value: CAP_SIZE_XL, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeXL", "XL") }]
+            : []),
+    ];
+    const capStyleItems = [
+        { value: CAP_STYLE_ASPHALT, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleAsphalt", "Asphalt") },
+        { value: CAP_STYLE_GRASS, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass") },
+        { value: CAP_STYLE_TREES, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees") },
+    ];
+    const handleCapStyleChange = (value: number) => {
+        if (value === CAP_STYLE_ASPHALT && culDeSacCapSize === CAP_SIZE_XL) {
+            setCulDeSacCapSize(CAP_SIZE_LARGE);
+        }
+        setCulDeSacCapStyle(value);
+    };
+
     return (
         <div
             ref={panelRef}
@@ -156,238 +235,240 @@ export const LegacyGridPanel = () => {
                 </div>
 
                 <div className={styles.content}>
-                {/* Mode : boutons d'outil natifs, état sélectionné violet vanilla. */}
-                <div className={styles.vanillaRow}>
-                    <VC.Section
-                        focusKey={VF.FOCUS_DISABLED}
-                        title={translate("GridRoadGenerator.UI.Mode", "Mode")}>
-                        <VC.ToolButton
-                            src="Media/Tools/Snap Options/ZoneGrid.svg"
-                            selected={fitMode}
-                            multiSelect={false}
-                            disabled={false}
-                            focusKey={VF.FOCUS_DISABLED}
-                            tooltip={translate("GridRoadGenerator.UI.ModeFit", "Fit to area")}
-                            onSelect={() => setMode(MODE_FIT)}
-                            className={VT.toolButton.button}
-                        />
-                        <VC.ToolButton
-                            src="Media/Glyphs/Length.svg"
-                            selected={!fitMode}
-                            multiSelect={false}
-                            disabled={false}
-                            focusKey={VF.FOCUS_DISABLED}
-                            tooltip={translate("GridRoadGenerator.UI.ModeFixed", "Fixed spacing")}
-                            onSelect={() => setMode(MODE_FIXED)}
-                            className={VT.toolButton.button}
-                        />
-                    </VC.Section>
-                </div>
-
-                {/* Colonnes / Lignes / Espacement : sliders natifs avec champ éditable. */}
-                <div className={styles.vanillaRow}>
-                    <div className={styles.vanillaField}>
-                        <VC.IntSliderField
-                            label={translate("GridRoadGenerator.UI.Columns", "Columns")}
-                            value={columns}
-                            min={1}
-                            max={12}
-                            disabled={!fitMode}
-                            onChange={(value: number) => setColumns(Math.round(value))}
-                        />
-                    </div>
-                </div>
-                <div className={styles.vanillaRow}>
-                    <div className={styles.vanillaField}>
-                        <VC.IntSliderField
-                            label={translate("GridRoadGenerator.UI.Rows", "Rows")}
-                            value={rows}
-                            min={1}
-                            max={12}
-                            disabled={!fitMode}
-                            onChange={(value: number) => setRows(Math.round(value))}
-                        />
-                    </div>
-                </div>
-                <div className={styles.vanillaRow}>
-                    <div className={styles.vanillaField}>
-                        <VC.FloatSliderField
-                            label={translate("GridRoadGenerator.UI.SpacingShort", "Spacing")}
-                            value={spacing}
-                            min={10}
-                            max={300}
-                            fractionDigits={0}
-                            disabled={fitMode}
-                            onChange={(value: number) => setSpacing(value)}
-                        />
-                        <span className={styles.unitLabel}>m</span>
-                    </div>
-                </div>
-                <div className={styles.vanillaRow}>
-                    <div className={styles.vanillaField}>
-                        <VC.FloatSliderField
-                            label={translate("GridRoadGenerator.UI.Angle", "Angle")}
-                            value={angleOffset}
-                            min={-90}
-                            max={90}
-                            fractionDigits={0}
-                            disabled={false}
-                            onChange={(value: number) => setAngleOffset(value)}
-                        />
-                        <span className={styles.unitLabel}>°</span>
-                    </div>
-                </div>
-
-                {/* Culs-de-sac : quartier pavillonnaire (collectrices traversantes,
-                    résidentielles en impasse). Sliders et toggle Quinconce grisés
-                    tant que le mode est désactivé. */}
-                <div className={styles.vanillaRow}>
-                    <VC.Section
-                        focusKey={VF.FOCUS_DISABLED}
-                        title={translate("GridRoadGenerator.UI.CulDeSac", "Cul-de-sac")}>
-                        <VC.ToggleField
-                            value={culDeSacMode}
-                            disabled={false}
-                            onChange={(value: boolean) => setCulDeSacMode(value)}
-                        />
-                    </VC.Section>
-                </div>
-                <div className={styles.vanillaRow}>
-                    <div className={styles.vanillaField}>
-                        <VC.FloatSliderField
-                            label={translate("GridRoadGenerator.UI.CulDeSacDepth", "Depth")}
-                            value={culDeSacDepth}
-                            min={50}
-                            max={90}
-                            fractionDigits={0}
-                            disabled={!culDeSacMode}
-                            onChange={(value: number) => setCulDeSacDepth(value)}
-                        />
-                        <span className={styles.unitLabel}>%</span>
-                    </div>
-                </div>
-                <div className={styles.vanillaRow}>
-                    <div className={styles.vanillaField}>
-                        <VC.FloatSliderField
-                            label={translate("GridRoadGenerator.UI.CulDeSacRatio", "Frequency")}
-                            value={culDeSacRatio}
-                            min={0}
-                            max={100}
-                            fractionDigits={0}
-                            disabled={!culDeSacMode}
-                            onChange={(value: number) => setCulDeSacRatio(value)}
-                        />
-                        <span className={styles.unitLabel}>%</span>
-                    </div>
-                </div>
-                <div className={styles.vanillaRow}>
-                    <VC.Section
-                        focusKey={VF.FOCUS_DISABLED}
-                        title={translate("GridRoadGenerator.UI.Staggered", "Staggered")}>
-                        <VC.ToggleField
-                            value={staggered}
-                            disabled={!culDeSacMode}
-                            onChange={(value: boolean) => setStaggered(value)}
-                        />
-                    </VC.Section>
-                </div>
-
-                {/* Style du cercle de retournement en bout d'impasse : la taille suit
-                    automatiquement la largeur du réseau choisi, seul le style (habillage
-                    visuel de l'îlot central) se choisit ici. */}
-                <div className={styles.vanillaRow}>
-                    <VC.Section
-                        focusKey={VF.FOCUS_DISABLED}
-                        title={translate("GridRoadGenerator.UI.CulDeSacCapStyle", "Turnaround style")}>
-                        <div className={styles.styleButtons}>
-                            <button
-                                className={
-                                    culDeSacCapStyle === CAP_STYLE_ASPHALT
-                                        ? `${styles.styleButton} ${styles.styleButtonActive}`
-                                        : styles.styleButton
-                                }
-                                disabled={!culDeSacMode}
-                                onClick={() => setCulDeSacCapStyle(CAP_STYLE_ASPHALT)}>
-                                {translate("GridRoadGenerator.UI.CulDeSacCapStyleAsphalt", "Asphalt")}
-                            </button>
-                            <button
-                                className={
-                                    culDeSacCapStyle === CAP_STYLE_GRASS
-                                        ? `${styles.styleButton} ${styles.styleButtonActive}`
-                                        : styles.styleButton
-                                }
-                                disabled={!culDeSacMode}
-                                onClick={() => setCulDeSacCapStyle(CAP_STYLE_GRASS)}>
-                                {translate("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass")}
-                            </button>
-                            <button
-                                className={
-                                    culDeSacCapStyle === CAP_STYLE_TREES
-                                        ? `${styles.styleButton} ${styles.styleButtonActive}`
-                                        : styles.styleButton
-                                }
-                                disabled={!culDeSacMode}
-                                onClick={() => setCulDeSacCapStyle(CAP_STYLE_TREES)}>
-                                {translate("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees")}
-                            </button>
-                        </div>
-                    </VC.Section>
-                </div>
-
-                {/* Compteur de nœuds : rangée native label / valeur. */}
-                <div className={styles.vanillaRow}>
-                    <VC.Section
-                        focusKey={VF.FOCUS_DISABLED}
-                        title={translate("GridRoadGenerator.UI.NodesSelected", "Selected nodes")}>
-                        <div
-                            className={
-                                perimeterInvalid
-                                    ? `${VT.mouseToolOptions.numberField} ${styles.invalid}`
-                                    : VT.mouseToolOptions.numberField
-                            }>
-                            {nodeCount}
-                        </div>
-                    </VC.Section>
-                </div>
-
-                {/* Réseau utilisé pour la grille : clic = ouvre le sélecteur. */}
-                <div className={styles.vanillaRow}>
-                    <VC.Section
-                        focusKey={VF.FOCUS_DISABLED}
-                        title={translate("GridRoadGenerator.UI.RoadPrefab", "Road")}>
-                        <button
-                            className={styles.prefabRow}
-                            onClick={() => setPickerOpen((open) => !open)}>
-                            {roadPrefabIcon && <img src={roadPrefabIcon} className={styles.prefabIcon} />}
-                            <span className={styles.prefabName}>{roadDisplayName}</span>
-                            <span className={styles.prefabChevron}>›</span>
-                        </button>
-                    </VC.Section>
-                </div>
-
-                {/* Anarchy (mod tiers optionnel) : rangée visible seulement s'il est
-                    chargé ; état et toggle passent par les bindings d'Anarchy lui-même,
-                    donc synchronisés avec son bouton toolbar et son raccourci. */}
-                {anarchyAvailable && (
-                    <div className={styles.vanillaRow}>
-                        <VC.Section focusKey={VF.FOCUS_DISABLED} title="Anarchy">
-                            <VC.ToolButton
-                                src="coui://uil/Standard/Anarchy.svg"
-                                selected={anarchyEnabled}
-                                multiSelect={false}
-                                disabled={false}
+                    {/* Géométrie : mode, colonnes/lignes/espacement, angle, suivi du terrain. */}
+                    <SectionFoldout
+                        title={translate("GridRoadGenerator.UI.SectionGeometry", "Geometry")}
+                        expanded={geometryExpanded}
+                        onToggle={() => setGeometryExpanded((value) => !value)}>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
                                 focusKey={VF.FOCUS_DISABLED}
-                                tooltip={translate("GridRoadGenerator.UI.AnarchyTooltip", "Toggle Anarchy")}
-                                onSelect={toggleAnarchy}
-                                className={VT.toolButton.button}
-                            />
-                        </VC.Section>
-                    </div>
-                )}
+                                title={translate("GridRoadGenerator.UI.Mode", "Mode")}>
+                                <VC.ToolButton
+                                    src="Media/Tools/Snap Options/ZoneGrid.svg"
+                                    selected={fitMode}
+                                    multiSelect={false}
+                                    disabled={false}
+                                    focusKey={VF.FOCUS_DISABLED}
+                                    tooltip={translate("GridRoadGenerator.UI.ModeFit", "Fit to area")}
+                                    onSelect={() => setMode(MODE_FIT)}
+                                    className={VT.toolButton.button}
+                                />
+                                <VC.ToolButton
+                                    src="Media/Glyphs/Length.svg"
+                                    selected={!fitMode}
+                                    multiSelect={false}
+                                    disabled={false}
+                                    focusKey={VF.FOCUS_DISABLED}
+                                    tooltip={translate("GridRoadGenerator.UI.ModeFixed", "Fixed spacing")}
+                                    onSelect={() => setMode(MODE_FIXED)}
+                                    className={VT.toolButton.button}
+                                />
+                            </VC.Section>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.IntSliderField
+                                    label={translate("GridRoadGenerator.UI.Columns", "Columns")}
+                                    value={columns}
+                                    min={1}
+                                    max={12}
+                                    disabled={!fitMode}
+                                    onChange={(value: number) => setColumns(Math.round(value))}
+                                />
+                            </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.IntSliderField
+                                    label={translate("GridRoadGenerator.UI.Rows", "Rows")}
+                                    value={rows}
+                                    min={1}
+                                    max={12}
+                                    disabled={!fitMode}
+                                    onChange={(value: number) => setRows(Math.round(value))}
+                                />
+                            </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.FloatSliderField
+                                    label={translate("GridRoadGenerator.UI.SpacingShort", "Spacing")}
+                                    value={spacing}
+                                    min={10}
+                                    max={300}
+                                    fractionDigits={0}
+                                    disabled={fitMode}
+                                    onChange={(value: number) => setSpacing(value)}
+                                />
+                                <span className={styles.unitLabel}>m</span>
+                            </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.FloatSliderField
+                                    label={translate("GridRoadGenerator.UI.Angle", "Angle")}
+                                    value={angleOffset}
+                                    min={-90}
+                                    max={90}
+                                    fractionDigits={0}
+                                    disabled={false}
+                                    onChange={(value: number) => setAngleOffset(value)}
+                                />
+                                <span className={styles.unitLabel}>°</span>
+                            </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.FollowTerrain", "Follow terrain")}>
+                                <VC.ToggleField
+                                    value={followTerrain}
+                                    disabled={false}
+                                    onChange={(value: boolean) => setFollowTerrain(value)}
+                                />
+                            </VC.Section>
+                        </div>
+                    </SectionFoldout>
 
-                {/* Action : bouton primaire natif. Pas de bouton "Tout annuler" —
-                    redondant avec Échap (vide la sélection) et le clic droit
-                    (retire le dernier nœud), déjà bien plus rapides d'accès. */}
+                    {/* Culs-de-sac : quartier pavillonnaire (collectrices traversantes,
+                        résidentielles en impasse). Toggle d'activation dans l'en-tête de
+                        section ; sliders et champs restent visibles mais grisés tant que
+                        le mode est désactivé (comme avant), jamais masqués. */}
+                    <SectionFoldout
+                        title={translate("GridRoadGenerator.UI.CulDeSac", "Cul-de-sac")}
+                        headerExtra={
+                            <VC.ToggleField
+                                value={culDeSacMode}
+                                disabled={false}
+                                onChange={(value: boolean) => setCulDeSacMode(value)}
+                            />
+                        }
+                        expanded={culDeSacExpanded}
+                        onToggle={() => setCulDeSacExpanded((value) => !value)}>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.FloatSliderField
+                                    label={translate("GridRoadGenerator.UI.CulDeSacDepth", "Depth")}
+                                    value={culDeSacDepth}
+                                    min={50}
+                                    max={90}
+                                    fractionDigits={0}
+                                    disabled={!culDeSacMode}
+                                    onChange={(value: number) => setCulDeSacDepth(value)}
+                                />
+                                <span className={styles.unitLabel}>%</span>
+                            </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.FloatSliderField
+                                    label={translate("GridRoadGenerator.UI.CulDeSacRatio", "Frequency")}
+                                    value={culDeSacRatio}
+                                    min={0}
+                                    max={100}
+                                    fractionDigits={0}
+                                    disabled={!culDeSacMode}
+                                    onChange={(value: number) => setCulDeSacRatio(value)}
+                                />
+                                <span className={styles.unitLabel}>%</span>
+                            </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.Staggered", "Staggered")}>
+                                <VC.ToggleField
+                                    value={staggered}
+                                    disabled={!culDeSacMode}
+                                    onChange={(value: boolean) => setStaggered(value)}
+                                />
+                            </VC.Section>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.CulDeSacCapSize", "Turnaround size")}>
+                                <VC.DropdownField
+                                    items={capSizeItems}
+                                    value={culDeSacCapSize}
+                                    disabled={!culDeSacMode}
+                                    onChange={(value: number) => setCulDeSacCapSize(value)}
+                                />
+                            </VC.Section>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.CulDeSacCapStyle", "Turnaround style")}>
+                                <VC.DropdownField
+                                    items={capStyleItems}
+                                    value={culDeSacCapStyle}
+                                    disabled={!culDeSacMode}
+                                    onChange={handleCapStyleChange}
+                                />
+                            </VC.Section>
+                        </div>
+                    </SectionFoldout>
+
+                    {/* Sélection en cours + réseau utilisé. */}
+                    <SectionFoldout
+                        title={translate("GridRoadGenerator.UI.SectionSelection", "Selection")}
+                        expanded={selectionExpanded}
+                        onToggle={() => setSelectionExpanded((value) => !value)}>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.NodesSelected", "Selected nodes")}>
+                                <div
+                                    className={
+                                        perimeterInvalid
+                                            ? `${VT.mouseToolOptions.numberField} ${styles.invalid}`
+                                            : VT.mouseToolOptions.numberField
+                                    }>
+                                    {nodeCount}
+                                </div>
+                            </VC.Section>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.RoadPrefab", "Road")}>
+                                <button
+                                    className={styles.prefabRow}
+                                    onClick={() => setPickerOpen((open) => !open)}>
+                                    {roadPrefabIcon && <img src={roadPrefabIcon} className={styles.prefabIcon} />}
+                                    <span className={styles.prefabName}>{roadDisplayName}</span>
+                                    <span className={styles.prefabChevron}>›</span>
+                                </button>
+                            </VC.Section>
+                        </div>
+                        {/* Anarchy (mod tiers optionnel) : rangée visible seulement s'il est
+                            chargé ; état et toggle passent par les bindings d'Anarchy lui-même,
+                            donc synchronisés avec son bouton toolbar et son raccourci. */}
+                        {anarchyAvailable && (
+                            <div className={styles.vanillaRow}>
+                                <VC.Section focusKey={VF.FOCUS_DISABLED} title="Anarchy">
+                                    <VC.ToolButton
+                                        src="coui://uil/Standard/Anarchy.svg"
+                                        selected={anarchyEnabled}
+                                        multiSelect={false}
+                                        disabled={false}
+                                        focusKey={VF.FOCUS_DISABLED}
+                                        tooltip={translate("GridRoadGenerator.UI.AnarchyTooltip", "Toggle Anarchy")}
+                                        onSelect={toggleAnarchy}
+                                        className={VT.toolButton.button}
+                                    />
+                                </VC.Section>
+                            </div>
+                        )}
+                    </SectionFoldout>
+                </div>
+
+                {/* Action : bouton primaire natif, hors de la zone défilante ci-dessus
+                    (.content a son propre scroll) pour rester toujours visible. Pas de
+                    bouton "Tout annuler" — redondant avec Échap (vide la sélection) et
+                    le clic droit (retire le dernier nœud), déjà bien plus rapides d'accès. */}
                 <div className={styles.actions}>
                     <Button
                         variant="primary"
@@ -396,7 +477,6 @@ export const LegacyGridPanel = () => {
                         onSelect={generateGrid}>
                         {translate("GridRoadGenerator.UI.Generate", "Generate")}
                     </Button>
-                </div>
                 </div>
             </div>
 

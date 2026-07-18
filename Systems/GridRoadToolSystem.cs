@@ -45,15 +45,16 @@ namespace GridRoadGenerator.Systems
         private const int MaxPerimeterNodes = 50;
 
         // Cercles de retournement (props CulDeSac<Taille><Style>, ex. "CulDeSacMedium02")
-        // posés en bout de chaque impasse. Taille choisie automatiquement d'après la
-        // largeur du réseau (NetGeometryData.m_DefaultWidth) ; seuils approximatifs,
+        // posés en bout de chaque impasse. Taille choisie explicitement dans le panneau
+        // (CulDeSacCapSize) ou, en mode Auto, déduite de la largeur du réseau
+        // (NetGeometryData.m_DefaultWidth) selon les seuils ci-dessous ; approximatifs,
         // à affiner selon retour visuel en jeu — pas de valeur officielle exposée par
         // le jeu pour ces props.
-        /// <summary>Largeur (m) sous laquelle la taille "Small" est choisie.</summary>
+        /// <summary>Mode Auto : largeur (m) sous laquelle la taille "Small" est choisie.</summary>
         private const float CulDeSacCapSmallMaxWidth = 7f;
-        /// <summary>Largeur (m) sous laquelle la taille "Medium" est choisie (sinon "Large").</summary>
+        /// <summary>Mode Auto : largeur (m) sous laquelle la taille "Medium" est choisie (sinon "Large").</summary>
         private const float CulDeSacCapMediumMaxWidth = 14f;
-        /// <summary>Largeur (m) sous laquelle la taille "Large" est choisie (sinon "XL").</summary>
+        /// <summary>Mode Auto : largeur (m) sous laquelle la taille "Large" est choisie (sinon "XL").</summary>
         private const float CulDeSacCapLargeMaxWidth = 22f;
 
         public override string toolID => "Grid Road Tool";
@@ -673,7 +674,7 @@ namespace GridRoadGenerator.Systems
                 // (contrairement à l'ancienne tentative avec Game.Net.Roundabout, ce n'est
                 // pas un composant réseau posé après coup, mais un objet indépendant).
                 if (segment.IsCulDeSacEnd
-                    && TryResolveCulDeSacCapPrefab(roadWidth, _settings.CulDeSacCapStyle, out Entity capPrefab))
+                    && TryResolveCulDeSacCapPrefab(roadWidth, _settings.CulDeSacCapSize, _settings.CulDeSacCapStyle, out Entity capPrefab))
                 {
                     Entity capDefinition = commandBuffer.CreateEntity();
                     commandBuffer.AddComponent(capDefinition, new CreationDefinition
@@ -700,19 +701,27 @@ namespace GridRoadGenerator.Systems
         }
 
         /// <summary>
-        /// Résout (avec cache) le prefab "CulDeSac&lt;Taille&gt;&lt;Style&gt;" adapté à la
-        /// largeur de route donnée : Small/Medium/Large/XL selon CulDeSacCap*MaxWidth,
-        /// sauf pour le style Asphalt qui n'a pas de variante XL (repli sur Large).
-        /// Retourne false (avec un avis loggé une seule fois par nom manquant) si le
-        /// prefab n'existe pas dans cette version du jeu — la grille reste posée sans
-        /// cercle plutôt que d'échouer entièrement.
+        /// Résout (avec cache) le prefab "CulDeSac&lt;Taille&gt;&lt;Style&gt;" pour la taille et
+        /// le style demandés. sizeSetting == Auto : la taille est déduite de la largeur de
+        /// route (Small/Medium/Large/XL selon CulDeSacCap*MaxWidth) ; sinon la taille choisie
+        /// explicitement dans le panneau est utilisée telle quelle. Dans les deux cas, le style
+        /// Asphalt n'a pas de variante XL (repli sur Large). Retourne false (avec un avis loggé
+        /// une seule fois par nom manquant) si le prefab n'existe pas dans cette version du jeu —
+        /// la grille reste posée sans cercle plutôt que d'échouer entièrement.
         /// </summary>
-        private bool TryResolveCulDeSacCapPrefab(float roadWidth, CulDeSacCapStyle style, out Entity prefabEntity)
+        private bool TryResolveCulDeSacCapPrefab(float roadWidth, CulDeSacCapSize sizeSetting, CulDeSacCapStyle style, out Entity prefabEntity)
         {
-            string size = roadWidth < CulDeSacCapSmallMaxWidth ? "Small"
-                : roadWidth < CulDeSacCapMediumMaxWidth ? "Medium"
-                : roadWidth < CulDeSacCapLargeMaxWidth ? "Large"
-                : "XL";
+            string size = sizeSetting switch
+            {
+                CulDeSacCapSize.Small => "Small",
+                CulDeSacCapSize.Medium => "Medium",
+                CulDeSacCapSize.Large => "Large",
+                CulDeSacCapSize.XL => "XL",
+                _ => roadWidth < CulDeSacCapSmallMaxWidth ? "Small"
+                    : roadWidth < CulDeSacCapMediumMaxWidth ? "Medium"
+                    : roadWidth < CulDeSacCapLargeMaxWidth ? "Large"
+                    : "XL"
+            };
             string styleCode = style switch
             {
                 CulDeSacCapStyle.Asphalt => "01",
@@ -745,7 +754,8 @@ namespace GridRoadGenerator.Systems
         ///  - sur un nœud sélectionné s'il est assez proche (la grille rejoint le coin) ;
         ///  - sinon sur la route existante entre deux nœuds consécutifs (split de l'arête,
         ///    comme quand le joueur termine un tracé au milieu d'une route) ;
-        ///  - sinon extrémité libre, reprojetée sur la hauteur du terrain.
+        ///  - sinon extrémité libre, reprojetée sur la hauteur du terrain (sauf si
+        ///    FollowTerrain est désactivé : voir le point 3 ci-dessous).
         /// </summary>
         private CoursePos MakeCoursePos(float3 position, ref TerrainHeightData heightData, List<PerimeterEdge> perimeter)
         {
@@ -794,8 +804,14 @@ namespace GridRoadGenerator.Systems
                 return coursePos;
             }
 
-            // 3) Extrémité libre (ex. périmètre virtuel du mode 2 nœuds) : hauteur du terrain.
-            position.y = TerrainUtils.SampleHeight(ref heightData, position);
+            // 3) Extrémité libre (ex. périmètre virtuel du mode 2 nœuds) : reprojetée sur la
+            // hauteur du terrain si FollowTerrain est activé (défaut). Sinon, position.y garde
+            // la hauteur moyenne du périmètre déjà calculée par GridGenerator.GenerateGrid —
+            // la grille reste plate à cette altitude.
+            if (_settings.FollowTerrain)
+            {
+                position.y = TerrainUtils.SampleHeight(ref heightData, position);
+            }
             coursePos.m_Position = position;
             return coursePos;
         }

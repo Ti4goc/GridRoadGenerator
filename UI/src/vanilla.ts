@@ -39,6 +39,12 @@ const modulePaths: ModulePath[] = [
         path: "game-ui/editor/widgets/fields/toggle-field.tsx",
         components: ["ToggleField"],
     },
+    {
+        // Liste déroulante native (widget de l'éditeur) : taille et style du
+        // cercle de retournement (remplace les rangées de boutons collés).
+        path: "game-ui/editor/widgets/fields/dropdown-field.tsx",
+        components: ["DropdownField"],
+    },
 ];
 
 const themePaths: ThemePath[] = [

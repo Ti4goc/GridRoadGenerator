@@ -50,6 +50,16 @@ namespace GridRoadGenerator.Settings
         [SettingsUISection(GroupGrid)]
         public float AngleOffsetDegrees { get; set; }
 
+        /// <summary>
+        /// Vrai (défaut) : chaque point libre de la grille générée est reprojeté sur la
+        /// hauteur réelle du terrain (comportement historique). Faux : ces points gardent
+        /// la hauteur moyenne du périmètre sélectionné déjà calculée par GridGenerator —
+        /// la grille reste plate. Les points raccordés au réseau existant (nœuds/arêtes
+        /// du périmètre) gardent toujours leur hauteur réelle, dans les deux cas.
+        /// </summary>
+        [SettingsUISection(GroupGrid)]
+        public bool FollowTerrain { get; set; }
+
         [SettingsUISection(GroupCulDeSac)]
         public bool CulDeSacMode { get; set; }
 
@@ -65,7 +75,11 @@ namespace GridRoadGenerator.Settings
         [SettingsUISection(GroupCulDeSac)]
         public float CulDeSacRatio { get; set; }
 
-        /// <summary>Style du cercle de retournement posé en bout d'impasse (taille auto, style choisi ici).</summary>
+        /// <summary>Taille du cercle de retournement posé en bout d'impasse (Auto = déduite de la largeur du réseau).</summary>
+        [SettingsUISection(GroupCulDeSac)]
+        public CulDeSacCapSize CulDeSacCapSize { get; set; }
+
+        /// <summary>Style du cercle de retournement posé en bout d'impasse, combiné à CulDeSacCapSize.</summary>
         [SettingsUISection(GroupCulDeSac)]
         public CulDeSacCapStyle CulDeSacCapStyle { get; set; }
 
@@ -94,11 +108,13 @@ namespace GridRoadGenerator.Settings
             Rows = d.Rows;
             SpacingMeters = d.SpacingMeters;
             AngleOffsetDegrees = d.AngleOffsetDegrees;
+            FollowTerrain = true;
             CulDeSacMode = d.CulDeSacMode;
             CulDeSacDepth = d.CulDeSacDepth;
             Staggered = d.Staggered;
             CulDeSacRatio = d.CulDeSacRatio;
-            CulDeSacCapStyle = CulDeSacCapStyle.Grass;
+            CulDeSacCapSize = CulDeSacCapSize.Small;
+            CulDeSacCapStyle = CulDeSacCapStyle.Asphalt;
             RoadPrefabName = string.Empty;
         }
 

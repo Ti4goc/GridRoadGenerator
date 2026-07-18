@@ -45,10 +45,66 @@ $input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
     cursor: move;
 }
 
+// Zone défilante des sections : bornée à une fraction de la hauteur d'écran
+// pour que .actions (bouton Générer), rendu comme frère hors de ce bloc,
+// reste toujours visible même si toutes les sections sont dépliées.
 .content {
     display: flex;
     flex-direction: column;
-    padding: $panel-padding-y $panel-padding-x;
+    padding: $panel-padding-y $panel-padding-x 0;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+// Repli par section (mode/grille, culs-de-sac, sélection) : même langage visuel
+// que le chevron du panneau natif (icône vanilla, rotation CSS).
+.foldout {
+    & + .foldout {
+        margin-top: 10rem;
+    }
+}
+
+.foldoutHeader {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    cursor: pointer;
+    padding-bottom: 4rem;
+    border-bottom: 1rem solid #ffffff26;
+}
+
+.foldoutChevron {
+    width: 10rem;
+    height: 10rem;
+    margin-right: 6rem;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+}
+
+.foldoutChevronCollapsed {
+    width: 10rem;
+    height: 10rem;
+    margin-right: 6rem;
+    flex-shrink: 0;
+    transform: rotate(-90deg);
+}
+
+.foldoutTitle {
+    flex: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: #ffffffd9;
+}
+
+.foldoutHeaderExtra {
+    display: flex;
+    align-items: center;
+}
+
+.foldoutBody {
+    padding-top: 8rem;
 }
 
 .vanillaRow {
@@ -157,51 +213,6 @@ $input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
     font-size: var(--fontSizeM);
 }
 
-// Sélecteur de style du cercle de retournement : 3 boutons pleine largeur,
-// même logique visuelle que les onglets du sélecteur de réseau (prefabPicker).
-.styleButtons {
-    display: flex;
-    flex-direction: row;
-    gap: 4rem;
-    width: 100%;
-}
-
-.styleButton {
-    flex: 1;
-    min-width: 0;
-    padding: 5rem 4rem;
-    border-radius: 4rem;
-    background: #ffffff0d;
-    border: 1rem solid transparent;
-    color: #ffffffb3;
-    font-size: var(--fontSizeXS);
-    coh-font-fit-mode: shrink;
-    cursor: pointer;
-
-    &:hover {
-        background-color: #ffffff1a;
-    }
-
-    &:disabled {
-        color: #ffffff59;
-        cursor: default;
-
-        &:hover {
-            background-color: #ffffff0d;
-        }
-    }
-}
-
-.styleButtonActive {
-    background-color: #9645ff40;
-    border-color: #9645ff;
-    color: white;
-
-    &:hover {
-        background-color: #9645ff59;
-    }
-}
-
 .prefabIcon {
     width: 24rem;
     height: 24rem;
@@ -217,11 +228,13 @@ $input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
     white-space: nowrap;
 }
 
+// Frère de .content (pas un enfant) : reste hors de sa zone défilante, donc
+// toujours visible en bas du panneau, quel que soit l'état des sections.
 .actions {
     display: flex;
     flex-direction: column;
     row-gap: 6rem;
-    margin-top: 10rem;
+    padding: 10rem $panel-padding-x $panel-padding-y;
 }
 
 .applyButton {

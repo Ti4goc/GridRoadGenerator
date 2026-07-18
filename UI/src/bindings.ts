@@ -21,12 +21,15 @@ export const columns$ = bindValue<number>(mod.id, "COLUMNS", 3);
 export const rows$ = bindValue<number>(mod.id, "ROWS", 3);
 export const spacing$ = bindValue<number>(mod.id, "SPACING", 60);
 export const angleOffset$ = bindValue<number>(mod.id, "ANGLE_OFFSET", 0);
+export const followTerrain$ = bindValue<boolean>(mod.id, "FOLLOW_TERRAIN", true);
 export const culDeSacMode$ = bindValue<boolean>(mod.id, "CULDESAC_MODE", false);
 export const culDeSacDepth$ = bindValue<number>(mod.id, "CULDESAC_DEPTH", 75);
 export const staggered$ = bindValue<boolean>(mod.id, "STAGGERED", true);
 export const culDeSacRatio$ = bindValue<number>(mod.id, "CULDESAC_RATIO", 100);
+/// Taille du cercle de retournement : 0=Auto, 1=Small, 2=Medium, 3=Large, 4=XL (miroir de CulDeSacCapSize en C#).
+export const culDeSacCapSize$ = bindValue<number>(mod.id, "CULDESAC_CAP_SIZE", 1);
 /// Style du cercle de retournement : 0=Asphalte, 1=Engazonné, 2=Arbres (miroir de CulDeSacCapStyle en C#).
-export const culDeSacCapStyle$ = bindValue<number>(mod.id, "CULDESAC_CAP_STYLE", 1);
+export const culDeSacCapStyle$ = bindValue<number>(mod.id, "CULDESAC_CAP_STYLE", 0);
 export const roadPrefabName$ = bindValue<string>(mod.id, "ROAD_PREFAB_NAME", "");
 export const roadPrefabIcon$ = bindValue<string>(mod.id, "ROAD_PREFAB_ICON", "");
 export const roadPrefabAuto$ = bindValue<boolean>(mod.id, "ROAD_PREFAB_AUTO", true);
@@ -41,10 +44,12 @@ export const setColumns = (value: number) => trigger(mod.id, "SET_COLUMNS", valu
 export const setRows = (value: number) => trigger(mod.id, "SET_ROWS", value);
 export const setSpacing = (value: number) => trigger(mod.id, "SET_SPACING", value);
 export const setAngleOffset = (value: number) => trigger(mod.id, "SET_ANGLE_OFFSET", value);
+export const setFollowTerrain = (value: boolean) => trigger(mod.id, "SET_FOLLOW_TERRAIN", value);
 export const setCulDeSacMode = (value: boolean) => trigger(mod.id, "SET_CULDESAC_MODE", value);
 export const setCulDeSacDepth = (value: number) => trigger(mod.id, "SET_CULDESAC_DEPTH", value);
 export const setStaggered = (value: boolean) => trigger(mod.id, "SET_STAGGERED", value);
 export const setCulDeSacRatio = (value: number) => trigger(mod.id, "SET_CULDESAC_RATIO", value);
+export const setCulDeSacCapSize = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_SIZE", value);
 export const setCulDeSacCapStyle = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_STYLE", value);
 export const generateGrid = () => trigger(mod.id, "GENERATE");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");

@@ -12,7 +12,7 @@
 import React, { useRef, useState } from "react";
 import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
-import { Button, InfoRow, InfoSection, Panel } from "cs2/ui";
+import { Button, InfoRow, InfoSectionFoldout, Panel } from "cs2/ui";
 import styles from "./gridPanelNative.module.scss";
 import gridIcon from "./gridIcon.svg";
 import { PrefabPicker } from "./prefabPicker";
@@ -23,10 +23,12 @@ import {
     angleOffset$,
     canApply$,
     columns$,
+    culDeSacCapSize$,
     culDeSacCapStyle$,
     culDeSacDepth$,
     culDeSacMode$,
     culDeSacRatio$,
+    followTerrain$,
     generateGrid,
     mode$,
     nodeCount$,
@@ -36,10 +38,12 @@ import {
     rows$,
     setAngleOffset,
     setColumns,
+    setCulDeSacCapSize,
     setCulDeSacCapStyle,
     setCulDeSacDepth,
     setCulDeSacMode,
     setCulDeSacRatio,
+    setFollowTerrain,
     setMode,
     setRows,
     setSpacing,
@@ -53,6 +57,12 @@ import {
 
 const MODE_FIT = 0;
 const MODE_FIXED = 1;
+
+const CAP_SIZE_AUTO = 0;
+const CAP_SIZE_SMALL = 1;
+const CAP_SIZE_MEDIUM = 2;
+const CAP_SIZE_LARGE = 3;
+const CAP_SIZE_XL = 4;
 
 const CAP_STYLE_ASPHALT = 0;
 const CAP_STYLE_GRASS = 1;
@@ -104,10 +114,12 @@ export const NativeGridPanel = () => {
     const rows = useValue(rows$);
     const spacing = useValue(spacing$);
     const angleOffset = useValue(angleOffset$);
+    const followTerrain = useValue(followTerrain$);
     const culDeSacMode = useValue(culDeSacMode$);
     const culDeSacDepth = useValue(culDeSacDepth$);
     const staggered = useValue(staggered$);
     const culDeSacRatio = useValue(culDeSacRatio$);
+    const culDeSacCapSize = useValue(culDeSacCapSize$);
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
@@ -155,6 +167,54 @@ export const NativeGridPanel = () => {
         : "—";
     const title = (translate("GridRoadGenerator.UI.Title", "Grid Road Generator") ?? "").toUpperCase();
 
+    // Taille et style du cercle de retournement : deux listes déroulantes natives
+    // combinées pour désigner le prefab "CulDeSac<Taille><Style>" exact. Le style
+    // Asphalt n'a pas de variante XL (prefab inexistant) : l'option est masquée
+    // dans la liste plutôt que de proposer une combinaison invalide, et un
+    // changement de style vers Asphalt replie une sélection XL existante sur
+    // Large (même repli que celui déjà fait côté C# si la combinaison survient
+    // par un autre chemin, ex. Options > Mods).
+    const capSizeItems = [
+        { value: CAP_SIZE_AUTO, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeAuto", "Automatic (road width)") },
+        { value: CAP_SIZE_SMALL, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeSmall", "Small") },
+        { value: CAP_SIZE_MEDIUM, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeMedium", "Medium") },
+        { value: CAP_SIZE_LARGE, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeLarge", "Large") },
+        ...(culDeSacCapStyle !== CAP_STYLE_ASPHALT
+            ? [{ value: CAP_SIZE_XL, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeXL", "XL") }]
+            : []),
+    ];
+    const capStyleItems = [
+        { value: CAP_STYLE_ASPHALT, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleAsphalt", "Asphalt") },
+        { value: CAP_STYLE_GRASS, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass") },
+        { value: CAP_STYLE_TREES, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees") },
+    ];
+    const handleCapStyleChange = (value: number) => {
+        if (value === CAP_STYLE_ASPHALT && culDeSacCapSize === CAP_SIZE_XL) {
+            setCulDeSacCapSize(CAP_SIZE_LARGE);
+        }
+        setCulDeSacCapStyle(value);
+    };
+
+    // En-tête de la section "Cul-de-sac" : titre + toggle d'activation, dans le
+    // slot `header` du InfoSectionFoldout natif (même famille que le chevron du
+    // panneau lui-même). Le toggle stoppe la propagation du clic pour ne jamais
+    // déplier/replier la section quand on veut juste l'activer/désactiver.
+    const culDeSacFoldoutHeader = (
+        <div className={styles.foldoutHeaderRow}>
+            <span>{translate("GridRoadGenerator.UI.CulDeSac", "Cul-de-sac")}</span>
+            <span
+                className={styles.foldoutHeaderToggle}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}>
+                <VC.ToggleField
+                    value={culDeSacMode}
+                    disabled={false}
+                    onChange={(value: boolean) => setCulDeSacMode(value)}
+                />
+            </span>
+        </div>
+    );
+
     // En-tête composé à la main (icône + titre + chevron replier), passé au
     // slot `header` du Panel natif — le X de fermeture est rendu par Panel
     // lui-même (PanelTitleBarTheme.closeButton) via onClose, pas recréé ici.
@@ -180,17 +240,30 @@ export const NativeGridPanel = () => {
         </div>
     );
 
+    // Action : bouton primaire natif custom, passé au slot `footer` du Panel natif
+    // (hors de la zone de contenu défilante des sections) pour qu'il reste visible
+    // même si le panneau scrolle. Pas de bouton "Tout annuler" — redondant avec
+    // Échap et le clic droit.
+    const footer = !collapsed && (
+        <div className={styles.actions}>
+            <Button variant="primary" className={styles.applyButton} disabled={!canApply} onSelect={generateGrid}>
+                {translate("GridRoadGenerator.UI.Generate", "Generate")}
+            </Button>
+        </div>
+    );
+
     return (
         <div
             ref={panelRef}
             className={styles.panelWrapper}
             style={{ left: `${panelPosition.x}px`, top: `${panelPosition.y}px` }}>
-            <Panel header={header} onClose={toggleTool} className={styles.panel}>
+            <Panel header={header} footer={footer} onClose={toggleTool} className={styles.panel}>
                 {!collapsed && (
                     <>
-                        {/* Mode : boutons d'outil natifs, état sélectionné violet vanilla. */}
-                        <InfoSection>
-                            <InfoRow uppercase left={translate("GridRoadGenerator.UI.Mode", "Mode")} />
+                        {/* Géométrie : mode, colonnes/lignes/espacement, angle, suivi du terrain. */}
+                        <InfoSectionFoldout
+                            header={translate("GridRoadGenerator.UI.SectionGeometry", "Geometry")}
+                            initialExpanded>
                             <InfoRow
                                 left={translate("GridRoadGenerator.UI.ModeFit", "Fit to area")}
                                 right={
@@ -219,13 +292,6 @@ export const NativeGridPanel = () => {
                                     />
                                 }
                             />
-                        </InfoSection>
-
-                        {/* Colonnes / Lignes / Espacement / Angle : sliders natifs, gardent
-                            leur propre libellé interne (déjà éprouvé) plutôt qu'un InfoRow
-                            à label séparé, pour éviter un double-libellé. */}
-                        <InfoSection>
-                            <InfoRow uppercase left={translate("GridRoadGenerator.UI.Grid", "Grid")} />
                             <div className={styles.vanillaRow}>
                                 <div className={styles.vanillaField}>
                                     <VC.IntSliderField
@@ -278,21 +344,22 @@ export const NativeGridPanel = () => {
                                     <span className={styles.unitLabel}>°</span>
                                 </div>
                             </div>
-                        </InfoSection>
-
-                        {/* Culs-de-sac : quartier pavillonnaire. */}
-                        <InfoSection>
-                            <InfoRow uppercase left={translate("GridRoadGenerator.UI.CulDeSac", "Cul-de-sac")} />
                             <InfoRow
-                                left={translate("GridRoadGenerator.UI.CulDeSac", "Cul-de-sac")}
+                                left={translate("GridRoadGenerator.UI.FollowTerrain", "Follow terrain")}
                                 right={
                                     <VC.ToggleField
-                                        value={culDeSacMode}
+                                        value={followTerrain}
                                         disabled={false}
-                                        onChange={(value: boolean) => setCulDeSacMode(value)}
+                                        onChange={(value: boolean) => setFollowTerrain(value)}
                                     />
                                 }
                             />
+                        </InfoSectionFoldout>
+
+                        {/* Culs-de-sac : quartier pavillonnaire. Toggle d'activation dans
+                            l'en-tête de section ; le reste des contrôles reste visible mais
+                            grisé quand il est désactivé (comme avant), pas masqué. */}
+                        <InfoSectionFoldout header={culDeSacFoldoutHeader} initialExpanded>
                             <div className={styles.vanillaRow}>
                                 <div className={styles.vanillaField}>
                                     <VC.FloatSliderField
@@ -332,46 +399,33 @@ export const NativeGridPanel = () => {
                                 }
                             />
                             <InfoRow
-                                left={translate("GridRoadGenerator.UI.CulDeSacCapStyle", "Turnaround style")}
+                                left={translate("GridRoadGenerator.UI.CulDeSacCapSize", "Turnaround size")}
                                 right={
-                                    <div className={styles.styleButtons}>
-                                        <button
-                                            className={
-                                                culDeSacCapStyle === CAP_STYLE_ASPHALT
-                                                    ? `${styles.styleButton} ${styles.styleButtonActive}`
-                                                    : styles.styleButton
-                                            }
-                                            disabled={!culDeSacMode}
-                                            onClick={() => setCulDeSacCapStyle(CAP_STYLE_ASPHALT)}>
-                                            {translate("GridRoadGenerator.UI.CulDeSacCapStyleAsphalt", "Asphalt")}
-                                        </button>
-                                        <button
-                                            className={
-                                                culDeSacCapStyle === CAP_STYLE_GRASS
-                                                    ? `${styles.styleButton} ${styles.styleButtonActive}`
-                                                    : styles.styleButton
-                                            }
-                                            disabled={!culDeSacMode}
-                                            onClick={() => setCulDeSacCapStyle(CAP_STYLE_GRASS)}>
-                                            {translate("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass")}
-                                        </button>
-                                        <button
-                                            className={
-                                                culDeSacCapStyle === CAP_STYLE_TREES
-                                                    ? `${styles.styleButton} ${styles.styleButtonActive}`
-                                                    : styles.styleButton
-                                            }
-                                            disabled={!culDeSacMode}
-                                            onClick={() => setCulDeSacCapStyle(CAP_STYLE_TREES)}>
-                                            {translate("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees")}
-                                        </button>
-                                    </div>
+                                    <VC.DropdownField
+                                        items={capSizeItems}
+                                        value={culDeSacCapSize}
+                                        disabled={!culDeSacMode}
+                                        onChange={(value: number) => setCulDeSacCapSize(value)}
+                                    />
                                 }
                             />
-                        </InfoSection>
+                            <InfoRow
+                                left={translate("GridRoadGenerator.UI.CulDeSacCapStyle", "Turnaround style")}
+                                right={
+                                    <VC.DropdownField
+                                        items={capStyleItems}
+                                        value={culDeSacCapStyle}
+                                        disabled={!culDeSacMode}
+                                        onChange={handleCapStyleChange}
+                                    />
+                                }
+                            />
+                        </InfoSectionFoldout>
 
                         {/* Sélection en cours + réseau utilisé. */}
-                        <InfoSection>
+                        <InfoSectionFoldout
+                            header={translate("GridRoadGenerator.UI.SectionSelection", "Selection")}
+                            initialExpanded>
                             <InfoRow
                                 left={translate("GridRoadGenerator.UI.NodesSelected", "Selected nodes")}
                                 right={<span className={perimeterInvalid ? styles.invalid : undefined}>{nodeCount}</span>}
@@ -407,19 +461,7 @@ export const NativeGridPanel = () => {
                                     }
                                 />
                             )}
-                        </InfoSection>
-
-                        {/* Action : bouton primaire natif custom. Pas de bouton "Tout
-                            annuler" — redondant avec Échap et le clic droit. */}
-                        <div className={styles.actions}>
-                            <Button
-                                variant="primary"
-                                className={styles.applyButton}
-                                disabled={!canApply}
-                                onSelect={generateGrid}>
-                                {translate("GridRoadGenerator.UI.Generate", "Generate")}
-                            </Button>
-                        </div>
+                        </InfoSectionFoldout>
                     </>
                 )}
             </Panel>
