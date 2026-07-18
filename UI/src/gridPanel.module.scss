@@ -172,7 +172,5 @@ $input-border-hover-color: rgba(255, 255, 255, 0.35);
     font-weight: 600;
 }
 
-.clearButton {
-    padding: 5rem 8rem;
-    font-size: var(--fontSizeS);
-}
+// Le bouton "Annuler" (clearButton) n'a plus de classe custom : le variant
+// "flat" du Button vanilla rend avec son style natif pur, sans imitation.

@@ -343,7 +343,10 @@ export const GridPanel = () => {
                         onSelect={generateGrid}>
                         {translate("GridRoadGenerator.UI.Generate", "Generate")}
                     </Button>
-                    <Button variant="flat" className={styles.clearButton} onSelect={clearSelection}>
+                    {/* Style vanilla pur du variant "flat" : aucune classe custom
+                        appliquée dessus (contrairement à applyButton, qui reste
+                        custom pour rester visuellement "primaire"). */}
+                    <Button variant="flat" onSelect={clearSelection}>
                         {translate("GridRoadGenerator.UI.ClearAll", "Clear all")}
                     </Button>
                 </div>
