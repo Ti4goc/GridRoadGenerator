@@ -65,6 +65,8 @@ Node-selection, tooltip and UI architecture patterns adapted from [CS2-NetworkTo
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times-->
 	<Dependency Id="" />
+	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
+	<ExternalLink Type="github" Url="https://github.com/Ti4goc/GridRoadGenerator" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
 Initial release:
