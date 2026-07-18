@@ -32,6 +32,8 @@ export const culDeSacCapSize$ = bindValue<number>(mod.id, "CULDESAC_CAP_SIZE", 1
 export const culDeSacCapStyle$ = bindValue<number>(mod.id, "CULDESAC_CAP_STYLE", 0);
 export const jitterAmount$ = bindValue<number>(mod.id, "JITTER_AMOUNT", 0);
 export const curveAmount$ = bindValue<number>(mod.id, "CURVE_AMOUNT", 0);
+/// Mode d'orientation : 0=Ângulo fixo, 1=Seguir relevo (miroir de OrientationMode en C#).
+export const orientationMode$ = bindValue<number>(mod.id, "ORIENTATION_MODE", 0);
 export const roadPrefabName$ = bindValue<string>(mod.id, "ROAD_PREFAB_NAME", "");
 export const roadPrefabIcon$ = bindValue<string>(mod.id, "ROAD_PREFAB_ICON", "");
 export const roadPrefabAuto$ = bindValue<boolean>(mod.id, "ROAD_PREFAB_AUTO", true);
@@ -56,6 +58,7 @@ export const setCulDeSacCapStyle = (value: number) => trigger(mod.id, "SET_CULDE
 export const setJitterAmount = (value: number) => trigger(mod.id, "SET_JITTER_AMOUNT", value);
 export const regenerateJitterSeed = () => trigger(mod.id, "REGENERATE_JITTER_SEED");
 export const setCurveAmount = (value: number) => trigger(mod.id, "SET_CURVE_AMOUNT", value);
+export const setOrientationMode = (value: number) => trigger(mod.id, "SET_ORIENTATION_MODE", value);
 export const generateGrid = () => trigger(mod.id, "GENERATE");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");
 export const setPickerType = (value: number) => trigger(mod.id, "SET_PICKER_TYPE", value);

@@ -112,6 +112,15 @@ namespace GridRoadGenerator.Settings
         public float CurveAmount { get; set; }
 
         /// <summary>
+        /// Ângulo fixo (manuel, AngleOffsetDegrees) ou Seguir relevo (recalculé à chaque
+        /// génération pour suivre le terrain — voir OrientationMode et
+        /// GridRoadToolSystem.ComputeTerrainFollowAngle pour l'étendue réelle, volontairement
+        /// simplifiée, de ce chantier exploratoire).
+        /// </summary>
+        [SettingsUISection(GroupOrganic)]
+        public OrientationMode OrientationMode { get; set; }
+
+        /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
         /// "TypePrefab:Nom" (ex. "RoadPrefab:Small Road"). Vide = mode auto
         /// (suivre le prefab de l'outil route natif). Persisté mais pas montré
@@ -146,6 +155,7 @@ namespace GridRoadGenerator.Settings
             JitterAmount = d.JitterAmount;
             JitterSeed = d.JitterSeed;
             CurveAmount = 0f;
+            OrientationMode = OrientationMode.FixedAngle;
             RoadPrefabName = string.Empty;
         }
 

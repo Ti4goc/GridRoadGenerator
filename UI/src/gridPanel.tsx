@@ -26,6 +26,7 @@ import {
     jitterAmount$,
     mode$,
     nodeCount$,
+    orientationMode$,
     perimeterInvalid$,
     regenerateJitterSeed,
     roadPrefabIcon$,
@@ -42,6 +43,7 @@ import {
     setFollowTerrain,
     setJitterAmount,
     setMode,
+    setOrientationMode,
     setRows,
     setSpacing,
     setStaggered,
@@ -63,6 +65,9 @@ const CAP_SIZE_XL = 4;
 const CAP_STYLE_ASPHALT = 0;
 const CAP_STYLE_GRASS = 1;
 const CAP_STYLE_TREES = 2;
+
+const ORIENTATION_FIXED_ANGLE = 0;
+const ORIENTATION_FOLLOW_TERRAIN = 1;
 
 // ------------------------------------------------------------------
 // Panneau déplaçable : drag par la barre de titre, position persistée
@@ -162,6 +167,7 @@ export const LegacyGridPanel = () => {
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const jitterAmount = useValue(jitterAmount$);
     const curveAmount = useValue(curveAmount$);
+    const orientationMode = useValue(orientationMode$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
     const anarchyAvailable = useValue(anarchyAvailable$);
@@ -233,6 +239,14 @@ export const LegacyGridPanel = () => {
         }
         setCulDeSacCapStyle(value);
     };
+
+    // Chantier exploratoire : "Seguir relevo" ne recalcule qu'UN seul angle pour tout
+    // le périmètre (pas une orientation continue par bloc, voir le commentaire équivalent
+    // dans gridPanelNative.tsx et GridRoadToolSystem.ComputeTerrainFollowAngle).
+    const orientationModeItems = [
+        { value: ORIENTATION_FIXED_ANGLE, displayName: loc("GridRoadGenerator.UI.OrientationFixedAngle", "Fixed angle") },
+        { value: ORIENTATION_FOLLOW_TERRAIN, displayName: loc("GridRoadGenerator.UI.OrientationFollowTerrain", "Follow terrain") },
+    ];
 
     return (
         <div
@@ -322,7 +336,7 @@ export const LegacyGridPanel = () => {
                                     min={-90}
                                     max={90}
                                     fractionDigits={0}
-                                    disabled={false}
+                                    disabled={orientationMode === ORIENTATION_FOLLOW_TERRAIN}
                                     onChange={(value: number) => setAngleOffset(value)}
                                 />
                                 <span className={styles.unitLabel}>°</span>
@@ -457,6 +471,18 @@ export const LegacyGridPanel = () => {
                                 />
                                 <span className={styles.unitLabel}>%</span>
                             </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.OrientationMode", "Orientation mode")}>
+                                <VC.DropdownField
+                                    items={orientationModeItems}
+                                    value={orientationMode}
+                                    disabled={false}
+                                    onChange={(value: number) => setOrientationMode(value)}
+                                />
+                            </VC.Section>
                         </div>
                     </SectionFoldout>
 

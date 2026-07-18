@@ -606,10 +606,16 @@ namespace GridRoadGenerator.Systems
                 ? geometryData.m_DefaultWidth
                 : 0f;
 
+            TerrainHeightData heightData = m_TerrainSystem.GetHeightData();
+
             List<RoadSegmentDef> segments;
             try
             {
                 GridParameters parameters = _settings.ToGridParameters();
+                if (_settings.OrientationMode == OrientationMode.FollowTerrain)
+                {
+                    parameters.AngleOffsetDegrees = ComputeTerrainFollowAngle(ref heightData);
+                }
                 List<float3> perimeterPositions = BuildCurveAwarePerimeterPositions();
                 segments = GridGenerator.GenerateGrid(perimeterPositions, parameters, out int omittedNodeCount);
                 if (omittedNodeCount > 0 && !_omittedNodesLogged)
@@ -628,7 +634,6 @@ namespace GridRoadGenerator.Systems
                 return 0;
             }
 
-            TerrainHeightData heightData = m_TerrainSystem.GetHeightData();
             List<PerimeterEdge> perimeter = BuildPerimeterEdges();
             EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
             Unity.Mathematics.Random random = RandomSeed.Next().GetRandom(0);
@@ -960,6 +965,91 @@ namespace GridRoadGenerator.Systems
                     : GridGenerator.SampleCurve(bezier.d, bezier.c, bezier.b, bezier.a));
             }
             return result;
+        }
+
+        // ------------------------------------------------------------------
+        // Orientation "Seguir relevo" (chantier exploratoire, voir OrientationMode)
+        // ------------------------------------------------------------------
+
+        /// <summary>Distance (m) utilisée pour échantillonner le gradient de pente par différences finies.</summary>
+        private const float TerrainGradientSampleDistance = 20f;
+
+        /// <summary>
+        /// UNE SEULE orientation pour tout le périmètre sélectionné, alignée sur les
+        /// courbes de niveau du terrain (perpendiculaire à la pente la plus forte) au
+        /// centroïde de la sélection — PAS une orientation continue par bloc.
+        ///
+        /// Une vraie orientation variant en douceur bloc par bloc demanderait de
+        /// subdiviser le polygone en plusieurs zones, calculer un angle par zone, ET
+        /// raccorder proprement les grilles voisines à leurs frontières (nouveau
+        /// clipping polygone-contre-polygone, gestion des coutures) — non tenté ici :
+        /// le risque de grille cassée ou auto-intersectante est réel et le calcul n'est
+        /// pas vérifiable sans lancer le jeu. Cette version traite tout le périmètre
+        /// comme une seule grande zone, en réutilisant tel quel GenerateGrid (déjà
+        /// testé) via le même paramètre AngleOffsetDegrees que le mode manuel — aucune
+        /// nouvelle logique de génération, donc aucun nouveau risque de régression.
+        ///
+        /// Retourne 0° (repli sur l'orientation naturelle "arête la plus longue", sans
+        /// rotation additionnelle) si le terrain est trop plat pour qu'un gradient soit
+        /// significatif à cet endroit.
+        /// </summary>
+        private float ComputeTerrainFollowAngle(ref TerrainHeightData heightData)
+        {
+            if (_selectedPositions.Count < 2)
+            {
+                return 0f;
+            }
+
+            float3 centroid = float3.zero;
+            foreach (float3 p in _selectedPositions)
+            {
+                centroid += p;
+            }
+            centroid /= _selectedPositions.Count;
+
+            // Gradient de hauteur par différences finies centrées (X et Z).
+            float hx1 = TerrainUtils.SampleHeight(ref heightData, centroid + new float3(TerrainGradientSampleDistance, 0f, 0f));
+            float hx2 = TerrainUtils.SampleHeight(ref heightData, centroid - new float3(TerrainGradientSampleDistance, 0f, 0f));
+            float hz1 = TerrainUtils.SampleHeight(ref heightData, centroid + new float3(0f, 0f, TerrainGradientSampleDistance));
+            float hz2 = TerrainUtils.SampleHeight(ref heightData, centroid - new float3(0f, 0f, TerrainGradientSampleDistance));
+            float2 gradient = new float2(hx1 - hx2, hz1 - hz2) / (2f * TerrainGradientSampleDistance);
+
+            if (math.length(gradient) < 0.01f)
+            {
+                return 0f; // terrain trop plat ici : aucune direction de pente significative
+            }
+
+            // Direction des courbes de niveau (constante d'altitude) : perpendiculaire
+            // à la direction de plus forte pente.
+            float2 contourDir = math.normalize(new float2(-gradient.y, gradient.x));
+
+            // Orientation naturelle du polygone (arête la plus longue) : même heuristique
+            // que GridGenerator.BuildLocalFrame (privée à Core, donc reproduite ici —
+            // quelques lignes plutôt que d'exposer une API interne pour ce seul besoin).
+            int count = _selectedPositions.Count;
+            int bestIndex = 0;
+            float bestLengthSq = -1f;
+            for (int i = 0; i < count; i++)
+            {
+                float2 a = _selectedPositions[i].xz;
+                float2 b = _selectedPositions[(i + 1) % count].xz;
+                float lenSq = math.lengthsq(b - a);
+                if (lenSq > bestLengthSq)
+                {
+                    bestLengthSq = lenSq;
+                    bestIndex = i;
+                }
+            }
+            float2 naturalDir = math.normalize(_selectedPositions[(bestIndex + 1) % count].xz - _selectedPositions[bestIndex].xz);
+
+            // Angle signé entre l'orientation naturelle et les courbes de niveau, ramené
+            // dans [-90°, 90°) : la grille a une symétrie de 90° (échange colonnes/rangées),
+            // donc tout angle y est équivalent — c'est aussi la plage du slider manuel.
+            float angleRad = math.atan2(
+                naturalDir.x * contourDir.y - naturalDir.y * contourDir.x,
+                naturalDir.x * contourDir.x + naturalDir.y * contourDir.y);
+            float angleDeg = math.degrees(angleRad);
+            return ((angleDeg + 90f) % 180f + 180f) % 180f - 90f;
         }
     }
 }

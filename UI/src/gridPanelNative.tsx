@@ -35,6 +35,7 @@ import {
     jitterAmount$,
     mode$,
     nodeCount$,
+    orientationMode$,
     perimeterInvalid$,
     regenerateJitterSeed,
     roadPrefabIcon$,
@@ -51,6 +52,7 @@ import {
     setFollowTerrain,
     setJitterAmount,
     setMode,
+    setOrientationMode,
     setRows,
     setSpacing,
     setStaggered,
@@ -73,6 +75,9 @@ const CAP_SIZE_XL = 4;
 const CAP_STYLE_ASPHALT = 0;
 const CAP_STYLE_GRASS = 1;
 const CAP_STYLE_TREES = 2;
+
+const ORIENTATION_FIXED_ANGLE = 0;
+const ORIENTATION_FOLLOW_TERRAIN = 1;
 
 // ------------------------------------------------------------------
 // Position du panneau : draggable de cs2/ui n'accepte qu'une position
@@ -129,6 +134,7 @@ export const NativeGridPanel = () => {
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const jitterAmount = useValue(jitterAmount$);
     const curveAmount = useValue(curveAmount$);
+    const orientationMode = useValue(orientationMode$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
     const anarchyAvailable = useValue(anarchyAvailable$);
@@ -203,6 +209,15 @@ export const NativeGridPanel = () => {
         }
         setCulDeSacCapStyle(value);
     };
+
+    // Chantier exploratoire : "Seguir relevo" ne recalcule qu'UN seul angle pour tout
+    // le périmètre (pas une orientation continue par bloc, voir le commentaire détaillé
+    // dans GridRoadToolSystem.ComputeTerrainFollowAngle) — le slider Ângulo manuel est
+    // grisé dans ce mode puisqu'il est alors ignoré côté génération.
+    const orientationModeItems = [
+        { value: ORIENTATION_FIXED_ANGLE, displayName: loc("GridRoadGenerator.UI.OrientationFixedAngle", "Fixed angle") },
+        { value: ORIENTATION_FOLLOW_TERRAIN, displayName: loc("GridRoadGenerator.UI.OrientationFollowTerrain", "Follow terrain") },
+    ];
 
     // En-tête de la section "Cul-de-sac" : titre + toggle d'activation, dans le
     // slot `header` du InfoSectionFoldout natif (même famille que le chevron du
@@ -353,7 +368,7 @@ export const NativeGridPanel = () => {
                                         min={-90}
                                         max={90}
                                         fractionDigits={0}
-                                        disabled={false}
+                                        disabled={orientationMode === ORIENTATION_FOLLOW_TERRAIN}
                                         onChange={(value: number) => setAngleOffset(value)}
                                     />
                                     <span className={styles.unitLabel}>°</span>
@@ -473,6 +488,17 @@ export const NativeGridPanel = () => {
                                     <span className={styles.unitLabel}>%</span>
                                 </div>
                             </div>
+                            <InfoRow
+                                left={translate("GridRoadGenerator.UI.OrientationMode", "Orientation mode")}
+                                right={
+                                    <VC.DropdownField
+                                        items={orientationModeItems}
+                                        value={orientationMode}
+                                        disabled={false}
+                                        onChange={(value: number) => setOrientationMode(value)}
+                                    />
+                                }
+                            />
                         </InfoSectionFoldout>
 
                         {/* Sélection en cours + réseau utilisé. */}
