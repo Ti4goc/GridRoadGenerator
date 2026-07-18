@@ -46,6 +46,8 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<string> _roadPrefabNameBinding;
         private ValueBinding<string> _roadPrefabIconBinding;
         private ValueBinding<bool> _roadPrefabAutoBinding;
+        private ValueBinding<bool> _anarchyAvailableBinding;
+        private bool _anarchyAvailable;
 
         // Sélecteur de réseau (pattern PrefabSelectionUISystem de CS2-NetworkTools, MIT).
         private ValueBinding<int> _pickerTypeBinding;
@@ -112,9 +114,15 @@ namespace GridRoadGenerator.Systems
             AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB", HandlePickPrefab));
             AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO", () => _toolSystem.SetRoadPrefab(null)));
 
-            // Mod Anarchy (tiers, optionnel) : présence détectée une fois, côté TS la
-            // rangée lit/déclenche directement les bindings cohtml d'Anarchy lui-même.
-            AddBinding(new ValueBinding<bool>(BindingGroup, "ANARCHY_AVAILABLE", IsAnarchyLoaded()));
+            // Mod Anarchy (tiers, optionnel) : côté TS la rangée lit/déclenche
+            // directement les bindings cohtml d'Anarchy lui-même. La détection est
+            // réévaluée chaque frame TANT QU'elle est négative (jamais figée à
+            // OnCreate() : rien ne garantit que l'assembly Anarchy soit déjà chargée
+            // dans l'AppDomain à cet instant précis selon l'ordre de chargement des
+            // mods — un simple appel unique aurait pu manquer un Anarchy chargé après
+            // nous). Une fois vraie, elle le reste (une assembly ne se décharge pas),
+            // donc on arrête de vérifier.
+            AddBinding(_anarchyAvailableBinding = new ValueBinding<bool>(BindingGroup, "ANARCHY_AVAILABLE", false));
 
             AddBinding(new TriggerBinding<int>(BindingGroup, "SET_MODE", value =>
             {
@@ -186,6 +194,12 @@ namespace GridRoadGenerator.Systems
             _culDeSacDepthBinding.Update(_settings.CulDeSacDepth * 100f);
             _staggeredBinding.Update(_settings.Staggered);
             _culDeSacRatioBinding.Update(_settings.CulDeSacRatio);
+
+            if (!_anarchyAvailable && IsAnarchyLoaded())
+            {
+                _anarchyAvailable = true;
+                _anarchyAvailableBinding.Update(true);
+            }
 
             PrefabBase roadPrefab = _toolSystem.GetPrefab();
             _roadPrefabNameBinding.Update(roadPrefab != null ? roadPrefab.name : string.Empty);
