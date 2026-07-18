@@ -101,6 +101,17 @@ namespace GridRoadGenerator.Settings
         public int JitterSeed { get; set; }
 
         /// <summary>
+        /// Courbure (0–100 %) appliquée aux collectrices (lignes traversantes complètes,
+        /// jamais les impasses ni le périmètre) : purement une affaire de tracé de la
+        /// NetCourse posée (GridRoadToolSystem), pas de la géométrie calculée par
+        /// GridGenerator — la position des nœuds ne change pas, donc les rues
+        /// perpendiculaires s'y raccordent normalement, sans logique particulière.
+        /// </summary>
+        [SettingsUISlider(min = 0f, max = 100f, step = 5f, unit = "percentage")]
+        [SettingsUISection(GroupOrganic)]
+        public float CurveAmount { get; set; }
+
+        /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
         /// "TypePrefab:Nom" (ex. "RoadPrefab:Small Road"). Vide = mode auto
         /// (suivre le prefab de l'outil route natif). Persisté mais pas montré
@@ -134,6 +145,7 @@ namespace GridRoadGenerator.Settings
             CulDeSacCapStyle = CulDeSacCapStyle.Asphalt;
             JitterAmount = d.JitterAmount;
             JitterSeed = d.JitterSeed;
+            CurveAmount = 0f;
             RoadPrefabName = string.Empty;
         }
 

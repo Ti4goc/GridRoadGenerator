@@ -646,7 +646,13 @@ namespace GridRoadGenerator.Systems
                 }
 
                 NetCourse course = default;
-                course.m_Curve = NetUtils.StraightCurve(start.m_Position, end.m_Position);
+                // Courbure organique : seulement les collectrices (IsHorizontal, cf.
+                // EmitLine — jamais les impasses ni, en amont, le périmètre lui-même).
+                // Les extrémités start/end restent exactement les mêmes qu'en ligne
+                // droite : voir BuildCurvedCourse.
+                course.m_Curve = segment.IsHorizontal && _settings.CurveAmount > 0f
+                    ? BuildCurvedCourse(start.m_Position, end.m_Position)
+                    : NetUtils.StraightCurve(start.m_Position, end.m_Position);
                 course.m_Length = MathUtils.Length(course.m_Curve);
                 course.m_FixedIndex = -1;
 
@@ -699,6 +705,25 @@ namespace GridRoadGenerator.Systems
                 }
             }
             return created;
+        }
+
+        /// <summary>
+        /// Bézier légèrement bombée entre deux points (collectrices, "variation organique") :
+        /// délègue le calcul des points de contrôle à GridGenerator.ComputeCurveControlPoints
+        /// (pur, testable) et l'enveloppe dans un Bezier4x3 Colossal. Les extrémités (a, d)
+        /// restent EXACTEMENT start/end : le raccordement au périmètre et aux rues
+        /// perpendiculaires n'est jamais affecté, seule la forme du tracé ENTRE les deux
+        /// nœuds change — MathUtils.StartTangent/EndTangent (déjà utilisées plus bas) gèrent
+        /// nativement une Bezier courbe, aucun traitement spécial requis en aval.
+        /// </summary>
+        private Bezier4x3 BuildCurvedCourse(float3 start, float3 end)
+        {
+            if (math.distance(start.xz, end.xz) < 1e-3f)
+            {
+                return NetUtils.StraightCurve(start, end);
+            }
+            GridGenerator.ComputeCurveControlPoints(start, end, _settings.CurveAmount, out float3 b, out float3 c);
+            return new Bezier4x3 { a = start, b = b, c = c, d = end };
         }
 
         /// <summary>

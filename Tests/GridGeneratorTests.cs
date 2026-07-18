@@ -928,4 +928,106 @@ namespace GridRoadGenerator.Tests
             Assert.Equal(baselineRowZs, jitteredRowZs);
         }
     }
+
+    /// <summary>
+    /// Chantier 7 : ComputeCurveControlPoints (pur, Core) calcule les points de contrôle
+    /// intermédiaires d'une Bézier légèrement bombée pour les collectrices. La construction
+    /// réelle de la NetCourse (Bezier4x3, ECS) se fait dans GridRoadToolSystem.BuildCurvedCourse,
+    /// non testable ici — mais celui-ci ne fait qu'envelopper ce calcul autour de a=start,
+    /// d=end fixes, donc les propriétés critiques (aucun mouvement des extrémités,
+    /// dégénère en ligne droite à 0 %) sont entièrement couvertes au niveau pur.
+    /// </summary>
+    public class GridGeneratorCurveControlPointsTests
+    {
+        [Fact]
+        public void ZeroAmount_ControlPointsLieExactlyOnTheChord()
+        {
+            var start = new float3(0f, 0f, 0f);
+            var end = new float3(90f, 0f, 0f);
+
+            GridGenerator.ComputeCurveControlPoints(start, end, 0f, out float3 b, out float3 c);
+
+            // À 0 %, b et c sont les points au tiers/deux-tiers de la corde : une évaluation
+            // de Bézier cubique avec a,b,c,d colinéaires dégénère exactement en ligne droite,
+            // identique visuellement à NetUtils.StraightCurve (jamais appelé dans ce cas côté
+            // GridRoadToolSystem, qui garde le chemin d'origine, mais la propriété géométrique
+            // tient indépendamment).
+            Assert.Equal(new float3(30f, 0f, 0f), b);
+            Assert.Equal(new float3(60f, 0f, 0f), c);
+        }
+
+        [Fact]
+        public void NonZeroAmount_OffsetsPerpendicularToTheChordBySameAmount()
+        {
+            var start = new float3(0f, 0f, 0f);
+            var end = new float3(100f, 0f, 0f);
+
+            GridGenerator.ComputeCurveControlPoints(start, end, 100f, out float3 b, out float3 c);
+
+            // Décalage attendu (perpendiculaire à la corde, donc uniquement sur Z ici) :
+            // 100 % * longueur(100) * MaxCurveBulgeFraction.
+            float expectedOffset = 100f * GridGenerator.MaxCurveBulgeFraction;
+            Assert.Equal(0f, b.y, 3);
+            Assert.Equal(0f, c.y, 3);
+            // Même décalage transversal pour b et c (corde parallèle à l'axe X ici, donc
+            // le décalage perpendiculaire tombe entièrement sur Z).
+            Assert.Equal(expectedOffset, b.z, 3);
+            Assert.Equal(expectedOffset, c.z, 3);
+            // Toujours au tiers/deux-tiers le long de X, la courbure ne change pas ça.
+            Assert.Equal(100f / 3f, b.x, 2);
+            Assert.Equal(200f / 3f, c.x, 2);
+        }
+
+        [Fact]
+        public void OffsetMagnitude_ScalesWithCurveAmountAndSegmentLength()
+        {
+            var shortStart = new float3(0f, 0f, 0f);
+            var shortEnd = new float3(50f, 0f, 0f);
+            var longStart = new float3(0f, 0f, 0f);
+            var longEnd = new float3(150f, 0f, 0f);
+
+            GridGenerator.ComputeCurveControlPoints(shortStart, shortEnd, 50f, out float3 shortB, out _);
+            GridGenerator.ComputeCurveControlPoints(longStart, longEnd, 50f, out float3 longB, out _);
+
+            // Même pourcentage, segment 3x plus long : décalage 3x plus grand.
+            Assert.Equal(shortB.z * 3f, longB.z, 2);
+
+            GridGenerator.ComputeCurveControlPoints(shortStart, shortEnd, 100f, out float3 fullB, out _);
+            // Même longueur, pourcentage doublé (50→100) : décalage doublé.
+            Assert.Equal(shortB.z * 2f, fullB.z, 2);
+        }
+
+        [Fact]
+        public void EndpointsAreNeverPartOfTheComputation_OnlyIntermediateControlPointsReturned()
+        {
+            // ComputeCurveControlPoints ne retourne QUE b et c : a=start et d=end restent
+            // par construction exactement ce que l'appelant leur a passé (voir
+            // GridRoadToolSystem.BuildCurvedCourse) — le raccordement au périmètre et aux
+            // rues perpendiculaires ne peut donc jamais être affecté par la courbure.
+            var start = new float3(12f, 3f, -7f);
+            var end = new float3(112f, 3f, 43f);
+
+            GridGenerator.ComputeCurveControlPoints(start, end, 80f, out float3 b, out float3 c);
+
+            Assert.NotEqual(start, b);
+            Assert.NotEqual(end, c);
+            // b et c restent dans le voisinage du segment (pas d'échappée démesurée) :
+            // la distance à la corde reste dans l'ordre de grandeur de MaxCurveBulgeFraction.
+            float length = math.distance(start.xz, end.xz);
+            float maxExpectedOffset = length * GridGenerator.MaxCurveBulgeFraction * 1.01f;
+            Assert.True(math.distance(b, math.lerp(start, end, 1f / 3f)) <= maxExpectedOffset);
+            Assert.True(math.distance(c, math.lerp(start, end, 2f / 3f)) <= maxExpectedOffset);
+        }
+
+        [Fact]
+        public void DegenerateZeroLengthSegment_DoesNotThrow()
+        {
+            var point = new float3(5f, 0f, 5f);
+
+            GridGenerator.ComputeCurveControlPoints(point, point, 100f, out float3 b, out float3 c);
+
+            Assert.Equal(point, b);
+            Assert.Equal(point, c);
+        }
+    }
 }

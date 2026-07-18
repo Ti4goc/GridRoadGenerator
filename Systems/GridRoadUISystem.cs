@@ -47,6 +47,7 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<int> _culDeSacCapSizeBinding;
         private ValueBinding<int> _culDeSacCapStyleBinding;
         private ValueBinding<float> _jitterAmountBinding;
+        private ValueBinding<float> _curveAmountBinding;
         private ValueBinding<string> _roadPrefabNameBinding;
         private ValueBinding<string> _roadPrefabIconBinding;
         private ValueBinding<bool> _roadPrefabAutoBinding;
@@ -104,6 +105,7 @@ namespace GridRoadGenerator.Systems
             AddBinding(_culDeSacCapSizeBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_CAP_SIZE", (int)_settings.CulDeSacCapSize));
             AddBinding(_culDeSacCapStyleBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_CAP_STYLE", (int)_settings.CulDeSacCapStyle));
             AddBinding(_jitterAmountBinding = new ValueBinding<float>(BindingGroup, "JITTER_AMOUNT", _settings.JitterAmount));
+            AddBinding(_curveAmountBinding = new ValueBinding<float>(BindingGroup, "CURVE_AMOUNT", _settings.CurveAmount));
 
             // Prefab de réseau utilisé par la grille (rangée du panneau, ouvre le sélecteur).
             AddBinding(_roadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_NAME", string.Empty));
@@ -205,6 +207,11 @@ namespace GridRoadGenerator.Systems
                 _settings.JitterSeed = System.Environment.TickCount;
                 _settings.ApplyAndSave();
             }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_CURVE_AMOUNT", value =>
+            {
+                _settings.CurveAmount = math.clamp(value, 0f, 100f);
+                _settings.ApplyAndSave();
+            }));
 
             // Actions du panneau.
             AddBinding(new TriggerBinding(BindingGroup, "GENERATE", () => _toolSystem.RequestApply()));
@@ -232,6 +239,7 @@ namespace GridRoadGenerator.Systems
             _culDeSacCapSizeBinding.Update((int)_settings.CulDeSacCapSize);
             _culDeSacCapStyleBinding.Update((int)_settings.CulDeSacCapStyle);
             _jitterAmountBinding.Update(_settings.JitterAmount);
+            _curveAmountBinding.Update(_settings.CurveAmount);
 
             if (!_anarchyAvailable && IsAnarchyLoaded())
             {

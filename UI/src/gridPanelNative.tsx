@@ -29,6 +29,7 @@ import {
     culDeSacDepth$,
     culDeSacMode$,
     culDeSacRatio$,
+    curveAmount$,
     followTerrain$,
     generateGrid,
     jitterAmount$,
@@ -46,6 +47,7 @@ import {
     setCulDeSacDepth,
     setCulDeSacMode,
     setCulDeSacRatio,
+    setCurveAmount,
     setFollowTerrain,
     setJitterAmount,
     setMode,
@@ -126,6 +128,7 @@ export const NativeGridPanel = () => {
     const culDeSacCapSize = useValue(culDeSacCapSize$);
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const jitterAmount = useValue(jitterAmount$);
+    const curveAmount = useValue(curveAmount$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
     const anarchyAvailable = useValue(anarchyAvailable$);
@@ -434,8 +437,8 @@ export const NativeGridPanel = () => {
                             />
                         </InfoSectionFoldout>
 
-                        {/* Variation organique : jitter des lignes internes (chantiers
-                            suivants : courbure des collectrices, orientation par bloc). */}
+                        {/* Variation organique : jitter des lignes internes, courbure des
+                            collectrices (chantier suivant : orientation par bloc). */}
                         <InfoSectionFoldout
                             header={translate("GridRoadGenerator.UI.SectionOrganic", "Organic variation")}
                             initialExpanded>
@@ -456,6 +459,20 @@ export const NativeGridPanel = () => {
                             <Button variant="flat" className={styles.reseedButton} onSelect={regenerateJitterSeed}>
                                 {translate("GridRoadGenerator.UI.JitterReseedButton", "New seed")}
                             </Button>
+                            <div className={styles.vanillaRow}>
+                                <div className={styles.vanillaField}>
+                                    <VC.FloatSliderField
+                                        label={translate("GridRoadGenerator.UI.CurveAmount", "Curve")}
+                                        value={curveAmount}
+                                        min={0}
+                                        max={100}
+                                        fractionDigits={0}
+                                        disabled={false}
+                                        onChange={(value: number) => setCurveAmount(value)}
+                                    />
+                                    <span className={styles.unitLabel}>%</span>
+                                </div>
+                            </div>
                         </InfoSectionFoldout>
 
                         {/* Sélection en cours + réseau utilisé. */}
