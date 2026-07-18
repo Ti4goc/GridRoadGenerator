@@ -69,17 +69,34 @@ namespace GridRoadGenerator.Systems
             OverlayRenderSystem.Buffer buffer = m_OverlayRenderSystem.GetBuffer(out JobHandle dependencies);
             dependencies.Complete();
 
-            // Périmètre en construction : lignes fines entre nœuds consécutifs,
-            // et fermeture en pointillés dès qu'un polygone existe.
-            for (int i = 0; i + 1 < positions.Count; i++)
+            // Périmètre en construction : lignes fines entre nœuds consécutifs, et fermeture
+            // en pointillés dès qu'un polygone existe. Suit la courbe réelle de la route
+            // existante entre deux nœuds (rond-point, virage...) quand elle en relie deux
+            // directement, au lieu d'une corde droite qui ne représenterait pas la vraie
+            // géométrie prise en compte par la génération (voir BuildCurveAwarePerimeterPositions).
+            for (int i = 0; i + 1 < nodes.Count; i++)
             {
-                buffer.DrawLine(PerimeterLine, new Line3.Segment(positions[i], positions[i + 1]), PerimeterLineWidth);
+                if (m_GridRoadToolSystem.TryGetPerimeterSegmentCurve(nodes[i], nodes[i + 1], out Bezier4x3 curve))
+                {
+                    buffer.DrawCurve(PerimeterLine, curve, PerimeterLineWidth);
+                }
+                else
+                {
+                    buffer.DrawLine(PerimeterLine, new Line3.Segment(positions[i], positions[i + 1]), PerimeterLineWidth);
+                }
             }
-            if (positions.Count >= 3)
+            if (nodes.Count >= 3)
             {
-                buffer.DrawDashedLine(PerimeterLine,
-                    new Line3.Segment(positions[positions.Count - 1], positions[0]),
-                    PerimeterLineWidth, 2f, 2f);
+                if (m_GridRoadToolSystem.TryGetPerimeterSegmentCurve(nodes[nodes.Count - 1], nodes[0], out Bezier4x3 closingCurve))
+                {
+                    buffer.DrawDashedCurve(PerimeterLine, closingCurve, PerimeterLineWidth, 2f, 2f);
+                }
+                else
+                {
+                    buffer.DrawDashedLine(PerimeterLine,
+                        new Line3.Segment(positions[positions.Count - 1], positions[0]),
+                        PerimeterLineWidth, 2f, 2f);
+                }
             }
 
             // Nœuds sélectionnés : cercle plein violet.

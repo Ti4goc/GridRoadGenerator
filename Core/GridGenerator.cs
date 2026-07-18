@@ -579,5 +579,60 @@ namespace GridRoadGenerator.Core
             }
             return result;
         }
+
+        // ------------------------------------------------------------------
+        // Échantillonnage de courbe (périmètre courbe, ex. rond-point)
+        // ------------------------------------------------------------------
+
+        /// <summary>Distance cible (m) entre deux points échantillonnés le long d'une arête courbe.</summary>
+        public const float CurveSampleSpacing = 5f;
+
+        /// <summary>Garde-fou : nombre max de points insérés pour une seule arête (courbe très longue).</summary>
+        public const int MaxCurveSamplesPerEdge = 24;
+
+        /// <summary>
+        /// Échantillonne des points STRICTEMENT INTÉRIEURS (t dans ]0, 1[) le long d'une
+        /// courbe de Bézier cubique (a = départ, b/c = points de contrôle, d = arrivée),
+        /// pour approximer une arête EXISTANTE courbe (rond-point, virage...) dans le
+        /// polygone du périmètre — un polygone construit uniquement à partir des nœuds
+        /// coupe tout droit à travers la courbe (corde), ce qui peut faire déborder la
+        /// grille générée sur la route courbe elle-même. Les extrémités (a et d) ne sont
+        /// PAS incluses : ce sont déjà les positions des nœuds sélectionnés côté appelant.
+        /// Aucune dépendance à Colossal.Mathematics ici (Bezier4x3 est décomposée en 4
+        /// float3 par l'appelant) : Core reste testable sans le SDK du jeu.
+        /// </summary>
+        public static List<float3> SampleCurve(float3 a, float3 b, float3 c, float3 d)
+        {
+            var result = new List<float3>();
+            float length = CubicBezierLength(a, b, c, d);
+            int samples = math.clamp((int)math.ceil(length / CurveSampleSpacing), 0, MaxCurveSamplesPerEdge);
+            for (int i = 1; i <= samples; i++)
+            {
+                float t = (float)i / (samples + 1);
+                result.Add(CubicBezierPosition(a, b, c, d, t));
+            }
+            return result;
+        }
+
+        private static float3 CubicBezierPosition(float3 a, float3 b, float3 c, float3 d, float t)
+        {
+            float u = 1f - t;
+            return u * u * u * a + 3f * u * u * t * b + 3f * u * t * t * c + t * t * t * d;
+        }
+
+        /// <summary>Longueur approchée par ligne brisée sur 16 segments — suffisant pour choisir un nombre d'échantillons.</summary>
+        private static float CubicBezierLength(float3 a, float3 b, float3 c, float3 d)
+        {
+            const int segments = 16;
+            float length = 0f;
+            float3 prev = a;
+            for (int i = 1; i <= segments; i++)
+            {
+                float3 point = CubicBezierPosition(a, b, c, d, (float)i / segments);
+                length += math.distance(prev, point);
+                prev = point;
+            }
+            return length;
+        }
     }
 }

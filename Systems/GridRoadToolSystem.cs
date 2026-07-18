@@ -610,7 +610,8 @@ namespace GridRoadGenerator.Systems
             try
             {
                 GridParameters parameters = _settings.ToGridParameters();
-                segments = GridGenerator.GenerateGrid(_selectedPositions, parameters, out int omittedNodeCount);
+                List<float3> perimeterPositions = BuildCurveAwarePerimeterPositions();
+                segments = GridGenerator.GenerateGrid(perimeterPositions, parameters, out int omittedNodeCount);
                 if (omittedNodeCount > 0 && !_omittedNodesLogged)
                 {
                     _omittedNodesLogged = true;
@@ -834,25 +835,104 @@ namespace GridRoadGenerator.Systems
             {
                 Entity nodeA = _selectedNodes[i];
                 Entity nodeB = _selectedNodes[(i + 1) % count];
-                if (!EntityManager.TryGetBuffer(nodeA, true, out DynamicBuffer<ConnectedEdge> connectedEdges))
+                if (TryFindConnectingEdge(nodeA, nodeB, out Entity edgeEntity, out Curve curve))
+                {
+                    result.Add(new PerimeterEdge { m_Entity = edgeEntity, m_Curve = curve.m_Bezier });
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Cherche l'arête existante reliant directement deux nœuds (dans un sens ou
+        /// l'autre). Utilisé pour retrouver le tracé réel entre deux nœuds consécutifs
+        /// du périmètre — raccord de la grille (BuildPerimeterEdges), échantillonnage
+        /// du polygone (BuildCurveAwarePerimeterPositions) et rendu de l'aperçu
+        /// (TryGetPerimeterSegmentCurve, lu par GridRoadOverlaySystem).
+        /// </summary>
+        private bool TryFindConnectingEdge(Entity nodeA, Entity nodeB, out Entity edgeEntity, out Curve curve)
+        {
+            edgeEntity = Entity.Null;
+            curve = default;
+            if (!EntityManager.TryGetBuffer(nodeA, true, out DynamicBuffer<ConnectedEdge> connectedEdges))
+            {
+                return false;
+            }
+            for (int j = 0; j < connectedEdges.Length; j++)
+            {
+                Entity candidate = connectedEdges[j].m_Edge;
+                if (!EntityManager.TryGetComponent(candidate, out Edge edge))
                 {
                     continue;
                 }
-                for (int j = 0; j < connectedEdges.Length; j++)
+                bool connects = (edge.m_Start == nodeA && edge.m_End == nodeB)
+                             || (edge.m_Start == nodeB && edge.m_End == nodeA);
+                if (connects && EntityManager.TryGetComponent(candidate, out Curve curveComponent))
                 {
-                    Entity edgeEntity = connectedEdges[j].m_Edge;
-                    if (!EntityManager.TryGetComponent(edgeEntity, out Edge edge))
-                    {
-                        continue;
-                    }
-                    bool connects = (edge.m_Start == nodeA && edge.m_End == nodeB)
-                                 || (edge.m_Start == nodeB && edge.m_End == nodeA);
-                    if (connects && EntityManager.TryGetComponent(edgeEntity, out Curve curve))
-                    {
-                        result.Add(new PerimeterEdge { m_Entity = edgeEntity, m_Curve = curve.m_Bezier });
-                        break;
-                    }
+                    edgeEntity = candidate;
+                    curve = curveComponent;
+                    return true;
                 }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Résout la courbe existante (si elle existe) reliant deux nœuds consécutifs du
+        /// périmètre en cours de sélection, pour le rendu de l'aperçu overlay — retourne
+        /// faux (bezier par défaut) si aucune arête ne les relie directement, auquel cas
+        /// l'appelant retombe sur une ligne droite (cohérent avec la génération, qui ferait
+        /// de même dans ce cas : voir BuildCurveAwarePerimeterPositions).
+        /// </summary>
+        public bool TryGetPerimeterSegmentCurve(Entity nodeA, Entity nodeB, out Bezier4x3 bezier)
+        {
+            bool found = TryFindConnectingEdge(nodeA, nodeB, out _, out Curve curve);
+            bezier = found ? curve.m_Bezier : default;
+            return found;
+        }
+
+        /// <summary>
+        /// Construit la liste de points du périmètre utilisée pour générer la grille :
+        /// les nœuds sélectionnés, plus des points échantillonnés le long de chaque arête
+        /// EXISTANTE courbe qui relie deux nœuds consécutifs (rond-point, virage...) — sans
+        /// quoi le polygone couperait tout droit (corde) à travers la courbe, et la grille
+        /// générée pourrait déborder sur la route courbe elle-même.
+        ///
+        /// Le mode "2 nœuds = rectangle" de GridGenerator (coins opposés, voir son en-tête)
+        /// reste intentionnellement inchangé : l'échantillonnage ne s'applique qu'à partir
+        /// de 3 nœuds (un vrai périmètre tracé), jamais au raccourci 2 points.
+        /// </summary>
+        private List<float3> BuildCurveAwarePerimeterPositions()
+        {
+            int count = _selectedNodes.Count;
+            var result = new List<float3>(_selectedPositions.Count);
+            if (count == 0)
+            {
+                return result;
+            }
+
+            int pairCount = count >= 3 ? count : 0;
+            for (int i = 0; i < count; i++)
+            {
+                result.Add(_selectedPositions[i]);
+                if (i >= pairCount)
+                {
+                    continue;
+                }
+                Entity nodeA = _selectedNodes[i];
+                Entity nodeB = _selectedNodes[(i + 1) % count];
+                if (!TryFindConnectingEdge(nodeA, nodeB, out Entity edgeEntity, out Curve curve)
+                    || !EntityManager.TryGetComponent(edgeEntity, out Edge edge))
+                {
+                    continue;
+                }
+                // Sens de la Bezier (a→d) : si l'arête part de nodeB plutôt que nodeA,
+                // les points de contrôle sont échantillonnés dans l'ordre inverse (d→a)
+                // pour que la liste résultante avance bien de nodeA vers nodeB.
+                Bezier4x3 bezier = curve.m_Bezier;
+                result.AddRange(edge.m_Start == nodeA
+                    ? GridGenerator.SampleCurve(bezier.a, bezier.b, bezier.c, bezier.d)
+                    : GridGenerator.SampleCurve(bezier.d, bezier.c, bezier.b, bezier.a));
             }
             return result;
         }

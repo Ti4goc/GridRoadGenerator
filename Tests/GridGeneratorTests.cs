@@ -665,4 +665,140 @@ namespace GridRoadGenerator.Tests
             return GridGenerator.MinSegmentLength - 0.5f;
         }
     }
+
+    /// <summary>
+    /// Chantier 1 (bug prioritaire) : le polygone du périmètre doit suivre la courbe
+    /// RÉELLE d'une arête existante entre deux nœuds consécutifs (rond-point, virage...),
+    /// pas la corde droite entre eux — sinon la grille générée peut déborder sur la route
+    /// courbe elle-même. GridGenerator.SampleCurve (pur, sans dépendance ECS/Colossal.Mathematics
+    /// — voir son en-tête) échantillonne cette courbe ; GridRoadToolSystem.BuildCurveAwarePerimeterPositions
+    /// (non testable ici, dépend de l'ECS) l'insère dans la liste de points avant génération.
+    /// </summary>
+    public class GridGeneratorCurveSamplingTests
+    {
+        // ------------------------------------------------------------------
+        // SampleCurve seul : les points échantillonnés doivent suivre la courbe,
+        // pas la corde droite entre les extrémités.
+        // ------------------------------------------------------------------
+
+        [Fact]
+        public void SampleCurve_StraightBezier_ReturnsPointsOnTheChord()
+        {
+            // Points de contrôle alignés : la "courbe" est en fait une droite.
+            var a = new float3(0f, 0f, 0f);
+            var b = new float3(33f, 0f, 0f);
+            var c = new float3(66f, 0f, 0f);
+            var d = new float3(100f, 0f, 0f);
+
+            List<float3> samples = GridGenerator.SampleCurve(a, b, c, d);
+
+            Assert.NotEmpty(samples);
+            foreach (float3 p in samples)
+            {
+                // Doit rester sur la droite Y=0, Z=0, avec X strictement entre 0 et 100.
+                Assert.True(p.x > 0f && p.x < 100f);
+                Assert.Equal(0f, p.z, 3);
+            }
+        }
+
+        [Fact]
+        public void SampleCurve_BulgingBezier_PointsDeviateSignificantlyFromTheChord()
+        {
+            // Courbe qui s'écarte fortement de la corde a→d (renflement de 75 m sur 200 m
+            // de long) : simule une arête de rond-point entre deux nœuds sélectionnés.
+            var a = new float3(200f, 0f, 0f);
+            var b = new float3(100f, 0f, 0f);
+            var c = new float3(100f, 0f, 200f);
+            var d = new float3(200f, 0f, 200f);
+
+            List<float3> samples = GridGenerator.SampleCurve(a, b, c, d);
+
+            Assert.NotEmpty(samples);
+            // La corde droite a→d serait X=200 partout : au moins un point échantillonné
+            // doit s'en écarter nettement (le renflement, pas une corde).
+            Assert.Contains(samples, p => p.x < 170f);
+            // Le point le plus proche du milieu (z≈100) doit être proche du renflement
+            // maximal théorique (x=125, cf. formule du point médian d'une cubique).
+            float3 middle = samples.OrderBy(p => math.abs(p.z - 100f)).First();
+            Assert.True(middle.x < 150f, $"Point médian attendu proche du renflement (x<150), obtenu x={middle.x}.");
+        }
+
+        [Fact]
+        public void SampleCurve_ShortEdge_NeverExceedsMaxSamples()
+        {
+            // Courbe très longue (garde-fou MaxCurveSamplesPerEdge) : ne doit jamais
+            // produire un nombre de points disproportionné.
+            var a = new float3(0f, 0f, 0f);
+            var b = new float3(0f, 0f, 1000f);
+            var c = new float3(2000f, 0f, 1000f);
+            var d = new float3(2000f, 0f, 2000f);
+
+            List<float3> samples = GridGenerator.SampleCurve(a, b, c, d);
+
+            Assert.True(samples.Count <= GridGenerator.MaxCurveSamplesPerEdge);
+        }
+
+        // ------------------------------------------------------------------
+        // Intégration : un polygone dont un côté est échantillonné le long d'une
+        // courbe (au lieu de la corde droite entre ses deux extrémités) doit exclure
+        // la zone entre la corde et la courbe — la grille générée ne doit pas y
+        // déborder, contrairement à ce qui se produirait avec la corde seule.
+        // ------------------------------------------------------------------
+
+        [Fact]
+        public void CurveSampledBoundary_ExcludesBulgeArea_ComparedToStraightChord()
+        {
+            // Carré 200×200, mais le côté droit (x=200, de z=0 à z=200) est en réalité
+            // une arête de rond-point qui se renfonce jusqu'à x≈125 vers z=100 (voir
+            // SampleCurve_BulgingBezier ci-dessus pour la même courbe) — comme si la
+            // route courbe mordait sur ce qui serait autrement une zone constructible.
+            var a = new float3(200f, 0f, 0f);
+            var b = new float3(100f, 0f, 0f);
+            var c = new float3(100f, 0f, 200f);
+            var d = new float3(200f, 0f, 200f);
+            List<float3> curveSamples = GridGenerator.SampleCurve(a, b, c, d);
+
+            var straightChordPerimeter = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(200f, 0f, 0f),
+                new float3(200f, 0f, 200f),
+                new float3(0f, 0f, 200f),
+            };
+            var curveAwarePerimeter = new List<float3> { new float3(0f, 0f, 0f), a };
+            curveAwarePerimeter.AddRange(curveSamples);
+            curveAwarePerimeter.Add(d);
+            curveAwarePerimeter.Add(new float3(0f, 0f, 200f));
+
+            var parameters = new GridParameters
+            {
+                Mode = SpacingMode.FitToArea,
+                Rows = 9,
+                Columns = 9,
+                SpacingMeters = 60f,
+            };
+
+            var straightSegments = GridGenerator.GenerateGrid(straightChordPerimeter, parameters);
+            var curvedSegments = GridGenerator.GenerateGrid(curveAwarePerimeter, parameters);
+
+            Assert.NotEmpty(straightSegments);
+            Assert.NotEmpty(curvedSegments);
+
+            // Zone du renflement (autour de z=100) : la corde droite laisse la génération
+            // atteindre x proche de 200 ; le polygone qui suit la courbe doit rester
+            // nettement en retrait de cette limite dans la même zone.
+            float MaxXNearBulge(List<RoadSegmentDef> segments) => segments
+                .SelectMany(s => new[] { s.Start, s.End })
+                .Where(p => math.abs(p.z - 100f) < 20f)
+                .Select(p => p.x)
+                .DefaultIfEmpty(float.MinValue)
+                .Max();
+
+            float straightMaxX = MaxXNearBulge(straightSegments);
+            float curvedMaxX = MaxXNearBulge(curvedSegments);
+
+            Assert.True(curvedMaxX < straightMaxX - 30f,
+                $"Le polygone qui suit la courbe devrait exclure le renflement (x max attendu nettement < {straightMaxX}), obtenu {curvedMaxX}.");
+        }
+    }
 }
