@@ -186,6 +186,50 @@ $input-border-hover-color: #ffffff59;
     margin-right: 6rem;
 }
 
+// Sélecteur de style du cercle de retournement : 3 boutons pleine largeur.
+.styleButtons {
+    display: flex;
+    flex-direction: row;
+    gap: 4rem;
+    width: 100%;
+}
+
+.styleButton {
+    flex: 1;
+    min-width: 0;
+    padding: 5rem 4rem;
+    border-radius: 4rem;
+    background: #ffffff0d;
+    border: 1rem solid transparent;
+    color: #ffffffb3;
+    font-size: var(--fontSizeXS);
+    coh-font-fit-mode: shrink;
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+    }
+
+    &:disabled {
+        color: #ffffff59;
+        cursor: default;
+
+        &:hover {
+            background-color: #ffffff0d;
+        }
+    }
+}
+
+.styleButtonActive {
+    background-color: #9645ff40;
+    border-color: #9645ff;
+    color: white;
+
+    &:hover {
+        background-color: #9645ff59;
+    }
+}
+
 .prefabName {
     font-size: var(--fontSizeS);
     line-height: 1.25em;

@@ -44,6 +44,18 @@ namespace GridRoadGenerator.Systems
         /// <summary>Garde-fou : nombre max de nœuds du contour détecté au double-clic.</summary>
         private const int MaxPerimeterNodes = 50;
 
+        // Cercles de retournement (props CulDeSac<Taille><Style>, ex. "CulDeSacMedium02")
+        // posés en bout de chaque impasse. Taille choisie automatiquement d'après la
+        // largeur du réseau (NetGeometryData.m_DefaultWidth) ; seuils approximatifs,
+        // à affiner selon retour visuel en jeu — pas de valeur officielle exposée par
+        // le jeu pour ces props.
+        /// <summary>Largeur (m) sous laquelle la taille "Small" est choisie.</summary>
+        private const float CulDeSacCapSmallMaxWidth = 7f;
+        /// <summary>Largeur (m) sous laquelle la taille "Medium" est choisie (sinon "Large").</summary>
+        private const float CulDeSacCapMediumMaxWidth = 14f;
+        /// <summary>Largeur (m) sous laquelle la taille "Large" est choisie (sinon "XL").</summary>
+        private const float CulDeSacCapLargeMaxWidth = 22f;
+
         public override string toolID => "Grid Road Tool";
 
         private readonly List<Entity> _selectedNodes = new List<Entity>();
@@ -56,6 +68,11 @@ namespace GridRoadGenerator.Systems
         private Entity _lastClickedNode = Entity.Null;
         private float _lastClickTime = -1f;
         private readonly List<Entity> _pathScratch = new List<Entity>();
+
+        /// <summary>Cache "CulDeSac&lt;Taille&gt;&lt;Style&gt;" → entité résolue (Entity.Null = introuvable, mémorisé pour ne pas répéter la recherche).</summary>
+        private readonly Dictionary<string, Entity> _culDeSacCapPrefabCache = new Dictionary<string, Entity>();
+        /// <summary>Empêche le spam du log de prefab de cercle introuvable : un avis par nom manquant.</summary>
+        private readonly HashSet<string> _culDeSacCapMissingLogged = new HashSet<string>();
 
         /// <summary>Vrai si le dernier double-clic n'a pas trouvé de contour fermé (affiché en tooltip).</summary>
         public bool PerimeterDetectionFailed { get; private set; }
@@ -584,6 +601,9 @@ namespace GridRoadGenerator.Systems
             }
 
             Entity prefabEntity = m_PrefabSystem.GetEntity(roadPrefab);
+            float roadWidth = EntityManager.TryGetComponent(prefabEntity, out NetGeometryData geometryData)
+                ? geometryData.m_DefaultWidth
+                : 0f;
 
             List<RoadSegmentDef> segments;
             try
@@ -646,8 +666,78 @@ namespace GridRoadGenerator.Systems
                 commandBuffer.AddComponent(definition, default(Updated));
                 commandBuffer.AddComponent(definition, course);
                 created++;
+
+                // Cercle de retournement : posé comme un objet libre à la position/rotation
+                // déjà calculées pour ce même bout de segment, dans le même lot de
+                // définitions que la route — pas besoin d'attendre que le nœud réel existe
+                // (contrairement à l'ancienne tentative avec Game.Net.Roundabout, ce n'est
+                // pas un composant réseau posé après coup, mais un objet indépendant).
+                if (segment.IsCulDeSacEnd
+                    && TryResolveCulDeSacCapPrefab(roadWidth, _settings.CulDeSacCapStyle, out Entity capPrefab))
+                {
+                    Entity capDefinition = commandBuffer.CreateEntity();
+                    commandBuffer.AddComponent(capDefinition, new CreationDefinition
+                    {
+                        m_Prefab = capPrefab,
+                        m_RandomSeed = random.NextInt()
+                    });
+                    commandBuffer.AddComponent(capDefinition, default(Updated));
+                    commandBuffer.AddComponent(capDefinition, new ObjectDefinition
+                    {
+                        m_Position = end.m_Position,
+                        m_LocalPosition = end.m_Position,
+                        m_Rotation = end.m_Rotation,
+                        m_LocalRotation = end.m_Rotation,
+                        m_Scale = 1f,
+                        m_Intensity = 1f,
+                        m_Probability = 100,
+                        m_PrefabSubIndex = -1,
+                        m_ParentMesh = -1
+                    });
+                }
             }
             return created;
+        }
+
+        /// <summary>
+        /// Résout (avec cache) le prefab "CulDeSac&lt;Taille&gt;&lt;Style&gt;" adapté à la
+        /// largeur de route donnée : Small/Medium/Large/XL selon CulDeSacCap*MaxWidth,
+        /// sauf pour le style Asphalt qui n'a pas de variante XL (repli sur Large).
+        /// Retourne false (avec un avis loggé une seule fois par nom manquant) si le
+        /// prefab n'existe pas dans cette version du jeu — la grille reste posée sans
+        /// cercle plutôt que d'échouer entièrement.
+        /// </summary>
+        private bool TryResolveCulDeSacCapPrefab(float roadWidth, CulDeSacCapStyle style, out Entity prefabEntity)
+        {
+            string size = roadWidth < CulDeSacCapSmallMaxWidth ? "Small"
+                : roadWidth < CulDeSacCapMediumMaxWidth ? "Medium"
+                : roadWidth < CulDeSacCapLargeMaxWidth ? "Large"
+                : "XL";
+            string styleCode = style switch
+            {
+                CulDeSacCapStyle.Asphalt => "01",
+                CulDeSacCapStyle.Trees => "03",
+                _ => "02"
+            };
+            if (size == "XL" && styleCode == "01")
+            {
+                size = "Large"; // pas de variante "CulDeSacXL01" (asphalte pur)
+            }
+
+            string name = $"CulDeSac{size}{styleCode}";
+            if (_culDeSacCapPrefabCache.TryGetValue(name, out prefabEntity))
+            {
+                return prefabEntity != Entity.Null;
+            }
+
+            bool found = m_PrefabSystem.TryGetPrefab(new PrefabID(nameof(StaticObjectPrefab), name), out PrefabBase prefab);
+            prefabEntity = found ? m_PrefabSystem.GetEntity(prefab) : Entity.Null;
+            _culDeSacCapPrefabCache[name] = prefabEntity;
+            if (!found && _culDeSacCapMissingLogged.Add(name))
+            {
+                Mod.Log.Warn($"Prefab de cercle de retournement introuvable : {name} (StaticObjectPrefab). Impasses posées sans cercle pour cette taille/style.");
+            }
+            return found;
         }
 
         /// <summary>

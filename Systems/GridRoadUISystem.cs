@@ -43,6 +43,7 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<float> _culDeSacDepthBinding;
         private ValueBinding<bool> _staggeredBinding;
         private ValueBinding<float> _culDeSacRatioBinding;
+        private ValueBinding<int> _culDeSacCapStyleBinding;
         private ValueBinding<string> _roadPrefabNameBinding;
         private ValueBinding<string> _roadPrefabIconBinding;
         private ValueBinding<bool> _roadPrefabAutoBinding;
@@ -96,6 +97,7 @@ namespace GridRoadGenerator.Systems
             AddBinding(_culDeSacDepthBinding = new ValueBinding<float>(BindingGroup, "CULDESAC_DEPTH", _settings.CulDeSacDepth * 100f));
             AddBinding(_staggeredBinding = new ValueBinding<bool>(BindingGroup, "STAGGERED", _settings.Staggered));
             AddBinding(_culDeSacRatioBinding = new ValueBinding<float>(BindingGroup, "CULDESAC_RATIO", _settings.CulDeSacRatio));
+            AddBinding(_culDeSacCapStyleBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_CAP_STYLE", (int)_settings.CulDeSacCapStyle));
 
             // Prefab de réseau utilisé par la grille (rangée du panneau, ouvre le sélecteur).
             AddBinding(_roadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_NAME", string.Empty));
@@ -170,6 +172,11 @@ namespace GridRoadGenerator.Systems
                 _settings.CulDeSacRatio = math.clamp(value, 0f, 100f);
                 _settings.ApplyAndSave();
             }));
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_CULDESAC_CAP_STYLE", value =>
+            {
+                _settings.CulDeSacCapStyle = (CulDeSacCapStyle)math.clamp(value, 0, 2);
+                _settings.ApplyAndSave();
+            }));
 
             // Actions du panneau.
             AddBinding(new TriggerBinding(BindingGroup, "GENERATE", () => _toolSystem.RequestApply()));
@@ -193,6 +200,7 @@ namespace GridRoadGenerator.Systems
             _culDeSacDepthBinding.Update(_settings.CulDeSacDepth * 100f);
             _staggeredBinding.Update(_settings.Staggered);
             _culDeSacRatioBinding.Update(_settings.CulDeSacRatio);
+            _culDeSacCapStyleBinding.Update((int)_settings.CulDeSacCapStyle);
 
             if (!_anarchyAvailable && IsAnarchyLoaded())
             {

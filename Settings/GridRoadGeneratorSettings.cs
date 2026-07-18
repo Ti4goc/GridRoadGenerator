@@ -65,6 +65,10 @@ namespace GridRoadGenerator.Settings
         [SettingsUISection(GroupCulDeSac)]
         public float CulDeSacRatio { get; set; }
 
+        /// <summary>Style du cercle de retournement posé en bout d'impasse (taille auto, style choisi ici).</summary>
+        [SettingsUISection(GroupCulDeSac)]
+        public CulDeSacCapStyle CulDeSacCapStyle { get; set; }
+
         /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
         /// "TypePrefab:Nom" (ex. "RoadPrefab:Small Road"). Vide = mode auto
@@ -94,6 +98,7 @@ namespace GridRoadGenerator.Settings
             CulDeSacDepth = d.CulDeSacDepth;
             Staggered = d.Staggered;
             CulDeSacRatio = d.CulDeSacRatio;
+            CulDeSacCapStyle = CulDeSacCapStyle.Grass;
             RoadPrefabName = string.Empty;
         }
 

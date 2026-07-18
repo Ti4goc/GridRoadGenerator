@@ -14,6 +14,7 @@ import {
     angleOffset$,
     canApply$,
     columns$,
+    culDeSacCapStyle$,
     culDeSacDepth$,
     culDeSacMode$,
     culDeSacRatio$,
@@ -26,6 +27,7 @@ import {
     rows$,
     setAngleOffset,
     setColumns,
+    setCulDeSacCapStyle,
     setCulDeSacDepth,
     setCulDeSacMode,
     setCulDeSacRatio,
@@ -41,6 +43,10 @@ import {
 
 const MODE_FIT = 0;
 const MODE_FIXED = 1;
+
+const CAP_STYLE_ASPHALT = 0;
+const CAP_STYLE_GRASS = 1;
+const CAP_STYLE_TREES = 2;
 
 // ------------------------------------------------------------------
 // Panneau déplaçable : drag par la barre de titre, position persistée
@@ -94,6 +100,7 @@ export const LegacyGridPanel = () => {
     const culDeSacDepth = useValue(culDeSacDepth$);
     const staggered = useValue(staggered$);
     const culDeSacRatio = useValue(culDeSacRatio$);
+    const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
     const anarchyAvailable = useValue(anarchyAvailable$);
@@ -282,6 +289,48 @@ export const LegacyGridPanel = () => {
                             disabled={!culDeSacMode}
                             onChange={(value: boolean) => setStaggered(value)}
                         />
+                    </VC.Section>
+                </div>
+
+                {/* Style du cercle de retournement en bout d'impasse : la taille suit
+                    automatiquement la largeur du réseau choisi, seul le style (habillage
+                    visuel de l'îlot central) se choisit ici. */}
+                <div className={styles.vanillaRow}>
+                    <VC.Section
+                        focusKey={VF.FOCUS_DISABLED}
+                        title={translate("GridRoadGenerator.UI.CulDeSacCapStyle", "Turnaround style")}>
+                        <div className={styles.styleButtons}>
+                            <button
+                                className={
+                                    culDeSacCapStyle === CAP_STYLE_ASPHALT
+                                        ? `${styles.styleButton} ${styles.styleButtonActive}`
+                                        : styles.styleButton
+                                }
+                                disabled={!culDeSacMode}
+                                onClick={() => setCulDeSacCapStyle(CAP_STYLE_ASPHALT)}>
+                                {translate("GridRoadGenerator.UI.CulDeSacCapStyleAsphalt", "Asphalt")}
+                            </button>
+                            <button
+                                className={
+                                    culDeSacCapStyle === CAP_STYLE_GRASS
+                                        ? `${styles.styleButton} ${styles.styleButtonActive}`
+                                        : styles.styleButton
+                                }
+                                disabled={!culDeSacMode}
+                                onClick={() => setCulDeSacCapStyle(CAP_STYLE_GRASS)}>
+                                {translate("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass")}
+                            </button>
+                            <button
+                                className={
+                                    culDeSacCapStyle === CAP_STYLE_TREES
+                                        ? `${styles.styleButton} ${styles.styleButtonActive}`
+                                        : styles.styleButton
+                                }
+                                disabled={!culDeSacMode}
+                                onClick={() => setCulDeSacCapStyle(CAP_STYLE_TREES)}>
+                                {translate("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees")}
+                            </button>
+                        </div>
                     </VC.Section>
                 </div>
 

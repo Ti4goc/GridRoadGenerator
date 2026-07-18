@@ -25,6 +25,8 @@ export const culDeSacMode$ = bindValue<boolean>(mod.id, "CULDESAC_MODE", false);
 export const culDeSacDepth$ = bindValue<number>(mod.id, "CULDESAC_DEPTH", 75);
 export const staggered$ = bindValue<boolean>(mod.id, "STAGGERED", true);
 export const culDeSacRatio$ = bindValue<number>(mod.id, "CULDESAC_RATIO", 100);
+/// Style du cercle de retournement : 0=Asphalte, 1=Engazonné, 2=Arbres (miroir de CulDeSacCapStyle en C#).
+export const culDeSacCapStyle$ = bindValue<number>(mod.id, "CULDESAC_CAP_STYLE", 1);
 export const roadPrefabName$ = bindValue<string>(mod.id, "ROAD_PREFAB_NAME", "");
 export const roadPrefabIcon$ = bindValue<string>(mod.id, "ROAD_PREFAB_ICON", "");
 export const roadPrefabAuto$ = bindValue<boolean>(mod.id, "ROAD_PREFAB_AUTO", true);
@@ -43,6 +45,7 @@ export const setCulDeSacMode = (value: boolean) => trigger(mod.id, "SET_CULDESAC
 export const setCulDeSacDepth = (value: number) => trigger(mod.id, "SET_CULDESAC_DEPTH", value);
 export const setStaggered = (value: boolean) => trigger(mod.id, "SET_STAGGERED", value);
 export const setCulDeSacRatio = (value: number) => trigger(mod.id, "SET_CULDESAC_RATIO", value);
+export const setCulDeSacCapStyle = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_STYLE", value);
 export const generateGrid = () => trigger(mod.id, "GENERATE");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");
 export const setPickerType = (value: number) => trigger(mod.id, "SET_PICKER_TYPE", value);

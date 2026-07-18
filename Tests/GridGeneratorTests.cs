@@ -407,6 +407,27 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
+        public void CulDeSacBlock_MarksOnlyTheFreeEndAsCulDeSacEnd()
+        {
+            // Même géométrie que Ratio100_NoColumnBlockRemainsFullLength : 2 impasses,
+            // chacune partant d'une vraie collectrice (Start, jamais marqué) et
+            // s'arrêtant à son bout libre (End, doit être marqué IsCulDeSacEnd).
+            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(2));
+            var columns = ColumnSegments(segments);
+
+            Assert.Equal(2, columns.Count);
+            foreach (var segment in columns)
+            {
+                Assert.True(segment.IsCulDeSacEnd, "Le bout libre d'une impasse doit être marqué IsCulDeSacEnd.");
+            }
+
+            // Les collectrices traversantes (lignes horizontales) ne sont jamais des impasses.
+            var collectors = segments.Where(s => s.IsHorizontal).ToList();
+            Assert.NotEmpty(collectors);
+            Assert.All(collectors, s => Assert.False(s.IsCulDeSacEnd));
+        }
+
+        [Fact]
         public void StaggeredTrueVersusFalse_ProduceDifferentStartingCollectors()
         {
             // Même géométrie que Ratio100_NoColumnBlockRemainsFullLength. Sans

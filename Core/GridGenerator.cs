@@ -13,12 +13,18 @@ namespace GridRoadGenerator.Core
         public float3 Start;
         public float3 End;
         public bool IsHorizontal; // "horizontal" = parallèle à l'axe principal de la grille
+        /// <summary>
+        /// Vrai si End est le bout libre d'une impasse (CulDeSacMode) : l'appelant ECS
+        /// y pose un objet de cercle de retournement une fois le segment créé.
+        /// </summary>
+        public bool IsCulDeSacEnd;
 
-        public RoadSegmentDef(float3 start, float3 end, bool isHorizontal)
+        public RoadSegmentDef(float3 start, float3 end, bool isHorizontal, bool isCulDeSacEnd = false)
         {
             Start = start;
             End = end;
             IsHorizontal = isHorizontal;
+            IsCulDeSacEnd = isCulDeSacEnd;
         }
     }
 
@@ -395,7 +401,7 @@ namespace GridRoadGenerator.Core
                 return; // le bout de l'impasse serait quasi confondu avec la collectrice visée
             }
 
-            segments.Add(new RoadSegmentDef(start.world, stubWorld, isHorizontal: false));
+            segments.Add(new RoadSegmentDef(start.world, stubWorld, isHorizontal: false, isCulDeSacEnd: true));
         }
 
         /// <summary>Motif déterministe "une fois sur N" : N = round(100/ratio), jamais aléatoire.</summary>
