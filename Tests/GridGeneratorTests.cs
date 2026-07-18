@@ -945,7 +945,7 @@ namespace GridRoadGenerator.Tests
             var start = new float3(0f, 0f, 0f);
             var end = new float3(90f, 0f, 0f);
 
-            GridGenerator.ComputeCurveControlPoints(start, end, 0f, out float3 b, out float3 c);
+            GridGenerator.ComputeCurveControlPoints(start, end, 0f, GridGenerator.CurveStyle.Bulge, out float3 b, out float3 c);
 
             // À 0 %, b et c sont les points au tiers/deux-tiers de la corde : une évaluation
             // de Bézier cubique avec a,b,c,d colinéaires dégénère exactement en ligne droite,
@@ -962,7 +962,7 @@ namespace GridRoadGenerator.Tests
             var start = new float3(0f, 0f, 0f);
             var end = new float3(100f, 0f, 0f);
 
-            GridGenerator.ComputeCurveControlPoints(start, end, 100f, out float3 b, out float3 c);
+            GridGenerator.ComputeCurveControlPoints(start, end, 100f, GridGenerator.CurveStyle.Bulge, out float3 b, out float3 c);
 
             // Décalage attendu (perpendiculaire à la corde, donc uniquement sur Z ici) :
             // 100 % * longueur(100) * MaxCurveBulgeFraction.
@@ -986,13 +986,13 @@ namespace GridRoadGenerator.Tests
             var longStart = new float3(0f, 0f, 0f);
             var longEnd = new float3(150f, 0f, 0f);
 
-            GridGenerator.ComputeCurveControlPoints(shortStart, shortEnd, 50f, out float3 shortB, out _);
-            GridGenerator.ComputeCurveControlPoints(longStart, longEnd, 50f, out float3 longB, out _);
+            GridGenerator.ComputeCurveControlPoints(shortStart, shortEnd, 50f, GridGenerator.CurveStyle.Bulge, out float3 shortB, out _);
+            GridGenerator.ComputeCurveControlPoints(longStart, longEnd, 50f, GridGenerator.CurveStyle.Bulge, out float3 longB, out _);
 
             // Même pourcentage, segment 3x plus long : décalage 3x plus grand.
             Assert.Equal(shortB.z * 3f, longB.z, 2);
 
-            GridGenerator.ComputeCurveControlPoints(shortStart, shortEnd, 100f, out float3 fullB, out _);
+            GridGenerator.ComputeCurveControlPoints(shortStart, shortEnd, 100f, GridGenerator.CurveStyle.Bulge, out float3 fullB, out _);
             // Même longueur, pourcentage doublé (50→100) : décalage doublé.
             Assert.Equal(shortB.z * 2f, fullB.z, 2);
         }
@@ -1007,7 +1007,7 @@ namespace GridRoadGenerator.Tests
             var start = new float3(12f, 3f, -7f);
             var end = new float3(112f, 3f, 43f);
 
-            GridGenerator.ComputeCurveControlPoints(start, end, 80f, out float3 b, out float3 c);
+            GridGenerator.ComputeCurveControlPoints(start, end, 80f, GridGenerator.CurveStyle.Bulge, out float3 b, out float3 c);
 
             Assert.NotEqual(start, b);
             Assert.NotEqual(end, c);
@@ -1024,10 +1024,25 @@ namespace GridRoadGenerator.Tests
         {
             var point = new float3(5f, 0f, 5f);
 
-            GridGenerator.ComputeCurveControlPoints(point, point, 100f, out float3 b, out float3 c);
+            GridGenerator.ComputeCurveControlPoints(point, point, 100f, GridGenerator.CurveStyle.Bulge, out float3 b, out float3 c);
 
             Assert.Equal(point, b);
             Assert.Equal(point, c);
+        }
+
+        [Fact]
+        public void SCurve_OffsetsBAndCOnOppositeSides()
+        {
+            var start = new float3(0f, 0f, 0f);
+            var end = new float3(100f, 0f, 0f);
+
+            GridGenerator.ComputeCurveControlPoints(start, end, 100f, GridGenerator.CurveStyle.SCurve, out float3 b, out float3 c);
+
+            float expectedOffset = 100f * GridGenerator.MaxCurveBulgeFraction;
+            // Contrairement à Bulge (même signe pour b et c), SCurve décale b et c de part
+            // et d'autre de la corde : la courbe change de sens à mi-segment.
+            Assert.Equal(expectedOffset, b.z, 3);
+            Assert.Equal(-expectedOffset, c.z, 3);
         }
     }
 }

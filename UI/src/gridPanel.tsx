@@ -4,11 +4,12 @@
 import React, { useRef, useState } from "react";
 import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
-import { Button } from "cs2/ui";
 import styles from "./gridPanel.module.scss";
 import { locString } from "./locHelpers";
 import { PrefabPicker } from "./prefabPicker";
+import { SafeButton } from "./safeButton";
 import { VC, VF, VT } from "./vanilla";
+import { ViewSelection } from "./viewSelection";
 import {
     anarchyAvailable$,
     anarchyEnabled$,
@@ -21,6 +22,7 @@ import {
     culDeSacMode$,
     culDeSacRatio$,
     curveAmount$,
+    curveStyle$,
     followTerrain$,
     generateGrid,
     jitterAmount$,
@@ -40,6 +42,7 @@ import {
     setCulDeSacMode,
     setCulDeSacRatio,
     setCurveAmount,
+    setCurveStyle,
     setFollowTerrain,
     setJitterAmount,
     setMode,
@@ -65,6 +68,9 @@ const CAP_SIZE_XL = 4;
 const CAP_STYLE_ASPHALT = 0;
 const CAP_STYLE_GRASS = 1;
 const CAP_STYLE_TREES = 2;
+
+const CURVE_STYLE_BULGE = 0;
+const CURVE_STYLE_S = 1;
 
 const ORIENTATION_FIXED_ANGLE = 0;
 const ORIENTATION_FOLLOW_TERRAIN = 1;
@@ -121,12 +127,18 @@ type SectionFoldoutProps = {
     headerExtra?: React.ReactNode;
     expanded: boolean;
     onToggle: () => void;
+    /// Vrai si la section est verrouillée fermée (ex. Cul-de-sac quand le mode est
+    /// désactivé) : en-tête grisé, curseur par défaut. onToggle reste appelé au clic
+    /// mais l'appelant l'a déjà rendu no-op dans ce cas ; purement visuel ici.
+    locked?: boolean;
     children: React.ReactNode;
 };
 
-const SectionFoldout = ({ title, headerExtra, expanded, onToggle, children }: SectionFoldoutProps) => (
+const SectionFoldout = ({ title, headerExtra, expanded, onToggle, locked, children }: SectionFoldoutProps) => (
     <div className={styles.foldout}>
-        <div className={styles.foldoutHeader} onClick={onToggle}>
+        <div
+            className={locked ? `${styles.foldoutHeader} ${styles.foldoutHeaderLocked}` : styles.foldoutHeader}
+            onClick={onToggle}>
             <img
                 src="Media/Glyphs/ThickStrokeArrowDown.svg"
                 className={expanded ? styles.foldoutChevron : styles.foldoutChevronCollapsed}
@@ -167,6 +179,7 @@ export const LegacyGridPanel = () => {
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const jitterAmount = useValue(jitterAmount$);
     const curveAmount = useValue(curveAmount$);
+    const curveStyle = useValue(curveStyle$);
     const orientationMode = useValue(orientationMode$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
@@ -175,10 +188,12 @@ export const LegacyGridPanel = () => {
     const [pickerOpen, setPickerOpen] = useState(false);
     const [panelPosition, setPanelPosition] = useState<PanelPosition>(loadPanelPosition);
     const panelRef = useRef<HTMLDivElement>(null);
+    // Seule la géométrie s'ouvre par défaut ; les autres sections restent repliées
+    // tant que le joueur ne les déplie pas explicitement.
     const [geometryExpanded, setGeometryExpanded] = useState(true);
-    const [culDeSacExpanded, setCulDeSacExpanded] = useState(true);
-    const [organicExpanded, setOrganicExpanded] = useState(true);
-    const [selectionExpanded, setSelectionExpanded] = useState(true);
+    const [culDeSacExpanded, setCulDeSacExpanded] = useState(false);
+    const [organicExpanded, setOrganicExpanded] = useState(false);
+    const [selectionExpanded, setSelectionExpanded] = useState(false);
 
     if (!toolActive) {
         return null;
@@ -233,6 +248,10 @@ export const LegacyGridPanel = () => {
         { value: CAP_STYLE_GRASS, displayName: loc("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass") },
         { value: CAP_STYLE_TREES, displayName: loc("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees") },
     ];
+    const curveStyleItems = [
+        { value: CURVE_STYLE_BULGE, displayName: loc("GridRoadGenerator.UI.CurveStyleBulge", "Bulge") },
+        { value: CURVE_STYLE_S, displayName: loc("GridRoadGenerator.UI.CurveStyleSCurve", "S-curve") },
+    ];
     const handleCapStyleChange = (value: number) => {
         if (value === CAP_STYLE_ASPHALT && culDeSacCapSize === CAP_SIZE_XL) {
             setCulDeSacCapSize(CAP_SIZE_LARGE);
@@ -255,10 +274,39 @@ export const LegacyGridPanel = () => {
             style={{ left: `${panelPosition.x}px`, top: `${panelPosition.y}px` }}>
             <div className={styles.panel}>
                 <div className={styles.header} onMouseDown={startDrag}>
-                    {translate("GridRoadGenerator.UI.Title", "Grid Road Generator")}
+                    <span className={styles.headerTitle}>
+                        {translate("GridRoadGenerator.UI.Title", "Grid Road Generator")}
+                    </span>
+                    {/* Anarchy (mod tiers optionnel) : toujours visible dans l'en-tête, pas
+                        enterré dans une section repliable. État et toggle passent par les
+                        bindings d'Anarchy lui-même, donc synchronisés avec son bouton
+                        toolbar et son raccourci. */}
+                    {anarchyAvailable && (
+                        <span
+                            className={styles.headerAnarchy}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => event.stopPropagation()}>
+                            <VC.ToolButton
+                                src="coui://uil/Standard/Anarchy.svg"
+                                selected={anarchyEnabled}
+                                multiSelect={false}
+                                disabled={false}
+                                focusKey={VF.FOCUS_DISABLED}
+                                tooltip={translate("GridRoadGenerator.UI.AnarchyTooltip", "Toggle Anarchy")}
+                                onSelect={toggleAnarchy}
+                                className={VT.toolButton.button}
+                            />
+                        </span>
+                    )}
                 </div>
 
                 <div className={styles.content}>
+                  <div className={styles.scrollWrapper}>
+                    <VC.Scrollable>
+                    {/* "Vista" : pas une section repliable (voir viewSelection.tsx),
+                        toujours visible en haut, avant la première section. */}
+                    <ViewSelection />
+
                     {/* Géométrie : mode, colonnes/lignes/espacement, angle, suivi du terrain. */}
                     <SectionFoldout
                         title={translate("GridRoadGenerator.UI.SectionGeometry", "Geometry")}
@@ -368,8 +416,9 @@ export const LegacyGridPanel = () => {
                                 onChange={(value: boolean) => setCulDeSacMode(value)}
                             />
                         }
-                        expanded={culDeSacExpanded}
-                        onToggle={() => setCulDeSacExpanded((value) => !value)}>
+                        expanded={culDeSacMode && culDeSacExpanded}
+                        onToggle={() => culDeSacMode && setCulDeSacExpanded((value) => !value)}
+                        locked={!culDeSacMode}>
                         <div className={styles.vanillaRow}>
                             <div className={styles.vanillaField}>
                                 <VC.FloatSliderField
@@ -455,9 +504,9 @@ export const LegacyGridPanel = () => {
                                 <span className={styles.unitLabel}>m</span>
                             </div>
                         </div>
-                        <Button variant="flat" className={styles.reseedButton} onSelect={regenerateJitterSeed}>
+                        <SafeButton variant="flat" className={styles.reseedButton} onSelect={regenerateJitterSeed}>
                             {translate("GridRoadGenerator.UI.JitterReseedButton", "New seed")}
-                        </Button>
+                        </SafeButton>
                         <div className={styles.vanillaRow}>
                             <div className={styles.vanillaField}>
                                 <VC.FloatSliderField
@@ -471,6 +520,18 @@ export const LegacyGridPanel = () => {
                                 />
                                 <span className={styles.unitLabel}>%</span>
                             </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.CurveStyle", "Curve style")}>
+                                <VC.DropdownField
+                                    items={curveStyleItems}
+                                    value={curveStyle}
+                                    disabled={curveAmount === 0}
+                                    onChange={(value: number) => setCurveStyle(value)}
+                                />
+                            </VC.Section>
                         </div>
                         <div className={styles.vanillaRow}>
                             <VC.Section
@@ -518,40 +579,24 @@ export const LegacyGridPanel = () => {
                                 </button>
                             </VC.Section>
                         </div>
-                        {/* Anarchy (mod tiers optionnel) : rangée visible seulement s'il est
-                            chargé ; état et toggle passent par les bindings d'Anarchy lui-même,
-                            donc synchronisés avec son bouton toolbar et son raccourci. */}
-                        {anarchyAvailable && (
-                            <div className={styles.vanillaRow}>
-                                <VC.Section focusKey={VF.FOCUS_DISABLED} title="Anarchy">
-                                    <VC.ToolButton
-                                        src="coui://uil/Standard/Anarchy.svg"
-                                        selected={anarchyEnabled}
-                                        multiSelect={false}
-                                        disabled={false}
-                                        focusKey={VF.FOCUS_DISABLED}
-                                        tooltip={translate("GridRoadGenerator.UI.AnarchyTooltip", "Toggle Anarchy")}
-                                        onSelect={toggleAnarchy}
-                                        className={VT.toolButton.button}
-                                    />
-                                </VC.Section>
-                            </div>
-                        )}
                     </SectionFoldout>
+                    </VC.Scrollable>
+                  </div>
                 </div>
 
                 {/* Action : bouton primaire natif, hors de la zone défilante ci-dessus
-                    (.content a son propre scroll) pour rester toujours visible. Pas de
-                    bouton "Tout annuler" — redondant avec Échap (vide la sélection) et
-                    le clic droit (retire le dernier nœud), déjà bien plus rapides d'accès. */}
+                    (.content a sa propre zone défilante, VC.Scrollable natif) pour rester
+                    toujours visible. Pas de bouton "Tout annuler" — redondant avec Échap
+                    (vide la sélection) et le clic droit (retire le dernier nœud), déjà bien
+                    plus rapides d'accès. */}
                 <div className={styles.actions}>
-                    <Button
+                    <SafeButton
                         variant="primary"
                         className={styles.applyButton}
                         disabled={!canApply}
                         onSelect={generateGrid}>
                         {translate("GridRoadGenerator.UI.Generate", "Generate")}
-                    </Button>
+                    </SafeButton>
                     <span className={styles.generateHint}>
                         {translate(
                             "GridRoadGenerator.UI.GenerateHint",

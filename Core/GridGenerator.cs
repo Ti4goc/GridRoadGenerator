@@ -684,23 +684,34 @@ namespace GridRoadGenerator.Core
         /// <summary>Fraction max de la longueur du segment utilisée comme décalage latéral, à curveAmountPercent = 100.</summary>
         public const float MaxCurveBulgeFraction = 0.12f;
 
+        /// <summary>Forme de la courbure organique appliquée aux collectrices (voir ComputeCurveControlPoints).</summary>
+        public enum CurveStyle
+        {
+            /// <summary>Bombée d'un seul côté sur toute la longueur du segment (comportement historique).</summary>
+            Bulge = 0,
+            /// <summary>Bombée d'un côté sur la première moitié, de l'autre sur la seconde (forme en S).</summary>
+            SCurve = 1
+        }
+
         /// <summary>
         /// Calcule les deux points de contrôle intermédiaires d'une Bézier cubique
         /// légèrement bombée entre start et end (collectrices, jamais les impasses ni le
         /// périmètre — voir GridRoadToolSystem.BuildCurvedCourse, qui enveloppe ce
         /// résultat dans un Bezier4x3 Colossal). Décalage perpendiculaire à la corde
-        /// start→end, toujours du même côté, proportionnel à curveAmountPercent (0–100)
-        /// et à la longueur du segment (dans le plan XZ ; Y interpolé linéairement,
-        /// jamais affecté par le décalage). curveAmountPercent = 0 place b et c
-        /// EXACTEMENT sur la corde (mêmes points qu'une évaluation de courbe rendrait
-        /// pour une ligne droite) — jamais utilisé dans ce cas côté appelant, qui prend
-        /// alors le même chemin qu'avant l'existence de la courbure (NetUtils.StraightCurve),
-        /// mais la propriété tient quand même.
+        /// start→end, proportionnel à curveAmountPercent (0–100) et à la longueur du
+        /// segment (dans le plan XZ ; Y interpolé linéairement, jamais affecté par le
+        /// décalage). style détermine si b et c sont décalés du même côté (Bulge, une
+        /// seule bombe sur tout le segment) ou de côtés opposés (SCurve, la courbe
+        /// change de sens à mi-segment). curveAmountPercent = 0 place b et c EXACTEMENT
+        /// sur la corde (mêmes points qu'une évaluation de courbe rendrait pour une ligne
+        /// droite) — jamais utilisé dans ce cas côté appelant, qui prend alors le même
+        /// chemin qu'avant l'existence de la courbure (NetUtils.StraightCurve), mais la
+        /// propriété tient quand même.
         /// Les extrémités elles-mêmes (a = start, d = end) ne sont jamais recalculées ici :
         /// c'est la garantie que le raccordement au périmètre et aux rues perpendiculaires
         /// n'est jamais affecté par la courbure, seule la forme ENTRE les deux nœuds change.
         /// </summary>
-        public static void ComputeCurveControlPoints(float3 start, float3 end, float curveAmountPercent, out float3 b, out float3 c)
+        public static void ComputeCurveControlPoints(float3 start, float3 end, float curveAmountPercent, CurveStyle style, out float3 b, out float3 c)
         {
             float3 chord = end - start;
             float length = math.length(chord.xz);
@@ -715,9 +726,10 @@ namespace GridRoadGenerator.Core
             float2 perp = new float2(-dir.y, dir.x);
             float offset = (curveAmountPercent / 100f) * length * MaxCurveBulgeFraction;
             float3 offset3 = new float3(perp.x * offset, 0f, perp.y * offset);
+            float3 offsetC = style == CurveStyle.SCurve ? -offset3 : offset3;
 
             b = start + chord * (1f / 3f) + offset3;
-            c = start + chord * (2f / 3f) + offset3;
+            c = start + chord * (2f / 3f) + offsetC;
         }
     }
 }

@@ -18,6 +18,11 @@ $input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
 // utilisé tel quel dans prefabPicker.module.scss) : aucune variable CSS exposée
 // par le jeu pour cette teinte n'a été trouvée dans les sources accessibles.
 $accent-violet: #9645ff;
+// Dégradé de sélection des ToolButtons, valeurs reprises telles quelles de
+// CS2-NetworkTools (variables.module.scss : $color-nt-1/$color-nt-2/$color-nt-3 —
+// rgb(193, 44, 234) / rgb(150, 69, 255), converties en hex pour éviter tout passage
+// par une fonction couleur Sass — voir la note hex8/hsla() en tête de fichier).
+$accent-violet-gradient-start: #c12cea;
 
 // top/left sont posés en style inline (position draggable persistée) sur le
 // wrapper, pas sur .panel : .panel a overflow:hidden (coins arrondis), et le
@@ -26,7 +31,7 @@ $accent-violet: #9645ff;
 // qui lui n'a pas de overflow:hidden.
 .panelWrapper {
     position: absolute;
-    width: 300rem;
+    width: 400rem;
     pointer-events: auto;
 }
 
@@ -35,20 +40,50 @@ $accent-violet: #9645ff;
     background-color: #181825bf; // rgba(24, 24, 37, 0.75)
     backdrop-filter: var(--panelBlur);
     border-radius: 12rem;
+    // Léger contour violet (même accent que le soulignement du titre et les bordures
+    // de foldout ci-dessous) tout autour du panneau, pas seulement sur le titre.
+    border: 2rem solid #9645ff8c;
     color: white;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+
+    // Dégradé violet du mod sur l'état "sélectionné" de TOUT ToolButton natif dans le
+    // panneau (Mode, Vista, Anarchy...), à la place de sa teinte vanilla par défaut —
+    // même pattern que CS2-NetworkTools (toolActionPanel.module.scss). Un seul sélecteur
+    // au niveau du panneau plutôt que dupliqué par rangée : un bouton "selected" est un
+    // descendant DOM de .panel quel que soit le module SCSS qui définit ses propres
+    // classes (viewSelection.module.scss, etc.), donc ce sélecteur les couvre tous.
+    button[class^="selected"],
+    button[class*="selected"] {
+        background-image: linear-gradient(to bottom, $accent-violet-gradient-start 0%, $accent-violet 100%) !important;
+        background-color: $accent-violet-gradient-start !important;
+    }
 }
 
 // Barre de titre : poignée de déplacement du panneau. Fin soulignement violet
 // (accent du thème vanilla) : seule touche de couleur du panneau, pas de fond plein.
 .header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
     padding: $panel-padding-y $panel-padding-x 8rem;
     font-weight: 600;
     color: white;
     cursor: move;
     border-bottom: 1rem solid $accent-violet;
+}
+
+.headerTitle {
+    flex: 1;
+}
+
+// Bouton Anarchy (mod tiers optionnel) dans l'en-tête, à côté du titre : toujours
+// visible, jamais enterré dans une section repliable.
+.headerAnarchy {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
 }
 
 // Zone défilante des sections : bornée à une fraction de la hauteur d'écran
@@ -59,7 +94,15 @@ $accent-violet: #9645ff;
     flex-direction: column;
     padding: $panel-padding-y $panel-padding-x 0;
     max-height: 70vh;
-    overflow-y: auto;
+}
+
+// Zone défilante native (VC.Scrollable, même composant que prefabPicker.tsx) : le
+// scroll/la barre viennent du thème vanilla du jeu, pas d'un overflow CSS custom.
+// flex:1 + min-height:0 (même recette que .list dans prefabPicker.module.scss) donne
+// à Scrollable une hauteur bornée à l'intérieur de .content (max-height: 70vh).
+.scrollWrapper {
+    flex: 1;
+    min-height: 0;
 }
 
 // Repli par section (mode/grille, culs-de-sac, sélection) : même langage visuel
@@ -77,6 +120,13 @@ $accent-violet: #9645ff;
     cursor: pointer;
     padding-bottom: 4rem;
     border-bottom: 1rem solid #9645ff59; // accent violet, atténué (3 sections par panneau)
+}
+
+// Section verrouillée fermée (Cul-de-sac quand le mode est désactivé) : signale
+// visuellement qu'il n'y a rien à déplier tant que le toggle d'activation reste éteint.
+.foldoutHeaderLocked {
+    cursor: default;
+    opacity: 0.6;
 }
 
 .foldoutChevron {
@@ -239,16 +289,24 @@ $accent-violet: #9645ff;
 .actions {
     display: flex;
     flex-direction: column;
-    row-gap: 6rem;
+    // Centre le bouton ET l'indication en dessous l'un par rapport à l'autre : sans ça,
+    // align-items:stretch (défaut) étire l'indication (span pleine largeur) mais pas le
+    // bouton (largeur intrinsèque), donc text-align:center sur l'indication la centre par
+    // rapport au panneau entier, pas par rapport au bouton, plus étroit, au-dessus.
+    align-items: center;
     padding: 10rem $panel-padding-x $panel-padding-y;
 }
 
 // Indication permanente (pas une tooltip au survol) : discrète, toujours visible.
+// margin-top plutôt que row-gap sur .actions : cohtml (moteur CSS du jeu) ignore
+// silencieusement gap/row-gap sur les conteneurs flex — déjà vu avec d'autres
+// propriétés CSS modernes (hsla(), pseudo-éléments) mal supportées ici.
 .generateHint {
     font-size: var(--fontSizeXS);
     line-height: 1.3em;
     color: #ffffff80;
     text-align: center;
+    margin-top: 12rem;
 }
 
 .applyButton {

@@ -1,35 +1,79 @@
 <Publish>
 	<!--Id must be set in order to update existed mod. it is not required for publishing mod for the first time-->
-	<ModId Value="" />
+	<ModId Value="151745" />
 	<!--Name of the mod to display to players-->
 	<DisplayName Value="Grid Road Generator" />
 	<!--Short description of the mod-->
-	<ShortDescription Value="Select road nodes forming any perimeter and generate a perfect inner road grid." />
+	<ShortDescription Value="Select road nodes to outline any perimeter, then generate a perfectly-fitted grid of internal streets — cul-de-sacs, organic variation and full curve control included. Available in 16 languages." />
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
 	<LongDescription>
 # Grid Road Generator
 
-Select several existing road nodes (the corners of a perimeter — any polygon: rectangle, L-shape, rotated, irregular), then confirm to generate a perfect grid of inner roads, oriented on the perimeter's longest edge and clipped to its boundaries.
+Select several existing road nodes — the corners of any perimeter (rectangle, L-shape, rotated, irregular) — then confirm to generate a perfect grid of inner roads, oriented on the perimeter's longest edge and clipped to its boundaries.
 
-- Spacing, rows and columns configurable in Options &gt; Mods
-- Uses the road prefab currently selected in the road tool (falls back to a small two-lane road)
+## Geometry
+- **Fit to area** (rows/columns spread evenly) or **fixed spacing** (distance in meters, road count computed automatically)
+- Columns, rows, spacing, additional angle offset
+- Follow terrain, or keep the generated grid flat at the perimeter's average elevation
+
+## Cul-de-sac (suburban layout)
+- Turns the cross streets into dead ends instead of through streets
+- Depth, frequency and staggering (alternates between the near/far collector street)
+- Turnaround circle at the end of each cul-de-sac: automatic size (follows road width) or manual, in asphalt, grass or tree-lined style
+
+## Organic variation
+- Jitter: deterministic pseudo-random offset of the internal lines, with a "new seed" button
+- Curve amount and style for the collector streets: a one-sided bulge, or an S-curve
+- Orientation: fixed angle, or an experimental "follow terrain" mode recomputed at generation time
+
+## Road selection
+- Uses whichever road prefab is selected in the vanilla road tool by default, or pick one explicitly from the in-panel selector (search, categories, recently used)
+
+## View
+- Toggle underground networks, the zone grid and normally-invisible networks while the tool is active — same as CS2-NetworkTools' View row
+- Every selectable road node shows a faint marker before you even hover over it
+
+## Compatibility
+- **[Anarchy](https://mods.paradoxplaza.com/mods/74604/Windows)** by **yenyang** (optional): if installed, a toggle appears in the panel header, synced with Anarchy's own button and shortcut. No hard dependency — nothing changes if Anarchy isn't installed.
+
+## Keybindings (Options &gt; Mods &gt; Grid Road Generator)
+- **Ctrl+G**: toggle the tool
+- **Enter**: confirm the perimeter and build the grid
+- **Left click**: add/remove a node · **Right click**: remove the last node · **Escape**: clear the selection
+
+All other settings (geometry, cul-de-sac, organic variation, road choice) live in the in-game panel itself, not in Options &gt; Mods, and persist between sessions.
+
+## Languages
+**16 languages** are included:
+- **12 official game languages**: English, French, German, Spanish, Italian, Polish, Portuguese (Brazil), Russian, Japanese, Korean, Chinese (Simplified), Chinese (Traditional)
+- **4 community languages**: Portuguese (Portugal), Ukrainian, Thai, Vietnamese — these four only appear if a locale-adding mod (e.g. an I18n mod) is installed
+
+## Credits
+Node-selection, tooltip and UI architecture patterns adapted from [CS2-NetworkTools](https://github.com/lucarager/CS2-NetworkTools) by Luca Rager, under the MIT license. Thank you!
 	</LongDescription>
 	<!--Thumbnail-->
-	<Thumbnail Value="Properties/Thumbnail.png" />
+	<Thumbnail Value="C:\Dev\GridRoadGenerator\Properties\Thumbnail.jpg" />
 	<!--Screenshot, can be set multiple times-->
-	<Screenshot Value="" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\1.jpg" />
 	<!--Tag, can be set multiple times-->
 	<Tag Value="Code Mod" />
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="0.1.0" />
+	<ModVersion Value="0.2.0" />
 	<!--Recommended version of the base game to use the mod-->
-	<GameVersion Value="1.*" />
+	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times-->
 	<Dependency Id="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
-	<ChangeLog Value="Initial release" />
-	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
-	<ExternalLink Type="github" Url="" />
+	<ChangeLog>
+Initial release:
+- Grid generation on any perimeter (rectangle, L-shape, rotated, irregular), fit-to-area or fixed spacing
+- Cul-de-sac (suburban) mode with configurable depth, frequency, staggering and turnaround style/size
+- Organic variation: jitter, collector curve amount/style (bulge or S-curve), terrain-follow orientation
+- In-panel road prefab picker, draggable/collapsible panel with a native scrollbar
+- View toggles (underground, zone grid, invisible networks) and selectable-node markers
+- Optional Anarchy integration
+- Reassignable keybindings (Ctrl+G, Enter) and 16 languages
+	</ChangeLog>
 </Publish>

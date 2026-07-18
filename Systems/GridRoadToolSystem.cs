@@ -8,6 +8,7 @@ using Game.Common;
 using Game.Input;
 using Game.Net;
 using Game.Prefabs;
+using Game.Rendering;
 using Game.Simulation;
 using Game.Tools;
 using GridRoadGenerator.Core;
@@ -93,13 +94,31 @@ namespace GridRoadGenerator.Systems
         /// <summary>Vrai si la grille prévisualisée peut être construite (pas d'erreur de placement).</summary>
         public bool CanApply { get; private set; }
 
+        /// <summary>
+        /// Vue active (Underground/ZoneGrid/InvisibleNetworks) tant que l'outil tourne — voir
+        /// RefreshViews. Restaurée depuis les settings à l'activation (OnStartRunning).
+        /// </summary>
+        public ViewOption SelectedViews { get; set; }
+
         private ProxyAction _confirmAction;
         private GridRoadGeneratorSettings _settings;
 
         private NetToolSystem m_NetToolSystem;
         private TerrainSystem m_TerrainSystem;
         private ToolOutputBarrier m_ToolOutputBarrier;
+        private RenderingSystem m_RenderingSystem;
         private EntityQuery m_DefinitionQuery;
+        /// <summary>
+        /// Tous les nœuds routiers sélectionnables (jamais les nœuds Temp d'aperçu), lus par
+        /// GridRoadOverlaySystem pour dessiner un point semi-transparent sur chacun, avant même
+        /// le survol — comme CS2-NetworkTools (NT_Eligible). Le composant vanilla Highlighted
+        /// seul ne produit aucun rendu visible sur un nœud (vérifié : NetworkTools dessine aussi
+        /// ces points lui-même, via OverlaySystem.DrawNodesJob, pas via Highlighted), d'où ce
+        /// choix de rester sur notre propre dessin (déjà en place pour la sélection/le survol)
+        /// plutôt que de compter sur un composant ECS vanilla qui ne fait rien ici.
+        /// </summary>
+        public EntityQuery EligibleRoadNodesQuery => m_EligibleRoadNodesQuery;
+        private EntityQuery m_EligibleRoadNodesQuery;
 
         private PrefabBase _fallbackPrefab;
         private bool _fallbackSearched;
@@ -120,7 +139,12 @@ namespace GridRoadGenerator.Systems
             m_NetToolSystem = World.GetOrCreateSystemManaged<NetToolSystem>();
             m_TerrainSystem = World.GetOrCreateSystemManaged<TerrainSystem>();
             m_ToolOutputBarrier = World.GetOrCreateSystemManaged<ToolOutputBarrier>();
+            m_RenderingSystem = World.GetOrCreateSystemManaged<RenderingSystem>();
             m_DefinitionQuery = GetDefinitionQuery();
+            m_EligibleRoadNodesQuery = GetEntityQuery(
+                ComponentType.ReadOnly<Node>(),
+                ComponentType.ReadOnly<Road>(),
+                ComponentType.Exclude<Temp>());
 
             _settings = Mod.Instance.Settings;
             _confirmAction = _settings.GetAction(GridRoadGeneratorSettings.ActionConfirmGrid);
@@ -152,6 +176,8 @@ namespace GridRoadGenerator.Systems
             {
                 _confirmAction.shouldBeEnabled = true;
             }
+            SelectedViews = _settings.SelectedViews;
+            RefreshViews();
         }
 
         protected override void OnStopRunning()
@@ -163,7 +189,25 @@ namespace GridRoadGenerator.Systems
             }
             // Purge les définitions restantes pour ne pas laisser d'aperçu fantôme derrière soi.
             Dependency = DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, Dependency);
+            // Nettoie l'état de rendu (requireUnderground/requireZones sont des champs
+            // ToolBaseSystem propres à cette instance, jamais relus une fois l'outil inactif ;
+            // markersVisible vit sur le RenderingSystem partagé du monde, donc explicitement
+            // remis à false ici — même pattern que CS2-NetworkTools BaseToolSystem.OnStopRunning).
+            m_RenderingSystem.markersVisible = false;
             base.OnStopRunning();
+        }
+
+        /// <summary>
+        /// Applique SelectedViews aux champs de rendu vanilla (ToolBaseSystem.requireUnderground/
+        /// requireZones) et au RenderingSystem (markersVisible, réseaux normalement invisibles) —
+        /// pattern repris de CS2-NetworkTools BaseToolSystem.RefreshViews. Appelé à l'activation
+        /// de l'outil et à chaque changement depuis le panneau (GridRoadUISystem).
+        /// </summary>
+        public void RefreshViews()
+        {
+            requireUnderground = (SelectedViews & ViewOption.Underground) != 0;
+            requireZones = (SelectedViews & ViewOption.ZoneGrid) != 0;
+            m_RenderingSystem.markersVisible = (SelectedViews & ViewOption.InvisibleNetworks) != 0;
         }
 
         /// <summary>Active/désactive l'outil (raccourci clavier global ou panneau UI).</summary>
@@ -727,7 +771,7 @@ namespace GridRoadGenerator.Systems
             {
                 return NetUtils.StraightCurve(start, end);
             }
-            GridGenerator.ComputeCurveControlPoints(start, end, _settings.CurveAmount, out float3 b, out float3 c);
+            GridGenerator.ComputeCurveControlPoints(start, end, _settings.CurveAmount, _settings.CurveStyle, out float3 b, out float3 c);
             return new Bezier4x3 { a = start, b = b, c = c, d = end };
         }
 

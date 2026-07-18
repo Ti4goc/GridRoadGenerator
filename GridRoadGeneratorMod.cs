@@ -18,6 +18,9 @@ namespace GridRoadGenerator
 
         public GridRoadGeneratorSettings Settings { get; private set; }
 
+        /// <summary>Version affichée dans la section "Sobre" (About) des Options > Mods.</summary>
+        public string Version => GetType().Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
         private GridRoadToolSystem _toolSystem;
         private ProxyAction _toggleToolAction;
 

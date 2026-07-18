@@ -4,6 +4,9 @@
     <Configurations>Debug;Release</Configurations>
     <RootNamespace>GridRoadGenerator</RootNamespace>
     <Nullable>disable</Nullable>
+    <!-- Doit rester alignée avec "version" dans UI/mod.json (numéro affiché dans Options >
+         Mods > Sobre, via Mod.Version). -->
+    <Version>0.2.0</Version>
   </PropertyGroup>
 
   <!-- Template officiel du toolchain de modding CS2 : Mod.props fournit TargetFramework,

@@ -1,0 +1,26 @@
+// Rangée "Vista" (View) : pas une section repliable, donc son propre module minimal
+// plutôt qu'une dépendance vers gridPanel.module.scss/gridPanelNative.module.scss —
+// composant partagé par les deux panneaux (natif et legacy).
+.viewRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12rem 8rem;
+    border-bottom: 1rem solid #9645ff59; // accent violet, atténué (même teinte que les foldouts)
+    margin-bottom: 8rem;
+}
+
+.viewLabel {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: #ffffffd9;
+}
+
+.viewButtons {
+    display: flex;
+    flex-direction: row;
+    column-gap: 4rem;
+}

@@ -3,25 +3,28 @@ using Game.Input;
 using Game.Modding;
 using Game.Settings;
 using GridRoadGenerator.Core;
+using GridRoadGenerator.Localization;
+using Mod = GridRoadGenerator.Mod;
 
 namespace GridRoadGenerator.Settings
 {
     /// <summary>
-    /// Réglages exposés dans le menu Options > Mods du jeu, plus les raccourcis clavier.
-    /// Les propriétés ProxyBinding sont détectées par ModSetting et enregistrées comme
-    /// actions d'input du mod via RegisterKeyBindings() (appelé dans Mod.OnLoad).
+    /// Réglages persistés du mod. La page Options > Mods du jeu ne montre plus que
+    /// les raccourcis clavier (GroupKeybindings) et la section "Sobre" (GroupAbout) :
+    /// tous les réglages de géométrie/organique (grille, culs-de-sac, variation
+    /// organique...) ci-dessous sont [SettingsUIHidden] — ils restent persistés entre
+    /// sessions (ModSetting) mais ne se pilotent plus que depuis le panneau en jeu
+    /// (GridRoadUISystem lit/écrit directement ces propriétés). Les propriétés
+    /// ProxyBinding sont détectées par ModSetting et enregistrées comme actions
+    /// d'input du mod via RegisterKeyBindings() (appelé dans Mod.OnLoad).
     /// </summary>
     [FileLocation("ModsSettings/GridRoadGenerator/GridRoadGenerator")]
-    [SettingsUIGroupOrder(GroupMode, GroupGrid, GroupCulDeSac, GroupOrganic, GroupKeybindings)]
-    [SettingsUIShowGroupName(GroupMode, GroupGrid, GroupCulDeSac, GroupOrganic, GroupKeybindings)]
+    [SettingsUIGroupOrder(GroupKeybindings, GroupAbout)]
+    [SettingsUIShowGroupName(GroupKeybindings, GroupAbout)]
     public class GridRoadGeneratorSettings : ModSetting
     {
-        public const string GroupMode = "Mode";
-        public const string GroupGrid = "Grid";
-        public const string GroupCulDeSac = "CulDeSac";
-        /// <summary>Variation organique : jitter des lignes internes, courbure des collectrices, orientation par bloc.</summary>
-        public const string GroupOrganic = "Organic";
         public const string GroupKeybindings = "Keybindings";
+        public const string GroupAbout = "About";
 
         /// <summary>Nom de l'action qui active/désactive l'outil (Ctrl+G par défaut).</summary>
         public const string ActionToggleTool = "ToggleTool";
@@ -33,23 +36,19 @@ namespace GridRoadGenerator.Settings
             SetDefaults();
         }
 
-        [SettingsUISection(GroupMode)]
+        [SettingsUIHidden]
         public SpacingMode Mode { get; set; }
 
-        [SettingsUISlider(min = 1, max = 12, step = 1)]
-        [SettingsUISection(GroupGrid)]
+        [SettingsUIHidden]
         public int Columns { get; set; }
 
-        [SettingsUISlider(min = 1, max = 12, step = 1)]
-        [SettingsUISection(GroupGrid)]
+        [SettingsUIHidden]
         public int Rows { get; set; }
 
-        [SettingsUISlider(min = 10f, max = 300f, step = 5f, unit = "length")]
-        [SettingsUISection(GroupGrid)]
+        [SettingsUIHidden]
         public float SpacingMeters { get; set; }
 
-        [SettingsUISlider(min = -90f, max = 90f, step = 1f, unit = "angle")]
-        [SettingsUISection(GroupGrid)]
+        [SettingsUIHidden]
         public float AngleOffsetDegrees { get; set; }
 
         /// <summary>
@@ -59,43 +58,39 @@ namespace GridRoadGenerator.Settings
         /// la grille reste plate. Les points raccordés au réseau existant (nœuds/arêtes
         /// du périmètre) gardent toujours leur hauteur réelle, dans les deux cas.
         /// </summary>
-        [SettingsUISection(GroupGrid)]
+        [SettingsUIHidden]
         public bool FollowTerrain { get; set; }
 
-        [SettingsUISection(GroupCulDeSac)]
+        [SettingsUIHidden]
         public bool CulDeSacMode { get; set; }
 
-        /// <summary>Stocké en fraction (0.5–0.9) ; affiché en pourcentage (50–90 %) dans Options > Mods.</summary>
-        [SettingsUISlider(min = 50f, max = 90f, step = 1f, unit = "percentage", scalarMultiplier = 100f)]
-        [SettingsUISection(GroupCulDeSac)]
+        /// <summary>Stocké en fraction (0.5–0.9) ; affiché en pourcentage (50–90 %) dans le panneau.</summary>
+        [SettingsUIHidden]
         public float CulDeSacDepth { get; set; }
 
-        [SettingsUISection(GroupCulDeSac)]
+        [SettingsUIHidden]
         public bool Staggered { get; set; }
 
-        [SettingsUISlider(min = 0f, max = 100f, step = 5f, unit = "percentage")]
-        [SettingsUISection(GroupCulDeSac)]
+        [SettingsUIHidden]
         public float CulDeSacRatio { get; set; }
 
         /// <summary>Taille du cercle de retournement posé en bout d'impasse (Auto = déduite de la largeur du réseau).</summary>
-        [SettingsUISection(GroupCulDeSac)]
+        [SettingsUIHidden]
         public CulDeSacCapSize CulDeSacCapSize { get; set; }
 
         /// <summary>Style du cercle de retournement posé en bout d'impasse, combiné à CulDeSacCapSize.</summary>
-        [SettingsUISection(GroupCulDeSac)]
+        [SettingsUIHidden]
         public CulDeSacCapStyle CulDeSacCapStyle { get; set; }
 
         /// <summary>
         /// Amplitude (m, 0–15) du décalage pseudo-aléatoire déterministe des lignes
         /// internes de la grille (jamais les collectrices ni le périmètre). 0 = désactivé.
         /// </summary>
-        [SettingsUISlider(min = 0f, max = 15f, step = 0.5f, unit = "length")]
-        [SettingsUISection(GroupOrganic)]
+        [SettingsUIHidden]
         public float JitterAmount { get; set; }
 
         /// <summary>
-        /// Graine du jitter : régénérée depuis le panneau ("Nova semente"), pas montrée
-        /// dans les Options (un entier de graine n'y a pas grand sens en réglage manuel).
+        /// Graine du jitter : régénérée depuis le panneau ("Nova semente").
         /// </summary>
         [SettingsUIHidden]
         public int JitterSeed { get; set; }
@@ -107,9 +102,16 @@ namespace GridRoadGenerator.Settings
         /// GridGenerator — la position des nœuds ne change pas, donc les rues
         /// perpendiculaires s'y raccordent normalement, sans logique particulière.
         /// </summary>
-        [SettingsUISlider(min = 0f, max = 100f, step = 5f, unit = "percentage")]
-        [SettingsUISection(GroupOrganic)]
+        [SettingsUIHidden]
         public float CurveAmount { get; set; }
+
+        /// <summary>
+        /// Forme de la courbure des collectrices : Bulge (bombée d'un seul côté, comportement
+        /// historique) ou SCurve (change de sens à mi-segment). Purement une affaire de tracé,
+        /// comme CurveAmount ci-dessus.
+        /// </summary>
+        [SettingsUIHidden]
+        public GridGenerator.CurveStyle CurveStyle { get; set; }
 
         /// <summary>
         /// Ângulo fixo (manuel, AngleOffsetDegrees) ou Seguir relevo (recalculé à chaque
@@ -117,17 +119,24 @@ namespace GridRoadGenerator.Settings
         /// GridRoadToolSystem.ComputeTerrainFollowAngle pour l'étendue réelle, volontairement
         /// simplifiée, de ce chantier exploratoire).
         /// </summary>
-        [SettingsUISection(GroupOrganic)]
+        [SettingsUIHidden]
         public OrientationMode OrientationMode { get; set; }
 
         /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
         /// "TypePrefab:Nom" (ex. "RoadPrefab:Small Road"). Vide = mode auto
-        /// (suivre le prefab de l'outil route natif). Persisté mais pas montré
-        /// dans les Options : se règle depuis le panneau de l'outil.
+        /// (suivre le prefab de l'outil route natif).
         /// </summary>
         [SettingsUIHidden]
         public string RoadPrefabName { get; set; }
+
+        /// <summary>
+        /// Vue active (Underground/ZoneGrid/InvisibleNetworks) pendant que l'outil est
+        /// actif : pattern repris de CS2-NetworkTools. Persistée entre sessions, restaurée
+        /// dans GridRoadToolSystem.OnStartRunning.
+        /// </summary>
+        [SettingsUIHidden]
+        public ViewOption SelectedViews { get; set; }
 
         [SettingsUIKeyboardBinding(BindingKeyboard.G, ActionToggleTool, ctrl: true)]
         [SettingsUISection(GroupKeybindings)]
@@ -136,6 +145,25 @@ namespace GridRoadGenerator.Settings
         [SettingsUIKeyboardBinding(BindingKeyboard.Enter, ActionConfirmGrid)]
         [SettingsUISection(GroupKeybindings)]
         public ProxyBinding ConfirmGridBinding { get; set; }
+
+        // ------------------------------------------------------------------
+        // Section "Sobre" (About)
+        // ------------------------------------------------------------------
+
+        [SettingsUISection(GroupAbout)]
+        public string ModDisplayName => Translations.ModName;
+
+        /// <summary>
+        /// Champ multiligne : c'est le LIBELLÉ de l'option (Options.OPTION[...], voir
+        /// Translations.Build) qui porte le texte affiché, jamais la valeur retournée
+        /// ici (MultilineTextSettingItemData ne lit jamais property.GetValue).
+        /// </summary>
+        [SettingsUISection(GroupAbout)]
+        [SettingsUIMultilineText]
+        public string Credits => string.Empty;
+
+        [SettingsUISection(GroupAbout)]
+        public string Version => Mod.Instance.Version;
 
         public override void SetDefaults()
         {
@@ -155,8 +183,11 @@ namespace GridRoadGenerator.Settings
             JitterAmount = d.JitterAmount;
             JitterSeed = d.JitterSeed;
             CurveAmount = 0f;
+            CurveStyle = GridGenerator.CurveStyle.Bulge;
             OrientationMode = OrientationMode.FixedAngle;
             RoadPrefabName = string.Empty;
+            // Comme CS2-NetworkTools : tout coché par défaut à la première ouverture.
+            SelectedViews = ViewOption.All;
         }
 
         public GridParameters ToGridParameters() => new GridParameters

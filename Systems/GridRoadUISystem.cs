@@ -48,7 +48,10 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<int> _culDeSacCapStyleBinding;
         private ValueBinding<float> _jitterAmountBinding;
         private ValueBinding<float> _curveAmountBinding;
+        private ValueBinding<int> _curveStyleBinding;
         private ValueBinding<int> _orientationModeBinding;
+        private ValueBinding<int> _availableViewsBinding;
+        private ValueBinding<int> _selectedViewsBinding;
         private ValueBinding<string> _roadPrefabNameBinding;
         private ValueBinding<string> _roadPrefabIconBinding;
         private ValueBinding<bool> _roadPrefabAutoBinding;
@@ -107,7 +110,14 @@ namespace GridRoadGenerator.Systems
             AddBinding(_culDeSacCapStyleBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_CAP_STYLE", (int)_settings.CulDeSacCapStyle));
             AddBinding(_jitterAmountBinding = new ValueBinding<float>(BindingGroup, "JITTER_AMOUNT", _settings.JitterAmount));
             AddBinding(_curveAmountBinding = new ValueBinding<float>(BindingGroup, "CURVE_AMOUNT", _settings.CurveAmount));
+            AddBinding(_curveStyleBinding = new ValueBinding<int>(BindingGroup, "CURVE_STYLE", (int)_settings.CurveStyle));
             AddBinding(_orientationModeBinding = new ValueBinding<int>(BindingGroup, "ORIENTATION_MODE", (int)_settings.OrientationMode));
+
+            // Vue (Underground/ZoneGrid/InvisibleNetworks), pattern repris de CS2-NetworkTools.
+            // AVAILABLE_VIEWS est fixe (un seul outil, qui les supporte toutes) — exposé quand
+            // même comme binding séparé pour rester extensible sans changer le contrat côté UI.
+            AddBinding(_availableViewsBinding = new ValueBinding<int>(BindingGroup, "AVAILABLE_VIEWS", (int)ViewOption.All));
+            AddBinding(_selectedViewsBinding = new ValueBinding<int>(BindingGroup, "SELECTED_VIEWS", (int)_settings.SelectedViews));
 
             // Prefab de réseau utilisé par la grille (rangée du panneau, ouvre le sélecteur).
             AddBinding(_roadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_NAME", string.Empty));
@@ -214,9 +224,22 @@ namespace GridRoadGenerator.Systems
                 _settings.CurveAmount = math.clamp(value, 0f, 100f);
                 _settings.ApplyAndSave();
             }));
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_CURVE_STYLE", value =>
+            {
+                _settings.CurveStyle = (GridGenerator.CurveStyle)math.clamp(value, 0, 1);
+                _settings.ApplyAndSave();
+            }));
             AddBinding(new TriggerBinding<int>(BindingGroup, "SET_ORIENTATION_MODE", value =>
             {
                 _settings.OrientationMode = (OrientationMode)math.clamp(value, 0, 1);
+                _settings.ApplyAndSave();
+            }));
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_SELECTED_VIEWS", value =>
+            {
+                var views = (ViewOption)value & ViewOption.All;
+                _toolSystem.SelectedViews = views;
+                _toolSystem.RefreshViews();
+                _settings.SelectedViews = views;
                 _settings.ApplyAndSave();
             }));
 
@@ -247,7 +270,9 @@ namespace GridRoadGenerator.Systems
             _culDeSacCapStyleBinding.Update((int)_settings.CulDeSacCapStyle);
             _jitterAmountBinding.Update(_settings.JitterAmount);
             _curveAmountBinding.Update(_settings.CurveAmount);
+            _curveStyleBinding.Update((int)_settings.CurveStyle);
             _orientationModeBinding.Update((int)_settings.OrientationMode);
+            _selectedViewsBinding.Update((int)_settings.SelectedViews);
 
             if (!_anarchyAvailable && IsAnarchyLoaded())
             {
