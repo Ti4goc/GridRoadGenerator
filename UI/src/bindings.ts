@@ -30,6 +30,7 @@ export const culDeSacRatio$ = bindValue<number>(mod.id, "CULDESAC_RATIO", 100);
 export const culDeSacCapSize$ = bindValue<number>(mod.id, "CULDESAC_CAP_SIZE", 1);
 /// Style du cercle de retournement : 0=Asphalte, 1=Engazonné, 2=Arbres (miroir de CulDeSacCapStyle en C#).
 export const culDeSacCapStyle$ = bindValue<number>(mod.id, "CULDESAC_CAP_STYLE", 0);
+export const jitterAmount$ = bindValue<number>(mod.id, "JITTER_AMOUNT", 0);
 export const roadPrefabName$ = bindValue<string>(mod.id, "ROAD_PREFAB_NAME", "");
 export const roadPrefabIcon$ = bindValue<string>(mod.id, "ROAD_PREFAB_ICON", "");
 export const roadPrefabAuto$ = bindValue<boolean>(mod.id, "ROAD_PREFAB_AUTO", true);
@@ -51,6 +52,8 @@ export const setStaggered = (value: boolean) => trigger(mod.id, "SET_STAGGERED",
 export const setCulDeSacRatio = (value: number) => trigger(mod.id, "SET_CULDESAC_RATIO", value);
 export const setCulDeSacCapSize = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_SIZE", value);
 export const setCulDeSacCapStyle = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_STYLE", value);
+export const setJitterAmount = (value: number) => trigger(mod.id, "SET_JITTER_AMOUNT", value);
+export const regenerateJitterSeed = () => trigger(mod.id, "REGENERATE_JITTER_SEED");
 export const generateGrid = () => trigger(mod.id, "GENERATE");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");
 export const setPickerType = (value: number) => trigger(mod.id, "SET_PICKER_TYPE", value);

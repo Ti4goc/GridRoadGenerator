@@ -22,9 +22,11 @@ import {
     culDeSacRatio$,
     followTerrain$,
     generateGrid,
+    jitterAmount$,
     mode$,
     nodeCount$,
     perimeterInvalid$,
+    regenerateJitterSeed,
     roadPrefabIcon$,
     roadPrefabName$,
     rows$,
@@ -36,6 +38,7 @@ import {
     setCulDeSacMode,
     setCulDeSacRatio,
     setFollowTerrain,
+    setJitterAmount,
     setMode,
     setRows,
     setSpacing,
@@ -155,6 +158,7 @@ export const LegacyGridPanel = () => {
     const culDeSacRatio = useValue(culDeSacRatio$);
     const culDeSacCapSize = useValue(culDeSacCapSize$);
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
+    const jitterAmount = useValue(jitterAmount$);
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
     const anarchyAvailable = useValue(anarchyAvailable$);
@@ -164,6 +168,7 @@ export const LegacyGridPanel = () => {
     const panelRef = useRef<HTMLDivElement>(null);
     const [geometryExpanded, setGeometryExpanded] = useState(true);
     const [culDeSacExpanded, setCulDeSacExpanded] = useState(true);
+    const [organicExpanded, setOrganicExpanded] = useState(true);
     const [selectionExpanded, setSelectionExpanded] = useState(true);
 
     if (!toolActive) {
@@ -411,6 +416,31 @@ export const LegacyGridPanel = () => {
                                 />
                             </VC.Section>
                         </div>
+                    </SectionFoldout>
+
+                    {/* Variation organique : jitter des lignes internes (chantiers
+                        suivants : courbure des collectrices, orientation par bloc). */}
+                    <SectionFoldout
+                        title={translate("GridRoadGenerator.UI.SectionOrganic", "Organic variation")}
+                        expanded={organicExpanded}
+                        onToggle={() => setOrganicExpanded((value) => !value)}>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.FloatSliderField
+                                    label={translate("GridRoadGenerator.UI.JitterAmount", "Jitter")}
+                                    value={jitterAmount}
+                                    min={0}
+                                    max={15}
+                                    fractionDigits={1}
+                                    disabled={false}
+                                    onChange={(value: number) => setJitterAmount(value)}
+                                />
+                                <span className={styles.unitLabel}>m</span>
+                            </div>
+                        </div>
+                        <Button variant="flat" className={styles.reseedButton} onSelect={regenerateJitterSeed}>
+                            {translate("GridRoadGenerator.UI.JitterReseedButton", "New seed")}
+                        </Button>
                     </SectionFoldout>
 
                     {/* Sélection en cours + réseau utilisé. */}

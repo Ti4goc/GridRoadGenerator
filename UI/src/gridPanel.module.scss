@@ -257,5 +257,12 @@ $accent-violet: #9645ff;
     font-weight: 600;
 }
 
+// Bouton "Nova semente" (Variação orgânica) : variant flat vanilla, juste un peu
+// d'espace au-dessus du slider de distorção qui le précède.
+.reseedButton {
+    margin-top: 4rem;
+    width: 100%;
+}
+
 // Le bouton "Annuler" (clearButton) n'a plus de classe custom : le variant
 // "flat" du Button vanilla rend avec son style natif pur, sans imitation.

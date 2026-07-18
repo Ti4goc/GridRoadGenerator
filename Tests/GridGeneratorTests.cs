@@ -158,7 +158,7 @@ namespace GridRoadGenerator.Tests
             return counts.Where(p => p.Value >= 2).ToDictionary(p => p.Key, p => p.Value);
         }
 
-        private static void AssertCommonInvariants(List<RoadSegmentDef> segments)
+        internal static void AssertCommonInvariants(List<RoadSegmentDef> segments)
         {
             var counts = new Dictionary<float3, int>();
             foreach (var segment in segments)
@@ -799,6 +799,133 @@ namespace GridRoadGenerator.Tests
 
             Assert.True(curvedMaxX < straightMaxX - 30f,
                 $"Le polygone qui suit la courbe devrait exclure le renflement (x max attendu nettement < {straightMaxX}), obtenu {curvedMaxX}.");
+        }
+    }
+
+    /// <summary>
+    /// Chantier 6 : JitterAmount/JitterSeed déplacent les lignes internes (colonnes) de
+    /// façon pseudo-aléatoire mais DÉTERMINISTE — jamais les collectrices (rangées) ni
+    /// le périmètre. Le clipping/découpage aux croisements ne fait aucune hypothèse sur
+    /// l'ordre ou la régularité des positions de lignes (voir GenerateGrid), donc rester
+    /// correct après jitter est une propriété automatique de GridGenerator.ApplyJitter
+    /// s'insérant simplement avant ce calcul — ces tests le confirment plutôt que de le
+    /// re-prouver depuis zéro.
+    /// </summary>
+    public class GridGeneratorJitterTests
+    {
+        private static readonly List<float3> SquareNodes = new List<float3>
+        {
+            new float3(0f, 0f, 0f),
+            new float3(300f, 0f, 0f),
+            new float3(300f, 0f, 300f),
+            new float3(0f, 0f, 300f),
+        };
+
+        private static GridParameters JitteredParameters(float amount, int seed) => new GridParameters
+        {
+            Mode = SpacingMode.FitToArea,
+            Rows = 3,
+            Columns = 5,
+            SpacingMeters = 60f,
+            JitterAmount = amount,
+            JitterSeed = seed,
+        };
+
+        [Fact]
+        public void SameSeed_ProducesIdenticalResultsAcrossGenerations()
+        {
+            GridParameters parameters = JitteredParameters(10f, 12345);
+
+            var first = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            var second = GridGenerator.GenerateGrid(SquareNodes, parameters);
+
+            Assert.NotEmpty(first);
+            Assert.Equal(first.Count, second.Count);
+            for (int i = 0; i < first.Count; i++)
+            {
+                Assert.Equal(first[i].Start, second[i].Start);
+                Assert.Equal(first[i].End, second[i].End);
+            }
+        }
+
+        [Fact]
+        public void DifferentSeeds_ProduceDifferentPositions()
+        {
+            var parametersA = JitteredParameters(10f, 1);
+            var parametersB = JitteredParameters(10f, 2);
+
+            var segmentsA = GridGenerator.GenerateGrid(SquareNodes, parametersA);
+            var segmentsB = GridGenerator.GenerateGrid(SquareNodes, parametersB);
+
+            Assert.NotEmpty(segmentsA);
+            Assert.NotEmpty(segmentsB);
+            bool anyDifferent = false;
+            int count = math.min(segmentsA.Count, segmentsB.Count);
+            for (int i = 0; i < count; i++)
+            {
+                if (math.distance(segmentsA[i].Start, segmentsB[i].Start) > 0.01f)
+                {
+                    anyDifferent = true;
+                    break;
+                }
+            }
+            Assert.True(anyDifferent, "Deux graines différentes devraient produire des positions de lignes différentes.");
+        }
+
+        [Fact]
+        public void ZeroAmount_IdenticalToNoJitterField()
+        {
+            GridParameters withExplicitZero = JitteredParameters(0f, 999); // seed sans effet à amplitude nulle
+            var withoutJitterAtAll = new GridParameters
+            {
+                Mode = SpacingMode.FitToArea,
+                Rows = 3,
+                Columns = 5,
+                SpacingMeters = 60f,
+                // JitterAmount/JitterSeed non renseignés = 0 par défaut (struct) : doit se
+                // comporter EXACTEMENT comme avant l'existence du jitter.
+            };
+
+            var a = GridGenerator.GenerateGrid(SquareNodes, withExplicitZero);
+            var b = GridGenerator.GenerateGrid(SquareNodes, withoutJitterAtAll);
+
+            Assert.Equal(a.Count, b.Count);
+            for (int i = 0; i < a.Count; i++)
+            {
+                Assert.Equal(a[i].Start, b[i].Start);
+                Assert.Equal(a[i].End, b[i].End);
+            }
+        }
+
+        [Fact]
+        public void Jittered_IntersectionsRemainCorrectlyConnected()
+        {
+            GridParameters parameters = JitteredParameters(12f, 42);
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+
+            Assert.NotEmpty(segments);
+            GridGeneratorTests.AssertCommonInvariants(segments);
+        }
+
+        [Fact]
+        public void Jittered_RowsNeverMoveFromTheirRegularPositions()
+        {
+            // Les collectrices (rangées, v) doivent rester identiques à une génération
+            // sans jitter : seules les colonnes (u) sont perturbées.
+            var withJitter = JitteredParameters(12f, 7);
+            var withoutJitter = JitteredParameters(0f, 7);
+
+            var jittered = GridGenerator.GenerateGrid(SquareNodes, withJitter);
+            var baseline = GridGenerator.GenerateGrid(SquareNodes, withoutJitter);
+
+            // Les segments de rangée (isHorizontal true, cf. EmitLine axisIsU: false ->
+            // isHorizontal: !axisIsU = true) doivent avoir le même Z constant qu'au repos
+            // pour chaque rangée — comparé via l'ensemble des Z distincts observés.
+            var jitteredRowZs = jittered.Where(s => s.IsHorizontal).Select(s => math.round(s.Start.z * 100f)).Distinct().OrderBy(z => z).ToList();
+            var baselineRowZs = baseline.Where(s => s.IsHorizontal).Select(s => math.round(s.Start.z * 100f)).Distinct().OrderBy(z => z).ToList();
+
+            Assert.Equal(baselineRowZs, jitteredRowZs);
         }
     }
 }

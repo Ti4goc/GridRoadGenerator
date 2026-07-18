@@ -12,13 +12,15 @@ namespace GridRoadGenerator.Settings
     /// actions d'input du mod via RegisterKeyBindings() (appelé dans Mod.OnLoad).
     /// </summary>
     [FileLocation("ModsSettings/GridRoadGenerator/GridRoadGenerator")]
-    [SettingsUIGroupOrder(GroupMode, GroupGrid, GroupCulDeSac, GroupKeybindings)]
-    [SettingsUIShowGroupName(GroupMode, GroupGrid, GroupCulDeSac, GroupKeybindings)]
+    [SettingsUIGroupOrder(GroupMode, GroupGrid, GroupCulDeSac, GroupOrganic, GroupKeybindings)]
+    [SettingsUIShowGroupName(GroupMode, GroupGrid, GroupCulDeSac, GroupOrganic, GroupKeybindings)]
     public class GridRoadGeneratorSettings : ModSetting
     {
         public const string GroupMode = "Mode";
         public const string GroupGrid = "Grid";
         public const string GroupCulDeSac = "CulDeSac";
+        /// <summary>Variation organique : jitter des lignes internes, courbure des collectrices, orientation par bloc.</summary>
+        public const string GroupOrganic = "Organic";
         public const string GroupKeybindings = "Keybindings";
 
         /// <summary>Nom de l'action qui active/désactive l'outil (Ctrl+G par défaut).</summary>
@@ -84,6 +86,21 @@ namespace GridRoadGenerator.Settings
         public CulDeSacCapStyle CulDeSacCapStyle { get; set; }
 
         /// <summary>
+        /// Amplitude (m, 0–15) du décalage pseudo-aléatoire déterministe des lignes
+        /// internes de la grille (jamais les collectrices ni le périmètre). 0 = désactivé.
+        /// </summary>
+        [SettingsUISlider(min = 0f, max = 15f, step = 0.5f, unit = "length")]
+        [SettingsUISection(GroupOrganic)]
+        public float JitterAmount { get; set; }
+
+        /// <summary>
+        /// Graine du jitter : régénérée depuis le panneau ("Nova semente"), pas montrée
+        /// dans les Options (un entier de graine n'y a pas grand sens en réglage manuel).
+        /// </summary>
+        [SettingsUIHidden]
+        public int JitterSeed { get; set; }
+
+        /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
         /// "TypePrefab:Nom" (ex. "RoadPrefab:Small Road"). Vide = mode auto
         /// (suivre le prefab de l'outil route natif). Persisté mais pas montré
@@ -115,6 +132,8 @@ namespace GridRoadGenerator.Settings
             CulDeSacRatio = d.CulDeSacRatio;
             CulDeSacCapSize = CulDeSacCapSize.Small;
             CulDeSacCapStyle = CulDeSacCapStyle.Asphalt;
+            JitterAmount = d.JitterAmount;
+            JitterSeed = d.JitterSeed;
             RoadPrefabName = string.Empty;
         }
 
@@ -128,7 +147,9 @@ namespace GridRoadGenerator.Settings
             CulDeSacMode = CulDeSacMode,
             CulDeSacDepth = CulDeSacDepth,
             Staggered = Staggered,
-            CulDeSacRatio = CulDeSacRatio
+            CulDeSacRatio = CulDeSacRatio,
+            JitterAmount = JitterAmount,
+            JitterSeed = JitterSeed
         };
     }
 }

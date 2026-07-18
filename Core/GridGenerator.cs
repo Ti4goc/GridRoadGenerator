@@ -58,6 +58,16 @@ namespace GridRoadGenerator.Core
         /// <summary>Fréquence des impasses (0–100 %) : motif déterministe "une sur N", pas aléatoire.</summary>
         public float CulDeSacRatio;
 
+        /// <summary>
+        /// Amplitude (m, 0–15) du décalage pseudo-aléatoire déterministe appliqué à la
+        /// position de chaque ligne INTERNE (les "colonnes", axisIsU — voir CulDeSacMode
+        /// ci-dessus) avant clipping. Les "rangées" (collectrices) et le périmètre lui-même
+        /// ne sont jamais concernés. 0 = désactivé, identique à avant l'existence du jitter.
+        /// </summary>
+        public float JitterAmount;
+        /// <summary>Graine du jitter : mêmes paramètres + même seed = même résultat, jamais aléatoire d'une génération à l'autre.</summary>
+        public int JitterSeed;
+
         public static GridParameters Default => new GridParameters
         {
             Mode = SpacingMode.FitToArea,
@@ -68,7 +78,9 @@ namespace GridRoadGenerator.Core
             CulDeSacMode = false,
             CulDeSacDepth = 0.75f,
             Staggered = true,
-            CulDeSacRatio = 100f
+            CulDeSacRatio = 100f,
+            JitterAmount = 0f,
+            JitterSeed = 0
         };
     }
 
@@ -190,6 +202,17 @@ namespace GridRoadGenerator.Core
             {
                 uPositions = DistributeFixed(lmin.x, lmax.x, parameters.SpacingMeters);
                 vPositions = DistributeFixed(lmin.y, lmax.y, parameters.SpacingMeters);
+            }
+
+            // Jitter : uniquement les lignes internes (colonnes, u), jamais les
+            // collectrices (rangées, v) ni bien sûr le périmètre lui-même. Appliqué
+            // sur les POSITIONS des lignes, en amont du clipping/calcul des croisements
+            // (BuildSubSegments) — ceux-ci ne supposent aucun ordre entre les lignes,
+            // donc rester correct après jitter est automatique, pas une propriété à
+            // maintenir séparément.
+            if (parameters.JitterAmount > 0f)
+            {
+                ApplyJitter(uPositions, parameters.JitterSeed, parameters.JitterAmount, lmin.x, lmax.x);
             }
 
             // Clipping de chaque ligne au polygone (intervalles intérieurs).
@@ -578,6 +601,25 @@ namespace GridRoadGenerator.Core
                 pos += spacing;
             }
             return result;
+        }
+
+        /// <summary>
+        /// Décale chaque position d'une quantité pseudo-aléatoire déterministe dans
+        /// [-amountMeters, +amountMeters] (Unity.Mathematics.Random, seedé une fois puis
+        /// consommé dans l'ordre de la liste — reproductible pour un même seed), avant
+        /// de clamper au rectangle englobant local pour ne pas éjecter une ligne hors du
+        /// polygone.
+        /// </summary>
+        private static void ApplyJitter(List<float> positions, int seed, float amountMeters, float min, float max)
+        {
+            // Random exige une seed non nulle ; combinée à une constante impaire pour
+            // éviter le cas seed=0 sans jamais changer le résultat pour seed!=0.
+            var random = new Unity.Mathematics.Random(((uint)seed ^ 0x9E3779B9u) | 1u);
+            for (int i = 0; i < positions.Count; i++)
+            {
+                float delta = random.NextFloat(-amountMeters, amountMeters);
+                positions[i] = math.clamp(positions[i] + delta, min, max);
+            }
         }
 
         // ------------------------------------------------------------------
