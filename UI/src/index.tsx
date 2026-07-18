@@ -1,7 +1,7 @@
 // Pattern d'enregistrement adapté de CS2-NetworkTools (c) Luca Rager, licence MIT
 // https://github.com/lucarager/CS2-NetworkTools
 import { ModRegistrar } from "cs2/modding";
-import { GridPanel } from "./gridPanel";
+import { GridPanel } from "./gridPanelSwitch";
 import { GridToolbarButton } from "./toolbarButton";
 import { initializeVanilla } from "./vanilla";
 

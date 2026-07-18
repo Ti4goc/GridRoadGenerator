@@ -78,7 +78,9 @@ const loadPanelPosition = (): PanelPosition => {
     return DEFAULT_POSITION;
 };
 
-export const GridPanel = () => {
+/// Panneau custom éprouvé (fonctionne en jeu, confirmé). Utilisé directement si
+/// le chrome InfoView natif n'est pas disponible/sûr — voir gridPanelSwitch.tsx.
+export const LegacyGridPanel = () => {
     const { translate } = useLocalization();
     const toolActive = useValue(toolActive$);
     const nodeCount = useValue(nodeCount$);

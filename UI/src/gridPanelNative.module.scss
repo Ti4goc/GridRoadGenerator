@@ -1,0 +1,211 @@
+// Panneau sur le chrome InfoView natif (Panel/InfoSection/InfoRow de cs2/ui) :
+// le fond, les bordures, l'opacité, l'espacement et le style des en-têtes de
+// section viennent du thème Panel natif lui-même, pas de valeurs approchées ici.
+// Ne reste en SCSS custom que : le positionnement/drag du wrapper (Panel natif
+// n'expose pas de callback de position finale), l'en-tête composé à la main
+// (icône + titre + chevron replier, sans équivalent Panel tout fait), et les
+// compensations d'intégration des widgets vanilla de l'éditeur (sliders), déjà
+// éprouvées et reprises telles quelles.
+
+$input-bg-color: rgba(0, 0, 0, 0.15);
+$input-border-color: rgba(255, 255, 255, 0.2);
+$input-border-hover-color: rgba(255, 255, 255, 0.35);
+
+// Wrapper positionné en absolu (drag manuel) ; le Panel natif à l'intérieur
+// n'a aucun style de position/fond propre à lui — tout vient de son thème.
+.panelWrapper {
+    position: absolute;
+    width: 300rem;
+    pointer-events: auto;
+}
+
+.panel {
+    width: 100%;
+}
+
+// En-tête composé : icône de grille + titre majuscules + chevron replier.
+// Poignée de déplacement (drag) sur toute la zone, sauf le bouton chevron
+// (stopPropagation) et le bouton de fermeture natif du Panel (en dehors de
+// ce slot `header`, rendu par Panel lui-même via son propre thème).
+.header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    cursor: move;
+    width: 100%;
+}
+
+.headerIcon {
+    width: 18rem;
+    height: 18rem;
+    margin-right: 6rem;
+    flex-shrink: 0;
+}
+
+.headerTitle {
+    flex: 1;
+    letter-spacing: 0.05em;
+}
+
+.collapseButton {
+    width: 22rem;
+    height: 22rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.collapseIcon {
+    width: 12rem;
+    height: 12rem;
+    transition: transform 0.15s;
+}
+
+.collapseIconCollapsed {
+    width: 12rem;
+    height: 12rem;
+    transform: rotate(-90deg);
+}
+
+.invalid {
+    color: #ff8080;
+}
+
+// ------------------------------------------------------------------
+// Sliders de l'éditeur (Colonnes/Lignes/Espacement/Angle/Profondeur/
+// Fréquence) : gardent leur propre libellé interne plutôt qu'un InfoRow
+// séparé (éviterait un double-libellé), avec les mêmes compensations
+// d'intégration que CS2-NetworkTools pour les faire tenir dans le
+// panneau.
+// ------------------------------------------------------------------
+
+.vanillaRow {
+    margin: 4rem 0;
+
+    .vanillaField {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        position: relative;
+
+        & > * {
+            padding: 0;
+        }
+
+        [class^="label"] {
+            flex-shrink: 0;
+            flex-grow: 0;
+            flex-basis: auto;
+            overflow-x: hidden;
+            overflow-y: hidden;
+            width: 110rem;
+            margin-right: 8rem;
+            font-size: var(--fontSizeS);
+            coh-font-fit-mode: shrink;
+            font-weight: 500;
+            line-height: 1.25em;
+            white-space: pre-wrap;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        [class^="item"] > [class^="content"] > * {
+            margin-bottom: 0;
+        }
+
+        [class^="row"] {
+            justify-content: space-between;
+        }
+
+        [class^="slider-input"],
+        [class^="number-field"] {
+            font-size: var(--fontSizeS);
+            coh-font-fit-mode: shrink;
+            color: rgba(255, 255, 255, 0.85);
+            line-height: 1.25em;
+            height: 26rem;
+            padding: 3rem 5rem;
+            background-color: $input-bg-color;
+            border: 1rem solid $input-border-color;
+
+            &:hover {
+                border-color: $input-border-hover-color;
+            }
+        }
+
+        [class^="slider-input"] {
+            width: 60rem;
+            border-radius: 3rem;
+        }
+
+        & > div {
+            flex: 1;
+        }
+
+        .unitLabel {
+            font-size: var(--fontSizeS);
+            line-height: 1.25em;
+            color: rgba(255, 255, 255, 0.5);
+            position: absolute;
+            right: 5rem;
+        }
+    }
+}
+
+// Rangée du réseau : cliquable, ouvre le sélecteur.
+.prefabRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+    padding: 2rem 6rem;
+    border-radius: 4rem;
+    background: transparent;
+    border: none;
+    color: white;
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+    }
+}
+
+.prefabChevron {
+    margin-left: 6rem;
+    color: #ffffff80;
+    font-size: var(--fontSizeM);
+}
+
+.prefabIcon {
+    width: 24rem;
+    height: 24rem;
+    margin-right: 6rem;
+}
+
+.prefabName {
+    font-size: var(--fontSizeS);
+    line-height: 1.25em;
+    coh-font-fit-mode: shrink;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    white-space: nowrap;
+}
+
+.actions {
+    display: flex;
+    flex-direction: column;
+    row-gap: 6rem;
+    margin: 10rem 12rem 12rem;
+}
+
+.applyButton {
+    padding: 5rem 8rem;
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+}
+
+// Le bouton "Annuler" n'a pas de classe custom : style vanilla pur du variant flat.
