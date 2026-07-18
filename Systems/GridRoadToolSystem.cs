@@ -735,6 +735,7 @@ namespace GridRoadGenerator.Systems
             NativeArray<Entity> entities = candidateQuery.ToEntityArray(Allocator.Temp);
             NativeArray<Game.Net.Node> nodes = candidateQuery.ToComponentDataArray<Game.Net.Node>(Allocator.Temp);
 
+            int posedCount = 0;
             for (int i = _pendingRoundabouts.Count - 1; i >= 0; i--)
             {
                 float3 target = _pendingRoundabouts[i];
@@ -744,11 +745,8 @@ namespace GridRoadGenerator.Systems
                     {
                         continue;
                     }
-                    EntityManager.AddComponentData(entities[j], new Roundabout { m_Radius = _pendingRoundaboutRadius });
-                    if (!EntityManager.HasComponent<Updated>(entities[j]))
-                    {
-                        EntityManager.AddComponent<Updated>(entities[j]);
-                    }
+                    PoseRoundabout(entities[j]);
+                    posedCount++;
                     _pendingRoundabouts.RemoveAt(i);
                     break;
                 }
@@ -756,10 +754,42 @@ namespace GridRoadGenerator.Systems
             entities.Dispose();
             nodes.Dispose();
 
+            if (posedCount > 0)
+            {
+                Mod.Log.Info($"{posedCount} rond-point(s) posé(s) (rayon {_pendingRoundaboutRadius:F1} m).");
+            }
             if (_pendingRoundabouts.Count > 0 && _pendingRoundaboutFramesLeft <= 0)
             {
                 Mod.Log.Warn($"{_pendingRoundabouts.Count} rond-point(s) non posé(s) : nœud introuvable après {RoundaboutSearchFrameBudget} frames.");
                 _pendingRoundabouts.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Pose Game.Net.Roundabout sur le nœud, et marque le nœud ET ses arêtes
+        /// connectées comme mises à jour : NetComponentsSystem (qui applique le flag
+        /// de composition Roundabout et recalcule la géométrie) ne retraite que les
+        /// entités portant Updated — se limiter au nœud seul laisserait les arêtes
+        /// avec leur ancienne géométrie près du nœud.
+        /// </summary>
+        private void PoseRoundabout(Entity node)
+        {
+            EntityManager.AddComponentData(node, new Roundabout { m_Radius = _pendingRoundaboutRadius });
+            MarkUpdated(node);
+            if (EntityManager.TryGetBuffer(node, true, out DynamicBuffer<ConnectedEdge> connectedEdges))
+            {
+                for (int i = 0; i < connectedEdges.Length; i++)
+                {
+                    MarkUpdated(connectedEdges[i].m_Edge);
+                }
+            }
+        }
+
+        private void MarkUpdated(Entity entity)
+        {
+            if (!EntityManager.HasComponent<Updated>(entity))
+            {
+                EntityManager.AddComponent<Updated>(entity);
             }
         }
 
