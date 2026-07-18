@@ -6,6 +6,7 @@ import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
 import { Button } from "cs2/ui";
 import styles from "./gridPanel.module.scss";
+import { locString } from "./locHelpers";
 import { PrefabPicker } from "./prefabPicker";
 import { VC, VF, VT } from "./vanilla";
 import {
@@ -203,19 +204,20 @@ export const LegacyGridPanel = () => {
 
     // Taille et style du cercle de retournement : voir le commentaire équivalent
     // dans gridPanelNative.tsx (même logique, panneau custom éprouvé ici).
+    const loc = (key: string, fallback: string) => locString(translate(key, fallback) ?? fallback);
     const capSizeItems = [
-        { value: CAP_SIZE_AUTO, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeAuto", "Automatic (road width)") },
-        { value: CAP_SIZE_SMALL, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeSmall", "Small") },
-        { value: CAP_SIZE_MEDIUM, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeMedium", "Medium") },
-        { value: CAP_SIZE_LARGE, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeLarge", "Large") },
+        { value: CAP_SIZE_AUTO, displayName: loc("GridRoadGenerator.UI.CulDeSacCapSizeAuto", "Automatic (road width)") },
+        { value: CAP_SIZE_SMALL, displayName: loc("GridRoadGenerator.UI.CulDeSacCapSizeSmall", "Small") },
+        { value: CAP_SIZE_MEDIUM, displayName: loc("GridRoadGenerator.UI.CulDeSacCapSizeMedium", "Medium") },
+        { value: CAP_SIZE_LARGE, displayName: loc("GridRoadGenerator.UI.CulDeSacCapSizeLarge", "Large") },
         ...(culDeSacCapStyle !== CAP_STYLE_ASPHALT
-            ? [{ value: CAP_SIZE_XL, displayName: translate("GridRoadGenerator.UI.CulDeSacCapSizeXL", "XL") }]
+            ? [{ value: CAP_SIZE_XL, displayName: loc("GridRoadGenerator.UI.CulDeSacCapSizeXL", "XL") }]
             : []),
     ];
     const capStyleItems = [
-        { value: CAP_STYLE_ASPHALT, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleAsphalt", "Asphalt") },
-        { value: CAP_STYLE_GRASS, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass") },
-        { value: CAP_STYLE_TREES, displayName: translate("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees") },
+        { value: CAP_STYLE_ASPHALT, displayName: loc("GridRoadGenerator.UI.CulDeSacCapStyleAsphalt", "Asphalt") },
+        { value: CAP_STYLE_GRASS, displayName: loc("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass") },
+        { value: CAP_STYLE_TREES, displayName: loc("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees") },
     ];
     const handleCapStyleChange = (value: number) => {
         if (value === CAP_STYLE_ASPHALT && culDeSacCapSize === CAP_SIZE_XL) {
