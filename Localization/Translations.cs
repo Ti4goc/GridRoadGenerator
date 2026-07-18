@@ -147,7 +147,6 @@ namespace GridRoadGenerator.Localization
                 // Les libellés mode/colonnes/lignes/espacement réutilisent ceux des Options.
                 { "GridRoadGenerator.UI.Title", ModName },
                 { "GridRoadGenerator.UI.Mode", t.ModeLabel },
-                { "GridRoadGenerator.UI.Grid", t.GroupGrid },
                 { "GridRoadGenerator.UI.ModeFit", t.EnumFitToArea },
                 { "GridRoadGenerator.UI.ModeFixed", t.EnumFixedSpacing },
                 { "GridRoadGenerator.UI.Columns", t.ColumnsLabel },
