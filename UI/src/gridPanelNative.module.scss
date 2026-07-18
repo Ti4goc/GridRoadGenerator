@@ -23,16 +23,25 @@ $input-border-hover-color: #ffffff59;
     width: 100%;
 }
 
+// Accent violet du thème vanilla (état sélectionné/actif des ToolButtons, cf.
+// prefabPicker.module.scss) : aucune variable CSS exposée par le jeu pour
+// cette teinte n'a été trouvée dans les sources accessibles (types cs2/ui,
+// SCSS de NetworkTools) — valeur reprise telle quelle du reste du mod.
+$accent-violet: #9645ff;
+
 // En-tête composé : icône de grille + titre majuscules + chevron replier.
 // Poignée de déplacement (drag) sur toute la zone, sauf le bouton chevron
 // (stopPropagation) et le bouton de fermeture natif du Panel (en dehors de
-// ce slot `header`, rendu par Panel lui-même via son propre thème).
+// ce slot `header`, rendu par Panel lui-même via son propre thème). Fin
+// soulignement violet : seule touche d'accent du panneau, pas de fond plein.
 .header {
     display: flex;
     flex-direction: row;
     align-items: center;
     cursor: move;
     width: 100%;
+    padding-bottom: 6rem;
+    border-bottom: 1rem solid $accent-violet;
 }
 
 .headerIcon {

@@ -14,6 +14,10 @@ $panel-padding-y: 12rem;
 $input-bg-color: #00000026; // rgba(0, 0, 0, 0.15)
 $input-border-color: #ffffff33; // rgba(255, 255, 255, 0.2)
 $input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
+// Accent violet du thème vanilla (état sélectionné/actif des ToolButtons, déjà
+// utilisé tel quel dans prefabPicker.module.scss) : aucune variable CSS exposée
+// par le jeu pour cette teinte n'a été trouvée dans les sources accessibles.
+$accent-violet: #9645ff;
 
 // top/left sont posés en style inline (position draggable persistée) sur le
 // wrapper, pas sur .panel : .panel a overflow:hidden (coins arrondis), et le
@@ -37,12 +41,14 @@ $input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
     overflow: hidden;
 }
 
-// Barre de titre : poignée de déplacement du panneau.
+// Barre de titre : poignée de déplacement du panneau. Fin soulignement violet
+// (accent du thème vanilla) : seule touche de couleur du panneau, pas de fond plein.
 .header {
     padding: $panel-padding-y $panel-padding-x 8rem;
     font-weight: 600;
     color: white;
     cursor: move;
+    border-bottom: 1rem solid $accent-violet;
 }
 
 // Zone défilante des sections : bornée à une fraction de la hauteur d'écran
@@ -70,7 +76,7 @@ $input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
     align-items: center;
     cursor: pointer;
     padding-bottom: 4rem;
-    border-bottom: 1rem solid #ffffff26;
+    border-bottom: 1rem solid #9645ff59; // accent violet, atténué (3 sections par panneau)
 }
 
 .foldoutChevron {
