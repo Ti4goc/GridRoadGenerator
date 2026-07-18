@@ -52,13 +52,15 @@ namespace GridRoadGenerator.Core
         /// <summary>Fréquence des impasses (0–100 %) : motif déterministe "une sur N", pas aléatoire.</summary>
         public float CulDeSacRatio;
         /// <summary>
-        /// Diamètre (m) de la boucle de retournement ajoutée au bout de chaque impasse
-        /// (aucune boucle de retournement placeable n'existe nativement ni chez un mod
-        /// tiers installé : approximée par un petit losange fermé en segments droits,
-        /// dimensionné par l'appelant selon la largeur de la route choisie).
-        /// 0 = pas de boucle (dead-end simple, comportement d'avant ce paramètre).
+        /// Diamètre (m) du rond-point de retournement à demander au bout de chaque
+        /// impasse. Ne dessine AUCUNE géométrie ici : GenerateGrid se contente de
+        /// signaler, via roundaboutPositions, où le nœud final devra recevoir le vrai
+        /// composant natif Game.Net.Roundabout (le jeu génère alors lui-même la
+        /// géométrie circulaire — c'est l'appelant ECS qui pose le composant une fois
+        /// le nœud réellement créé, Core restant indépendant de l'ECS).
+        /// 0 = pas de rond-point (dead-end simple, comportement d'avant ce paramètre).
         /// </summary>
-        public float TurningLoopDiameter;
+        public float RoundaboutDiameter;
 
         public static GridParameters Default => new GridParameters
         {
@@ -71,7 +73,7 @@ namespace GridRoadGenerator.Core
             CulDeSacDepth = 0.75f,
             Staggered = true,
             CulDeSacRatio = 100f,
-            TurningLoopDiameter = 0f
+            RoundaboutDiameter = 0f
         };
     }
 
@@ -136,14 +138,23 @@ namespace GridRoadGenerator.Core
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
             => GenerateGrid(selectedNodePositions, parameters, out _);
 
+        /// <summary>Surcharge pratique quand les positions de rond-point ne sont pas nécessaires (ex. tests MinNodeDistance).</summary>
+        public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
+            GridParameters parameters, out int omittedNodeCount)
+            => GenerateGrid(selectedNodePositions, parameters, out omittedNodeCount, out _);
+
         /// <summary>
         /// Génère la grille. omittedNodeCount compte les croisements omis pour cause de
         /// proximité excessive avec un autre nœud généré (MinNodeDistance) — 0 si aucun.
+        /// roundaboutPositions liste les bouts d'impasse (RoundaboutDiameter > 0) où
+        /// l'appelant ECS doit poser Game.Net.Roundabout une fois le nœud réel créé —
+        /// Core ne dessine aucune géométrie de rond-point lui-même.
         /// </summary>
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
-            GridParameters parameters, out int omittedNodeCount)
+            GridParameters parameters, out int omittedNodeCount, out List<float3> roundaboutPositions)
         {
             omittedNodeCount = 0;
+            roundaboutPositions = new List<float3>();
             if (selectedNodePositions == null || selectedNodePositions.Count < 2)
                 throw new ArgumentException("Il faut au moins 2 nœuds sélectionnés.");
 
@@ -203,7 +214,7 @@ namespace GridRoadGenerator.Core
             foreach (var v in vPositions)
                 vLines.Add(new GridLine { Position = v, Intervals = ClipLineToPolygon(local, axisIsU: false, position: v) });
 
-            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount);
+            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount, roundaboutPositions);
         }
 
         // ------------------------------------------------------------------
@@ -225,7 +236,8 @@ namespace GridRoadGenerator.Core
         /// donc déterministe : c'est toujours le croisement le plus tardif qui cède.
         /// </summary>
         private static List<RoadSegmentDef> BuildSubSegments(List<GridLine> uLines, List<GridLine> vLines,
-            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters, out int omittedNodeCount)
+            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters, out int omittedNodeCount,
+            List<float3> roundaboutPositions)
         {
             var uSplits = new List<(float t, float3 world)>[uLines.Count];
             var vSplits = new List<(float t, float3 world)>[vLines.Count];
@@ -272,9 +284,9 @@ namespace GridRoadGenerator.Core
             // "colonnes", perpendiculaires à l'axe principal). Les collectrices
             // (v-lines) restent toujours des traversées complètes.
             for (int i = 0; i < uLines.Count; i++)
-                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters, ref omittedNodeCount);
+                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters, ref omittedNodeCount, roundaboutPositions);
             for (int i = 0; i < vLines.Count; i++)
-                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters, ref omittedNodeCount);
+                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters, ref omittedNodeCount, roundaboutPositions);
             return segments;
         }
 
@@ -307,7 +319,7 @@ namespace GridRoadGenerator.Core
         /// </summary>
         private static void EmitLine(List<RoadSegmentDef> segments, GridLine line,
             List<(float t, float3 world)> splits, bool axisIsU, float2 origin, float2 uDir, float2 vDir, float y,
-            GridParameters parameters, ref int omittedNodeCount)
+            GridParameters parameters, ref int omittedNodeCount, List<float3> roundaboutPositions)
         {
             splits.Sort((a, b) => a.t.CompareTo(b.t));
             bool culDeSac = axisIsU && parameters.CulDeSacMode;
@@ -353,7 +365,7 @@ namespace GridRoadGenerator.Core
                     }
 
                     EmitCulDeSacBlock(segments, line, chain[i], chain[i + 1], blockIndex, parameters,
-                        origin, uDir, vDir, y, ref omittedNodeCount);
+                        origin, uDir, vDir, y, ref omittedNodeCount, roundaboutPositions);
                     blockIndex++;
                 }
             }
@@ -371,7 +383,7 @@ namespace GridRoadGenerator.Core
         private static void EmitCulDeSacBlock(List<RoadSegmentDef> segments, GridLine line,
             (float t, float3 world, bool isCollector) a, (float t, float3 world, bool isCollector) b,
             int blockIndex, GridParameters parameters, float2 origin, float2 uDir, float2 vDir, float y,
-            ref int omittedNodeCount)
+            ref int omittedNodeCount, List<float3> roundaboutPositions)
         {
             if (!IsCulDeSacBlock(blockIndex, parameters.CulDeSacRatio))
             {
@@ -406,49 +418,15 @@ namespace GridRoadGenerator.Core
 
             segments.Add(new RoadSegmentDef(start.world, stubWorld, isHorizontal: false));
 
-            if (parameters.TurningLoopDiameter > 0f)
+            if (parameters.RoundaboutDiameter > 0f)
             {
-                EmitTurningLoop(segments, start.world, stubWorld, parameters.TurningLoopDiameter);
+                // Aucune géométrie dessinée ici : le nœud à stubWorld n'existe pas
+                // encore (il sera créé par le pipeline ECS du jeu à la pose). On se
+                // contente de signaler sa position ; c'est l'appelant qui posera le
+                // composant natif Game.Net.Roundabout une fois le nœud réel trouvé.
+                roundaboutPositions.Add(stubWorld);
             }
         }
-
-        /// <summary>Diamètre plancher (m) garantissant que chaque côté de la boucle atteint MinSegmentLength.</summary>
-        private const float MinTurningLoopDiameter = 12f;
-
-        /// <summary>
-        /// Boucle de retournement en bout d'impasse : aucun rond-point placeable
-        /// n'existe nativement ni chez un mod tiers installé (voir recherche du
-        /// chantier dédié) — approximée par un petit losange fermé en 4 segments
-        /// droits, en "sucette" au bout du tronçon existant (stubWorld → freeEnd →
-        /// côté droit → côté gauche → retour à freeEnd), qui laisse un véhicule
-        /// faire demi-tour sans manœuvre. Toujours tournée vers la droite du sens
-        /// de l'impasse, indépendamment de Staggered (concept indépendant).
-        /// </summary>
-        private static void EmitTurningLoop(List<RoadSegmentDef> segments, float3 stubStart, float3 freeEnd, float diameter)
-        {
-            float2 direction = freeEnd.xz - stubStart.xz;
-            float length = math.length(direction);
-            if (length < Epsilon)
-            {
-                return; // impasse dégénérée (longueur nulle), pas de direction pour orienter la boucle
-            }
-            direction /= length;
-            float2 perpendicular = new float2(-direction.y, direction.x);
-
-            float radius = math.max(diameter, MinTurningLoopDiameter) * 0.5f;
-            float3 farTip = OffsetXZ(freeEnd, direction * (2f * radius));
-            float3 rightSide = OffsetXZ(freeEnd, direction * radius + perpendicular * radius);
-            float3 leftSide = OffsetXZ(freeEnd, direction * radius - perpendicular * radius);
-
-            // Losange fermé : freeEnd → droite → pointe → gauche → freeEnd.
-            segments.Add(new RoadSegmentDef(freeEnd, rightSide, isHorizontal: false));
-            segments.Add(new RoadSegmentDef(rightSide, farTip, isHorizontal: false));
-            segments.Add(new RoadSegmentDef(farTip, leftSide, isHorizontal: false));
-            segments.Add(new RoadSegmentDef(leftSide, freeEnd, isHorizontal: false));
-        }
-
-        /// <summary>Décale un point monde d'un vecteur 2D dans le plan (X, Z), hauteur inchangée.</summary>
-        private static float3 OffsetXZ(float3 point, float2 offset) => new float3(point.x + offset.x, point.y, point.z + offset.y);
 
         /// <summary>Motif déterministe "une fois sur N" : N = round(100/ratio), jamais aléatoire.</summary>
         private static bool IsCulDeSacBlock(int blockIndex, float ratioPercent)

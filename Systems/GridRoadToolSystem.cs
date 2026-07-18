@@ -12,6 +12,7 @@ using Game.Simulation;
 using Game.Tools;
 using GridRoadGenerator.Core;
 using GridRoadGenerator.Settings;
+using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -43,8 +44,12 @@ namespace GridRoadGenerator.Systems
         private const int MaxPathfindNodes = 2000;
         /// <summary>Garde-fou : nombre max de nœuds du contour détecté au double-clic.</summary>
         private const int MaxPerimeterNodes = 50;
-        /// <summary>Diamètre de la boucle de retournement en bout d'impasse, en multiple de la largeur de route choisie.</summary>
-        private const float TurningLoopWidthMultiplier = 2.5f;
+        /// <summary>Diamètre du rond-point en bout d'impasse, en multiple de la largeur de route choisie.</summary>
+        private const float RoundaboutWidthMultiplier = 2.5f;
+        /// <summary>Distance (m) tolérée entre un point de rond-point demandé et le nœud réel créé par le jeu.</summary>
+        private const float RoundaboutSnapDistance = 2f;
+        /// <summary>Garde-fou : nombre de frames avant d'abandonner la recherche d'un nœud de rond-point.</summary>
+        private const int RoundaboutSearchFrameBudget = 10;
 
         public override string toolID => "Grid Road Tool";
 
@@ -59,6 +64,20 @@ namespace GridRoadGenerator.Systems
         private Entity _lastClickedNode = Entity.Null;
         private float _lastClickTime = -1f;
         private readonly List<Entity> _pathScratch = new List<Entity>();
+
+        // Ronds-points natifs (Game.Net.Roundabout) en bout d'impasse : Core signale
+        // seulement des POSITIONS (aucune géométrie), recalculées à chaque frame
+        // d'aperçu — _lastPreviewRoundabouts contient donc toujours celles de la
+        // dernière frame prévisualisée, celle qui sera réellement posée à la
+        // validation. Une fois la pose confirmée, _pendingRoundabouts prend le
+        // relais : les nœuds réels n'existent pas encore au moment de l'Apply (créés
+        // par le pipeline ECS du jeu sur les frames suivantes), donc on les recherche
+        // par proximité pendant quelques frames avant d'y poser le composant.
+        private readonly List<float3> _lastPreviewRoundabouts = new List<float3>();
+        private float _lastPreviewRoundaboutRadius;
+        private readonly List<float3> _pendingRoundabouts = new List<float3>();
+        private float _pendingRoundaboutRadius;
+        private int _pendingRoundaboutFramesLeft;
 
         /// <summary>Vrai si le dernier double-clic n'a pas trouvé de contour fermé (affiché en tooltip).</summary>
         public bool PerimeterDetectionFailed { get; private set; }
@@ -171,6 +190,14 @@ namespace GridRoadGenerator.Systems
 
             try
             {
+                // Poursuit la recherche des nœuds de rond-point en attente, quel que
+                // soit l'état de l'outil par ailleurs (même après ResetState : la
+                // pose est indépendante de la sélection en cours).
+                if (_pendingRoundabouts.Count > 0)
+                {
+                    ProcessPendingRoundabouts();
+                }
+
                 // Échap : annule la sélection en cours (1er appui) ; sans sélection,
                 // désactive l'outil — le panneau se ferme et le bouton toolbar se
                 // relâche via TOOL_ACTIVE (même cadence que les outils vanilla).
@@ -196,6 +223,17 @@ namespace GridRoadGenerator.Systems
                     if (GetAllowApply() && !m_DefinitionQuery.IsEmptyIgnoreFilter)
                     {
                         applyMode = ApplyMode.Apply;
+                        // Les nœuds réels n'existent pas encore à cet instant (créés par
+                        // le pipeline ECS du jeu sur les prochaines frames) : on
+                        // mémorise juste où ils doivent apparaître, la recherche se
+                        // fait dans ProcessPendingRoundabouts (appelée chaque frame).
+                        if (_lastPreviewRoundabouts.Count > 0)
+                        {
+                            _pendingRoundabouts.Clear();
+                            _pendingRoundabouts.AddRange(_lastPreviewRoundabouts);
+                            _pendingRoundaboutRadius = _lastPreviewRoundaboutRadius;
+                            _pendingRoundaboutFramesLeft = RoundaboutSearchFrameBudget;
+                        }
                         ResetState();
                         return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                     }
@@ -598,23 +636,28 @@ namespace GridRoadGenerator.Systems
             try
             {
                 GridParameters parameters = _settings.ToGridParameters();
-                // Boucle de retournement dimensionnée sur la route choisie : aucun
-                // rond-point placeable n'existe nativement ni chez un mod tiers
-                // installé (recherche dédiée). GridGenerator.MinTurningLoopDiameter
-                // garantit un minimum viable même sur une route étroite.
+                // Rond-point natif (Game.Net.Roundabout) dimensionné sur la route
+                // choisie : posé après coup sur le nœud réel (voir ApplyPendingRoundabouts),
+                // Core se contente de signaler où via roundaboutPositions.
                 if (parameters.CulDeSacMode
                     && EntityManager.TryGetComponent(prefabEntity, out NetGeometryData geometryData)
                     && geometryData.m_DefaultWidth > 0f)
                 {
-                    parameters.TurningLoopDiameter = geometryData.m_DefaultWidth * TurningLoopWidthMultiplier;
+                    parameters.RoundaboutDiameter = geometryData.m_DefaultWidth * RoundaboutWidthMultiplier;
                 }
 
-                segments = GridGenerator.GenerateGrid(_selectedPositions, parameters, out int omittedNodeCount);
+                segments = GridGenerator.GenerateGrid(_selectedPositions, parameters, out int omittedNodeCount, out List<float3> roundaboutPositions);
                 if (omittedNodeCount > 0 && !_omittedNodesLogged)
                 {
                     _omittedNodesLogged = true;
                     Mod.Log.Info($"{omittedNodeCount} croisement(s) omis (nœuds trop proches, < {GridGenerator.MinNodeDistance} m).");
                 }
+
+                // Mémorise les ronds-points de CETTE frame d'aperçu : c'est elle qui
+                // sera réellement posée si le joueur valide juste après.
+                _lastPreviewRoundabouts.Clear();
+                _lastPreviewRoundabouts.AddRange(roundaboutPositions);
+                _lastPreviewRoundaboutRadius = parameters.RoundaboutDiameter * 0.5f;
             }
             catch (Exception e)
             {
@@ -668,6 +711,56 @@ namespace GridRoadGenerator.Systems
                 created++;
             }
             return created;
+        }
+
+        /// <summary>
+        /// Recherche par proximité les nœuds réels correspondant aux ronds-points
+        /// demandés à la dernière validation (les nœuds n'existent pas encore au
+        /// moment de l'Apply : ils sont créés par le pipeline ECS du jeu sur les
+        /// frames suivantes) et y pose le composant natif Game.Net.Roundabout —
+        /// c'est ensuite le jeu lui-même qui génère la géométrie circulaire réelle,
+        /// aucun dessin de notre part. Abandonne proprement (log, sans blocage) après
+        /// RoundaboutSearchFrameBudget frames si un nœud reste introuvable (ex.
+        /// tronçon finalement refusé par une collision).
+        /// </summary>
+        private void ProcessPendingRoundabouts()
+        {
+            _pendingRoundaboutFramesLeft--;
+
+            EntityQuery candidateQuery = GetEntityQuery(
+                ComponentType.ReadOnly<Game.Net.Node>(),
+                ComponentType.Exclude<Roundabout>(),
+                ComponentType.Exclude<Temp>(),
+                ComponentType.Exclude<Deleted>());
+            NativeArray<Entity> entities = candidateQuery.ToEntityArray(Allocator.Temp);
+            NativeArray<Game.Net.Node> nodes = candidateQuery.ToComponentDataArray<Game.Net.Node>(Allocator.Temp);
+
+            for (int i = _pendingRoundabouts.Count - 1; i >= 0; i--)
+            {
+                float3 target = _pendingRoundabouts[i];
+                for (int j = 0; j < entities.Length; j++)
+                {
+                    if (math.distance(nodes[j].m_Position.xz, target.xz) >= RoundaboutSnapDistance)
+                    {
+                        continue;
+                    }
+                    EntityManager.AddComponentData(entities[j], new Roundabout { m_Radius = _pendingRoundaboutRadius });
+                    if (!EntityManager.HasComponent<Updated>(entities[j]))
+                    {
+                        EntityManager.AddComponent<Updated>(entities[j]);
+                    }
+                    _pendingRoundabouts.RemoveAt(i);
+                    break;
+                }
+            }
+            entities.Dispose();
+            nodes.Dispose();
+
+            if (_pendingRoundabouts.Count > 0 && _pendingRoundaboutFramesLeft <= 0)
+            {
+                Mod.Log.Warn($"{_pendingRoundabouts.Count} rond-point(s) non posé(s) : nœud introuvable après {RoundaboutSearchFrameBudget} frames.");
+                _pendingRoundabouts.Clear();
+            }
         }
 
         /// <summary>

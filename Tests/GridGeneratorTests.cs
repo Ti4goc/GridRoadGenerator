@@ -646,12 +646,13 @@ namespace GridRoadGenerator.Tests
     }
 
     /// <summary>
-    /// Vérifie la boucle de retournement (TurningLoopDiameter) en bout d'impasse :
-    /// aucune boucle par défaut (régression zéro), et une boucle fermée en 4
-    /// segments droits ("losange") quand activée, chaque côté au-dessus de
-    /// MinSegmentLength, correctement refermée sur le bout de l'impasse.
+    /// Vérifie le signalement des ronds-points (RoundaboutDiameter) en bout
+    /// d'impasse : Core ne dessine AUCUNE géométrie de rond-point lui-même — il
+    /// se contente de lister, dans roundaboutPositions, les bouts d'impasse où
+    /// l'appelant ECS devra poser le composant natif Game.Net.Roundabout une
+    /// fois le nœud réel créé (voir GridRoadToolSystem).
     /// </summary>
-    public class GridGeneratorTurningLoopTests
+    public class GridGeneratorRoundaboutTests
     {
         private static readonly List<float3> SquareNodes = new List<float3>
         {
@@ -664,7 +665,10 @@ namespace GridRoadGenerator.Tests
         // Rows=2, Columns=1 : collectrices à v=100 et v=200, une seule colonne
         // (u=150) devenant impasse. Profondeur par défaut (0.75) ⇒ 2 impasses
         // valides (blocs [100,200] et [200,300]), aucune omise pour proximité.
-        private static GridParameters BaseParameters(float turningLoopDiameter) => new GridParameters
+        // Impasses attendues : stubT=125 (bloc [100,200], part de v=200) et
+        // stubT=275 (bloc [200,300], part de v=200) ⇒ points monde (150,125) et
+        // (150,275).
+        private static GridParameters BaseParameters(float roundaboutDiameter) => new GridParameters
         {
             Mode = SpacingMode.FitToArea,
             Rows = 2,
@@ -674,67 +678,83 @@ namespace GridRoadGenerator.Tests
             CulDeSacDepth = 0.75f,
             Staggered = true,
             CulDeSacRatio = 100f,
-            TurningLoopDiameter = turningLoopDiameter,
+            RoundaboutDiameter = roundaboutDiameter,
         };
 
         private static List<RoadSegmentDef> ColumnSegments(List<RoadSegmentDef> segments) =>
             segments.Where(s => !s.IsHorizontal).ToList();
 
         [Fact]
-        public void DiameterZero_NoLoopAdded_MatchesPreviousBehavior()
+        public void DiameterZero_NoRoundaboutSignaled_MatchesPreviousBehavior()
         {
-            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(0f));
+            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(0f), out _, out var roundabouts);
             var columns = ColumnSegments(segments);
 
-            // Seulement les 2 tronçons d'impasse, aucun segment de boucle.
+            // Seulement les 2 tronçons d'impasse, aucune géométrie ajoutée : Core
+            // ne dessine jamais de boucle lui-même, avec ou sans RoundaboutDiameter.
             Assert.Equal(2, columns.Count);
+            Assert.Empty(roundabouts);
         }
 
         [Fact]
-        public void DiameterPositive_AddsClosedFourSegmentLoopAtEachDeadEnd()
+        public void DiameterPositive_SignalsRoundaboutAtEachDeadEndWithoutAddingGeometry()
         {
-            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(20f));
+            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(20f), out _, out var roundabouts);
             var columns = ColumnSegments(segments);
 
-            // 2 tronçons d'impasse + 2 boucles de 4 segments chacune.
-            Assert.Equal(10, columns.Count);
+            // Toujours seulement 2 tronçons d'impasse : aucune géométrie
+            // supplémentaire, contrairement à l'ancienne approche par losange.
+            Assert.Equal(2, columns.Count);
 
-            // Chaque bout d'impasse (jonction "sucette") est touché par exactement
-            // 3 segments : le tronçon qui y arrive, et les deux côtés de la boucle
-            // qui en partent et y reviennent — preuve que la boucle est bien
-            // refermée sur le même point (fusion en un seul nœud en jeu).
-            var touchCounts = new Dictionary<float3, int>();
-            foreach (var segment in columns)
-            {
-                touchCounts[segment.Start] = touchCounts.TryGetValue(segment.Start, out int s) ? s + 1 : 1;
-                touchCounts[segment.End] = touchCounts.TryGetValue(segment.End, out int e) ? e + 1 : 1;
-            }
-            var junctions = touchCounts.Where(p => p.Value == 3).ToList();
-            Assert.Equal(2, junctions.Count);
+            // Un point de rond-point signalé par impasse, exactement au bout
+            // (stubWorld) de chaque tronçon — pas ailleurs, pas dupliqué.
+            Assert.Equal(2, roundabouts.Count);
+            Assert.Contains(roundabouts, p => math.distance(p.xz, new float2(150f, 125f)) < 0.5f);
+            Assert.Contains(roundabouts, p => math.distance(p.xz, new float2(150f, 275f)) < 0.5f);
 
-            foreach (var segment in columns)
+            foreach (float3 point in roundabouts)
             {
-                float length = math.distance(segment.Start.xz, segment.End.xz);
-                Assert.True(length >= GridGenerator.MinSegmentLength - 0.5f,
-                    $"Segment de boucle trop court : {length} m.");
+                bool matchesSegmentEnd = columns.Any(s => math.distance(s.End.xz, point.xz) < 0.5f);
+                Assert.True(matchesSegmentEnd, $"Rond-point signalé sans correspondre au bout d'un tronçon d'impasse : {point}.");
             }
         }
 
         [Fact]
-        public void DiameterBelowMinimum_IsClampedNotDegenerate()
+        public void OmittedCulDeSac_NeverSignalsRoundabout()
         {
-            // Diamètre ridiculement petit (1 m, bien en dessous du plancher) :
-            // la boucle doit quand même être viable (segments >= MinSegmentLength),
-            // jamais une géométrie dégénérée à longueur quasi nulle.
-            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(1f));
+            // Profondeur 90 % sur un bloc de 70 m : le bloc [100,200] devrait
+            // s'arrêter à 7 m de la collectrice visée (< MinNodeDistance) et être
+            // omis (voir GridGeneratorMinNodeDistanceTests) — aucun rond-point ne
+            // doit être signalé pour une impasse qui n'existe finalement pas.
+            var nodes = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(300f, 0f, 0f),
+                new float3(300f, 0f, 210f),
+                new float3(0f, 0f, 210f),
+            };
+            var parameters = new GridParameters
+            {
+                Mode = SpacingMode.FixedSpacing,
+                Columns = 1,
+                Rows = 1,
+                SpacingMeters = 70f,
+                CulDeSacMode = true,
+                CulDeSacDepth = 0.9f,
+                Staggered = true,
+                CulDeSacRatio = 100f,
+                RoundaboutDiameter = 20f,
+            };
+
+            var segments = GridGenerator.GenerateGrid(nodes, parameters, out int omittedNodeCount, out var roundabouts);
             var columns = ColumnSegments(segments);
 
-            Assert.Equal(10, columns.Count);
-            foreach (var segment in columns)
+            Assert.True(omittedNodeCount >= 1);
+            // Aucun rond-point signalé pour un bout de tronçon qui n'a pas été créé.
+            foreach (float3 point in roundabouts)
             {
-                float length = math.distance(segment.Start.xz, segment.End.xz);
-                Assert.True(length >= GridGenerator.MinSegmentLength - 0.5f,
-                    $"Segment de boucle dégénéré malgré le plancher de diamètre : {length} m.");
+                bool matchesSegmentEnd = columns.Any(s => math.distance(s.End.xz, point.xz) < 0.5f);
+                Assert.True(matchesSegmentEnd, $"Rond-point signalé pour une impasse omise : {point}.");
             }
         }
     }
