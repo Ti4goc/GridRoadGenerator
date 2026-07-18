@@ -51,6 +51,14 @@ namespace GridRoadGenerator.Core
         public bool Staggered;
         /// <summary>Fréquence des impasses (0–100 %) : motif déterministe "une sur N", pas aléatoire.</summary>
         public float CulDeSacRatio;
+        /// <summary>
+        /// Diamètre (m) de la boucle de retournement ajoutée au bout de chaque impasse
+        /// (aucune boucle de retournement placeable n'existe nativement ni chez un mod
+        /// tiers installé : approximée par un petit losange fermé en segments droits,
+        /// dimensionné par l'appelant selon la largeur de la route choisie).
+        /// 0 = pas de boucle (dead-end simple, comportement d'avant ce paramètre).
+        /// </summary>
+        public float TurningLoopDiameter;
 
         public static GridParameters Default => new GridParameters
         {
@@ -62,7 +70,8 @@ namespace GridRoadGenerator.Core
             CulDeSacMode = false,
             CulDeSacDepth = 0.75f,
             Staggered = true,
-            CulDeSacRatio = 100f
+            CulDeSacRatio = 100f,
+            TurningLoopDiameter = 0f
         };
     }
 
@@ -396,7 +405,50 @@ namespace GridRoadGenerator.Core
             }
 
             segments.Add(new RoadSegmentDef(start.world, stubWorld, isHorizontal: false));
+
+            if (parameters.TurningLoopDiameter > 0f)
+            {
+                EmitTurningLoop(segments, start.world, stubWorld, parameters.TurningLoopDiameter);
+            }
         }
+
+        /// <summary>Diamètre plancher (m) garantissant que chaque côté de la boucle atteint MinSegmentLength.</summary>
+        private const float MinTurningLoopDiameter = 12f;
+
+        /// <summary>
+        /// Boucle de retournement en bout d'impasse : aucun rond-point placeable
+        /// n'existe nativement ni chez un mod tiers installé (voir recherche du
+        /// chantier dédié) — approximée par un petit losange fermé en 4 segments
+        /// droits, en "sucette" au bout du tronçon existant (stubWorld → freeEnd →
+        /// côté droit → côté gauche → retour à freeEnd), qui laisse un véhicule
+        /// faire demi-tour sans manœuvre. Toujours tournée vers la droite du sens
+        /// de l'impasse, indépendamment de Staggered (concept indépendant).
+        /// </summary>
+        private static void EmitTurningLoop(List<RoadSegmentDef> segments, float3 stubStart, float3 freeEnd, float diameter)
+        {
+            float2 direction = freeEnd.xz - stubStart.xz;
+            float length = math.length(direction);
+            if (length < Epsilon)
+            {
+                return; // impasse dégénérée (longueur nulle), pas de direction pour orienter la boucle
+            }
+            direction /= length;
+            float2 perpendicular = new float2(-direction.y, direction.x);
+
+            float radius = math.max(diameter, MinTurningLoopDiameter) * 0.5f;
+            float3 farTip = OffsetXZ(freeEnd, direction * (2f * radius));
+            float3 rightSide = OffsetXZ(freeEnd, direction * radius + perpendicular * radius);
+            float3 leftSide = OffsetXZ(freeEnd, direction * radius - perpendicular * radius);
+
+            // Losange fermé : freeEnd → droite → pointe → gauche → freeEnd.
+            segments.Add(new RoadSegmentDef(freeEnd, rightSide, isHorizontal: false));
+            segments.Add(new RoadSegmentDef(rightSide, farTip, isHorizontal: false));
+            segments.Add(new RoadSegmentDef(farTip, leftSide, isHorizontal: false));
+            segments.Add(new RoadSegmentDef(leftSide, freeEnd, isHorizontal: false));
+        }
+
+        /// <summary>Décale un point monde d'un vecteur 2D dans le plan (X, Z), hauteur inchangée.</summary>
+        private static float3 OffsetXZ(float3 point, float2 offset) => new float3(point.x + offset.x, point.y, point.z + offset.y);
 
         /// <summary>Motif déterministe "une fois sur N" : N = round(100/ratio), jamais aléatoire.</summary>
         private static bool IsCulDeSacBlock(int blockIndex, float ratioPercent)

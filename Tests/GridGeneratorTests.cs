@@ -644,4 +644,98 @@ namespace GridRoadGenerator.Tests
             return GridGenerator.MinSegmentLength - 0.5f;
         }
     }
+
+    /// <summary>
+    /// Vérifie la boucle de retournement (TurningLoopDiameter) en bout d'impasse :
+    /// aucune boucle par défaut (régression zéro), et une boucle fermée en 4
+    /// segments droits ("losange") quand activée, chaque côté au-dessus de
+    /// MinSegmentLength, correctement refermée sur le bout de l'impasse.
+    /// </summary>
+    public class GridGeneratorTurningLoopTests
+    {
+        private static readonly List<float3> SquareNodes = new List<float3>
+        {
+            new float3(0f, 0f, 0f),
+            new float3(300f, 0f, 0f),
+            new float3(300f, 0f, 300f),
+            new float3(0f, 0f, 300f),
+        };
+
+        // Rows=2, Columns=1 : collectrices à v=100 et v=200, une seule colonne
+        // (u=150) devenant impasse. Profondeur par défaut (0.75) ⇒ 2 impasses
+        // valides (blocs [100,200] et [200,300]), aucune omise pour proximité.
+        private static GridParameters BaseParameters(float turningLoopDiameter) => new GridParameters
+        {
+            Mode = SpacingMode.FitToArea,
+            Rows = 2,
+            Columns = 1,
+            SpacingMeters = 60f,
+            CulDeSacMode = true,
+            CulDeSacDepth = 0.75f,
+            Staggered = true,
+            CulDeSacRatio = 100f,
+            TurningLoopDiameter = turningLoopDiameter,
+        };
+
+        private static List<RoadSegmentDef> ColumnSegments(List<RoadSegmentDef> segments) =>
+            segments.Where(s => !s.IsHorizontal).ToList();
+
+        [Fact]
+        public void DiameterZero_NoLoopAdded_MatchesPreviousBehavior()
+        {
+            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(0f));
+            var columns = ColumnSegments(segments);
+
+            // Seulement les 2 tronçons d'impasse, aucun segment de boucle.
+            Assert.Equal(2, columns.Count);
+        }
+
+        [Fact]
+        public void DiameterPositive_AddsClosedFourSegmentLoopAtEachDeadEnd()
+        {
+            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(20f));
+            var columns = ColumnSegments(segments);
+
+            // 2 tronçons d'impasse + 2 boucles de 4 segments chacune.
+            Assert.Equal(10, columns.Count);
+
+            // Chaque bout d'impasse (jonction "sucette") est touché par exactement
+            // 3 segments : le tronçon qui y arrive, et les deux côtés de la boucle
+            // qui en partent et y reviennent — preuve que la boucle est bien
+            // refermée sur le même point (fusion en un seul nœud en jeu).
+            var touchCounts = new Dictionary<float3, int>();
+            foreach (var segment in columns)
+            {
+                touchCounts[segment.Start] = touchCounts.TryGetValue(segment.Start, out int s) ? s + 1 : 1;
+                touchCounts[segment.End] = touchCounts.TryGetValue(segment.End, out int e) ? e + 1 : 1;
+            }
+            var junctions = touchCounts.Where(p => p.Value == 3).ToList();
+            Assert.Equal(2, junctions.Count);
+
+            foreach (var segment in columns)
+            {
+                float length = math.distance(segment.Start.xz, segment.End.xz);
+                Assert.True(length >= GridGenerator.MinSegmentLength - 0.5f,
+                    $"Segment de boucle trop court : {length} m.");
+            }
+        }
+
+        [Fact]
+        public void DiameterBelowMinimum_IsClampedNotDegenerate()
+        {
+            // Diamètre ridiculement petit (1 m, bien en dessous du plancher) :
+            // la boucle doit quand même être viable (segments >= MinSegmentLength),
+            // jamais une géométrie dégénérée à longueur quasi nulle.
+            var segments = GridGenerator.GenerateGrid(SquareNodes, BaseParameters(1f));
+            var columns = ColumnSegments(segments);
+
+            Assert.Equal(10, columns.Count);
+            foreach (var segment in columns)
+            {
+                float length = math.distance(segment.Start.xz, segment.End.xz);
+                Assert.True(length >= GridGenerator.MinSegmentLength - 0.5f,
+                    $"Segment de boucle dégénéré malgré le plancher de diamètre : {length} m.");
+            }
+        }
+    }
 }

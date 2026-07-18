@@ -43,6 +43,8 @@ namespace GridRoadGenerator.Systems
         private const int MaxPathfindNodes = 2000;
         /// <summary>Garde-fou : nombre max de nœuds du contour détecté au double-clic.</summary>
         private const int MaxPerimeterNodes = 50;
+        /// <summary>Diamètre de la boucle de retournement en bout d'impasse, en multiple de la largeur de route choisie.</summary>
+        private const float TurningLoopWidthMultiplier = 2.5f;
 
         public override string toolID => "Grid Road Tool";
 
@@ -590,10 +592,24 @@ namespace GridRoadGenerator.Systems
                 return 0;
             }
 
+            Entity prefabEntity = m_PrefabSystem.GetEntity(roadPrefab);
+
             List<RoadSegmentDef> segments;
             try
             {
-                segments = GridGenerator.GenerateGrid(_selectedPositions, _settings.ToGridParameters(), out int omittedNodeCount);
+                GridParameters parameters = _settings.ToGridParameters();
+                // Boucle de retournement dimensionnée sur la route choisie : aucun
+                // rond-point placeable n'existe nativement ni chez un mod tiers
+                // installé (recherche dédiée). GridGenerator.MinTurningLoopDiameter
+                // garantit un minimum viable même sur une route étroite.
+                if (parameters.CulDeSacMode
+                    && EntityManager.TryGetComponent(prefabEntity, out NetGeometryData geometryData)
+                    && geometryData.m_DefaultWidth > 0f)
+                {
+                    parameters.TurningLoopDiameter = geometryData.m_DefaultWidth * TurningLoopWidthMultiplier;
+                }
+
+                segments = GridGenerator.GenerateGrid(_selectedPositions, parameters, out int omittedNodeCount);
                 if (omittedNodeCount > 0 && !_omittedNodesLogged)
                 {
                     _omittedNodesLogged = true;
@@ -610,7 +626,6 @@ namespace GridRoadGenerator.Systems
                 return 0;
             }
 
-            Entity prefabEntity = m_PrefabSystem.GetEntity(roadPrefab);
             TerrainHeightData heightData = m_TerrainSystem.GetHeightData();
             List<PerimeterEdge> perimeter = BuildPerimeterEdges();
             EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
