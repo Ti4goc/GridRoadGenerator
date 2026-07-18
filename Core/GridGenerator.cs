@@ -51,16 +51,6 @@ namespace GridRoadGenerator.Core
         public bool Staggered;
         /// <summary>Fréquence des impasses (0–100 %) : motif déterministe "une sur N", pas aléatoire.</summary>
         public float CulDeSacRatio;
-        /// <summary>
-        /// Diamètre (m) du rond-point de retournement à demander au bout de chaque
-        /// impasse. Ne dessine AUCUNE géométrie ici : GenerateGrid se contente de
-        /// signaler, via roundaboutPositions, où le nœud final devra recevoir le vrai
-        /// composant natif Game.Net.Roundabout (le jeu génère alors lui-même la
-        /// géométrie circulaire — c'est l'appelant ECS qui pose le composant une fois
-        /// le nœud réellement créé, Core restant indépendant de l'ECS).
-        /// 0 = pas de rond-point (dead-end simple, comportement d'avant ce paramètre).
-        /// </summary>
-        public float RoundaboutDiameter;
 
         public static GridParameters Default => new GridParameters
         {
@@ -72,8 +62,7 @@ namespace GridRoadGenerator.Core
             CulDeSacMode = false,
             CulDeSacDepth = 0.75f,
             Staggered = true,
-            CulDeSacRatio = 100f,
-            RoundaboutDiameter = 0f
+            CulDeSacRatio = 100f
         };
     }
 
@@ -138,23 +127,14 @@ namespace GridRoadGenerator.Core
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
             => GenerateGrid(selectedNodePositions, parameters, out _);
 
-        /// <summary>Surcharge pratique quand les positions de rond-point ne sont pas nécessaires (ex. tests MinNodeDistance).</summary>
-        public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
-            GridParameters parameters, out int omittedNodeCount)
-            => GenerateGrid(selectedNodePositions, parameters, out omittedNodeCount, out _);
-
         /// <summary>
         /// Génère la grille. omittedNodeCount compte les croisements omis pour cause de
         /// proximité excessive avec un autre nœud généré (MinNodeDistance) — 0 si aucun.
-        /// roundaboutPositions liste les bouts d'impasse (RoundaboutDiameter > 0) où
-        /// l'appelant ECS doit poser Game.Net.Roundabout une fois le nœud réel créé —
-        /// Core ne dessine aucune géométrie de rond-point lui-même.
         /// </summary>
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
-            GridParameters parameters, out int omittedNodeCount, out List<float3> roundaboutPositions)
+            GridParameters parameters, out int omittedNodeCount)
         {
             omittedNodeCount = 0;
-            roundaboutPositions = new List<float3>();
             if (selectedNodePositions == null || selectedNodePositions.Count < 2)
                 throw new ArgumentException("Il faut au moins 2 nœuds sélectionnés.");
 
@@ -214,7 +194,7 @@ namespace GridRoadGenerator.Core
             foreach (var v in vPositions)
                 vLines.Add(new GridLine { Position = v, Intervals = ClipLineToPolygon(local, axisIsU: false, position: v) });
 
-            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount, roundaboutPositions);
+            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount);
         }
 
         // ------------------------------------------------------------------
@@ -236,8 +216,7 @@ namespace GridRoadGenerator.Core
         /// donc déterministe : c'est toujours le croisement le plus tardif qui cède.
         /// </summary>
         private static List<RoadSegmentDef> BuildSubSegments(List<GridLine> uLines, List<GridLine> vLines,
-            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters, out int omittedNodeCount,
-            List<float3> roundaboutPositions)
+            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters, out int omittedNodeCount)
         {
             var uSplits = new List<(float t, float3 world)>[uLines.Count];
             var vSplits = new List<(float t, float3 world)>[vLines.Count];
@@ -284,9 +263,9 @@ namespace GridRoadGenerator.Core
             // "colonnes", perpendiculaires à l'axe principal). Les collectrices
             // (v-lines) restent toujours des traversées complètes.
             for (int i = 0; i < uLines.Count; i++)
-                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters, ref omittedNodeCount, roundaboutPositions);
+                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters, ref omittedNodeCount);
             for (int i = 0; i < vLines.Count; i++)
-                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters, ref omittedNodeCount, roundaboutPositions);
+                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters, ref omittedNodeCount);
             return segments;
         }
 
@@ -319,7 +298,7 @@ namespace GridRoadGenerator.Core
         /// </summary>
         private static void EmitLine(List<RoadSegmentDef> segments, GridLine line,
             List<(float t, float3 world)> splits, bool axisIsU, float2 origin, float2 uDir, float2 vDir, float y,
-            GridParameters parameters, ref int omittedNodeCount, List<float3> roundaboutPositions)
+            GridParameters parameters, ref int omittedNodeCount)
         {
             splits.Sort((a, b) => a.t.CompareTo(b.t));
             bool culDeSac = axisIsU && parameters.CulDeSacMode;
@@ -365,7 +344,7 @@ namespace GridRoadGenerator.Core
                     }
 
                     EmitCulDeSacBlock(segments, line, chain[i], chain[i + 1], blockIndex, parameters,
-                        origin, uDir, vDir, y, ref omittedNodeCount, roundaboutPositions);
+                        origin, uDir, vDir, y, ref omittedNodeCount);
                     blockIndex++;
                 }
             }
@@ -383,7 +362,7 @@ namespace GridRoadGenerator.Core
         private static void EmitCulDeSacBlock(List<RoadSegmentDef> segments, GridLine line,
             (float t, float3 world, bool isCollector) a, (float t, float3 world, bool isCollector) b,
             int blockIndex, GridParameters parameters, float2 origin, float2 uDir, float2 vDir, float y,
-            ref int omittedNodeCount, List<float3> roundaboutPositions)
+            ref int omittedNodeCount)
         {
             if (!IsCulDeSacBlock(blockIndex, parameters.CulDeSacRatio))
             {
@@ -417,15 +396,6 @@ namespace GridRoadGenerator.Core
             }
 
             segments.Add(new RoadSegmentDef(start.world, stubWorld, isHorizontal: false));
-
-            if (parameters.RoundaboutDiameter > 0f)
-            {
-                // Aucune géométrie dessinée ici : le nœud à stubWorld n'existe pas
-                // encore (il sera créé par le pipeline ECS du jeu à la pose). On se
-                // contente de signaler sa position ; c'est l'appelant qui posera le
-                // composant natif Game.Net.Roundabout une fois le nœud réel trouvé.
-                roundaboutPositions.Add(stubWorld);
-            }
         }
 
         /// <summary>Motif déterministe "une fois sur N" : N = round(100/ratio), jamais aléatoire.</summary>
