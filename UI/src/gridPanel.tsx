@@ -13,7 +13,6 @@ import {
     anarchyEnabled$,
     angleOffset$,
     canApply$,
-    clearSelection,
     columns$,
     culDeSacDepth$,
     culDeSacMode$,
@@ -337,7 +336,9 @@ export const LegacyGridPanel = () => {
                     </div>
                 )}
 
-                {/* Actions : bouton primaire natif + bouton secondaire natif. */}
+                {/* Action : bouton primaire natif. Pas de bouton "Tout annuler" —
+                    redondant avec Échap (vide la sélection) et le clic droit
+                    (retire le dernier nœud), déjà bien plus rapides d'accès. */}
                 <div className={styles.actions}>
                     <Button
                         variant="primary"
@@ -345,12 +346,6 @@ export const LegacyGridPanel = () => {
                         disabled={!canApply}
                         onSelect={generateGrid}>
                         {translate("GridRoadGenerator.UI.Generate", "Generate")}
-                    </Button>
-                    {/* Style vanilla pur du variant "flat" : aucune classe custom
-                        appliquée dessus (contrairement à applyButton, qui reste
-                        custom pour rester visuellement "primaire"). */}
-                    <Button variant="flat" onSelect={clearSelection}>
-                        {translate("GridRoadGenerator.UI.ClearAll", "Clear all")}
                     </Button>
                 </div>
                 </div>

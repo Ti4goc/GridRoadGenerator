@@ -22,7 +22,6 @@ import {
     anarchyEnabled$,
     angleOffset$,
     canApply$,
-    clearSelection,
     columns$,
     culDeSacDepth$,
     culDeSacMode$,
@@ -366,8 +365,8 @@ export const NativeGridPanel = () => {
                             )}
                         </InfoSection>
 
-                        {/* Actions : bouton primaire natif custom + bouton secondaire
-                            vanilla pur (aucune classe custom sur "Annuler"). */}
+                        {/* Action : bouton primaire natif custom. Pas de bouton "Tout
+                            annuler" — redondant avec Échap et le clic droit. */}
                         <div className={styles.actions}>
                             <Button
                                 variant="primary"
@@ -375,9 +374,6 @@ export const NativeGridPanel = () => {
                                 disabled={!canApply}
                                 onSelect={generateGrid}>
                                 {translate("GridRoadGenerator.UI.Generate", "Generate")}
-                            </Button>
-                            <Button variant="flat" onSelect={clearSelection}>
-                                {translate("GridRoadGenerator.UI.ClearAll", "Clear all")}
                             </Button>
                         </div>
                     </>

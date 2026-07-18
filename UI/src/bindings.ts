@@ -44,7 +44,6 @@ export const setCulDeSacDepth = (value: number) => trigger(mod.id, "SET_CULDESAC
 export const setStaggered = (value: boolean) => trigger(mod.id, "SET_STAGGERED", value);
 export const setCulDeSacRatio = (value: number) => trigger(mod.id, "SET_CULDESAC_RATIO", value);
 export const generateGrid = () => trigger(mod.id, "GENERATE");
-export const clearSelection = () => trigger(mod.id, "CLEAR_SELECTION");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");
 export const setPickerType = (value: number) => trigger(mod.id, "SET_PICKER_TYPE", value);
 

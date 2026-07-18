@@ -50,7 +50,6 @@ namespace GridRoadGenerator.Systems
         private readonly List<float3> _selectedPositions = new List<float3>();
         private Entity _hoveredNode = Entity.Null;
         private bool _applyRequested;
-        private bool _clearRequested;
         private bool _invalidLogged;
         /// <summary>Empêche le spam du log d'omission de nœuds trop proches (MinNodeDistance) : un avis par sélection.</summary>
         private bool _omittedNodesLogged;
@@ -158,9 +157,6 @@ namespace GridRoadGenerator.Systems
         /// <summary>Demande la construction de la grille prévisualisée (bouton "Générer" du panneau).</summary>
         public void RequestApply() => _applyRequested = true;
 
-        /// <summary>Demande l'annulation de toute la sélection (bouton "Tout annuler" du panneau).</summary>
-        public void RequestClear() => _clearRequested = true;
-
         protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
             // Cadence vanilla du NetTool : par défaut on repart de zéro chaque frame
@@ -172,14 +168,11 @@ namespace GridRoadGenerator.Systems
                 // Échap : annule la sélection en cours (1er appui) ; sans sélection,
                 // désactive l'outil — le panneau se ferme et le bouton toolbar se
                 // relâche via TOOL_ACTIVE (même cadence que les outils vanilla).
-                // Le bouton "Tout annuler" du panneau ne fait que vider la sélection.
-                if (_clearRequested || cancelAction.WasPressedThisFrame())
+                if (cancelAction.WasPressedThisFrame())
                 {
-                    bool escapePressed = !_clearRequested;
-                    _clearRequested = false;
                     bool hadSelection = _selectedNodes.Count > 0;
                     ResetState();
-                    if (escapePressed && !hadSelection)
+                    if (!hadSelection)
                     {
                         m_ToolSystem.activeTool = m_DefaultToolSystem;
                     }

@@ -173,7 +173,6 @@ namespace GridRoadGenerator.Systems
 
             // Actions du panneau.
             AddBinding(new TriggerBinding(BindingGroup, "GENERATE", () => _toolSystem.RequestApply()));
-            AddBinding(new TriggerBinding(BindingGroup, "CLEAR_SELECTION", () => _toolSystem.RequestClear()));
             AddBinding(new TriggerBinding(BindingGroup, "TOGGLE_TOOL", () => _toolSystem.ToggleTool()));
         }
 
