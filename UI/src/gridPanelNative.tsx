@@ -12,7 +12,7 @@
 import React, { useRef, useState } from "react";
 import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
-import { Button, InfoRow, InfoSectionFoldout, Panel } from "cs2/ui";
+import { Button, InfoRow, InfoSection, Panel } from "cs2/ui";
 import styles from "./gridPanelNative.module.scss";
 import gridIcon from "./gridIcon.svg";
 import { locString } from "./locHelpers";
@@ -114,6 +114,56 @@ const loadPanelPosition = (): PanelPosition => {
     return DEFAULT_POSITION;
 };
 
+// ------------------------------------------------------------------
+// Repli par section : InfoSectionFoldout (cs2/ui) a provoqué un crash vécu en
+// jeu ("l'UI disparaît en cliquant sur le bouton du mod") — il n'existe pas de
+// façon fiable au runtime malgré sa présence dans les types, exactement le
+// risque déjà documenté dans gridPanelSwitch.tsx pour Panel/InfoRow/InfoSection
+// (jamais étendu à InfoSectionFoldout, ajouté plus tard). Repli sur un chevron
+// composé à la main (même mécanisme que gridPanel.tsx), mais construit à partir
+// d'InfoSection/InfoRow — déjà garantis par le garde statique de
+// gridPanelSwitch.tsx — plutôt que des divs nues, pour rester dans le style
+// InfoView natif.
+// ------------------------------------------------------------------
+
+type NativeSectionFoldoutProps = {
+    title: React.ReactNode;
+    /// Contenu additionnel dans l'en-tête (ex. toggle d'activation) ; stoppe
+    /// lui-même la propagation du clic pour ne jamais déplier/replier la
+    /// section quand on veut juste l'actionner.
+    headerExtra?: React.ReactNode;
+    expanded: boolean;
+    onToggle: () => void;
+    children: React.ReactNode;
+};
+
+const NativeSectionFoldout = ({ title, headerExtra, expanded, onToggle, children }: NativeSectionFoldoutProps) => (
+    <InfoSection>
+        <InfoRow
+            uppercase
+            left={
+                <span className={styles.foldoutTitleRow} onClick={onToggle}>
+                    <img
+                        src="Media/Glyphs/ThickStrokeArrowDown.svg"
+                        className={expanded ? styles.foldoutChevron : styles.foldoutChevronCollapsed}
+                    />
+                    <span>{title}</span>
+                </span>
+            }
+            right={
+                headerExtra && (
+                    <span
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => event.stopPropagation()}>
+                        {headerExtra}
+                    </span>
+                )
+            }
+        />
+        {expanded && children}
+    </InfoSection>
+);
+
 export const NativeGridPanel = () => {
     const { translate } = useLocalization();
     const toolActive = useValue(toolActive$);
@@ -144,6 +194,10 @@ export const NativeGridPanel = () => {
     const [collapsed, setCollapsed] = useState(false);
     const [panelPosition, setPanelPosition] = useState<PanelPosition>(loadPanelPosition);
     const panelRef = useRef<HTMLDivElement>(null);
+    const [geometryExpanded, setGeometryExpanded] = useState(true);
+    const [culDeSacExpanded, setCulDeSacExpanded] = useState(true);
+    const [organicExpanded, setOrganicExpanded] = useState(true);
+    const [selectionExpanded, setSelectionExpanded] = useState(true);
 
     if (!toolActive) {
         return null;
@@ -219,24 +273,14 @@ export const NativeGridPanel = () => {
         { value: ORIENTATION_FOLLOW_TERRAIN, displayName: loc("GridRoadGenerator.UI.OrientationFollowTerrain", "Follow terrain") },
     ];
 
-    // En-tête de la section "Cul-de-sac" : titre + toggle d'activation, dans le
-    // slot `header` du InfoSectionFoldout natif (même famille que le chevron du
-    // panneau lui-même). Le toggle stoppe la propagation du clic pour ne jamais
-    // déplier/replier la section quand on veut juste l'activer/désactiver.
-    const culDeSacFoldoutHeader = (
-        <div className={styles.foldoutHeaderRow}>
-            <span>{translate("GridRoadGenerator.UI.CulDeSac", "Cul-de-sac")}</span>
-            <span
-                className={styles.foldoutHeaderToggle}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}>
-                <VC.ToggleField
-                    value={culDeSacMode}
-                    disabled={false}
-                    onChange={(value: boolean) => setCulDeSacMode(value)}
-                />
-            </span>
-        </div>
+    // Toggle d'activation dans l'en-tête de la section "Cul-de-sac" (headerExtra
+    // de NativeSectionFoldout, qui stoppe déjà lui-même la propagation du clic).
+    const culDeSacToggle = (
+        <VC.ToggleField
+            value={culDeSacMode}
+            disabled={false}
+            onChange={(value: boolean) => setCulDeSacMode(value)}
+        />
     );
 
     // En-tête composé à la main (icône + titre + chevron replier), passé au
@@ -291,9 +335,10 @@ export const NativeGridPanel = () => {
                 {!collapsed && (
                     <>
                         {/* Géométrie : mode, colonnes/lignes/espacement, angle, suivi du terrain. */}
-                        <InfoSectionFoldout
-                            header={translate("GridRoadGenerator.UI.SectionGeometry", "Geometry")}
-                            initialExpanded>
+                        <NativeSectionFoldout
+                            title={translate("GridRoadGenerator.UI.SectionGeometry", "Geometry")}
+                            expanded={geometryExpanded}
+                            onToggle={() => setGeometryExpanded((value) => !value)}>
                             <InfoRow
                                 left={translate("GridRoadGenerator.UI.ModeFit", "Fit to area")}
                                 right={
@@ -384,12 +429,16 @@ export const NativeGridPanel = () => {
                                     />
                                 }
                             />
-                        </InfoSectionFoldout>
+                        </NativeSectionFoldout>
 
                         {/* Culs-de-sac : quartier pavillonnaire. Toggle d'activation dans
                             l'en-tête de section ; le reste des contrôles reste visible mais
                             grisé quand il est désactivé (comme avant), pas masqué. */}
-                        <InfoSectionFoldout header={culDeSacFoldoutHeader} initialExpanded>
+                        <NativeSectionFoldout
+                            title={translate("GridRoadGenerator.UI.CulDeSac", "Cul-de-sac")}
+                            headerExtra={culDeSacToggle}
+                            expanded={culDeSacExpanded}
+                            onToggle={() => setCulDeSacExpanded((value) => !value)}>
                             <div className={styles.vanillaRow}>
                                 <div className={styles.vanillaField}>
                                     <VC.FloatSliderField
@@ -450,13 +499,14 @@ export const NativeGridPanel = () => {
                                     />
                                 }
                             />
-                        </InfoSectionFoldout>
+                        </NativeSectionFoldout>
 
                         {/* Variation organique : jitter des lignes internes, courbure des
-                            collectrices (chantier suivant : orientation par bloc). */}
-                        <InfoSectionFoldout
-                            header={translate("GridRoadGenerator.UI.SectionOrganic", "Organic variation")}
-                            initialExpanded>
+                            collectrices, orientation. */}
+                        <NativeSectionFoldout
+                            title={translate("GridRoadGenerator.UI.SectionOrganic", "Organic variation")}
+                            expanded={organicExpanded}
+                            onToggle={() => setOrganicExpanded((value) => !value)}>
                             <div className={styles.vanillaRow}>
                                 <div className={styles.vanillaField}>
                                     <VC.FloatSliderField
@@ -499,12 +549,13 @@ export const NativeGridPanel = () => {
                                     />
                                 }
                             />
-                        </InfoSectionFoldout>
+                        </NativeSectionFoldout>
 
                         {/* Sélection en cours + réseau utilisé. */}
-                        <InfoSectionFoldout
-                            header={translate("GridRoadGenerator.UI.SectionSelection", "Selection")}
-                            initialExpanded>
+                        <NativeSectionFoldout
+                            title={translate("GridRoadGenerator.UI.SectionSelection", "Selection")}
+                            expanded={selectionExpanded}
+                            onToggle={() => setSelectionExpanded((value) => !value)}>
                             <InfoRow
                                 left={translate("GridRoadGenerator.UI.NodesSelected", "Selected nodes")}
                                 right={<span className={perimeterInvalid ? styles.invalid : undefined}>{nodeCount}</span>}
@@ -540,7 +591,7 @@ export const NativeGridPanel = () => {
                                     }
                                 />
                             )}
-                        </InfoSectionFoldout>
+                        </NativeSectionFoldout>
                     </>
                 )}
             </Panel>

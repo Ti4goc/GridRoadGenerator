@@ -84,19 +84,30 @@ $accent-violet: #9645ff;
     color: #ff8080;
 }
 
-// En-tête de la section "Cul-de-sac" (InfoSectionFoldout) : titre à gauche,
-// toggle d'activation à droite, sur toute la largeur disponible du header.
-.foldoutHeaderRow {
+// Repli par section (NativeSectionFoldout, voir le composant) : chevron composé
+// à la main dans le slot `left` d'un InfoRow uppercase, même langage visuel que
+// le chevron du panneau lui-même (.collapseIcon/.collapseIconCollapsed).
+.foldoutTitleRow {
     display: flex;
     flex-direction: row;
     align-items: center;
-    justify-content: space-between;
-    width: 100%;
+    cursor: pointer;
 }
 
-.foldoutHeaderToggle {
-    display: flex;
-    align-items: center;
+.foldoutChevron {
+    width: 10rem;
+    height: 10rem;
+    margin-right: 6rem;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+}
+
+.foldoutChevronCollapsed {
+    width: 10rem;
+    height: 10rem;
+    margin-right: 6rem;
+    flex-shrink: 0;
+    transform: rotate(-90deg);
 }
 
 // ------------------------------------------------------------------
