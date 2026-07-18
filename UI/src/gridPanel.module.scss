@@ -15,15 +15,23 @@ $input-bg-color: #00000026; // rgba(0, 0, 0, 0.15)
 $input-border-color: #ffffff33; // rgba(255, 255, 255, 0.2)
 $input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
 
-// top/left sont posés en style inline (position draggable persistée).
-.panel {
+// top/left sont posés en style inline (position draggable persistée) sur le
+// wrapper, pas sur .panel : .panel a overflow:hidden (coins arrondis), et le
+// PrefabPicker doit pouvoir s'afficher à sa droite (left: 312rem) sans être
+// rogné — il est donc rendu comme frère de .panel à l'intérieur du wrapper,
+// qui lui n'a pas de overflow:hidden.
+.panelWrapper {
     position: absolute;
     width: 300rem;
+    pointer-events: auto;
+}
+
+.panel {
+    width: 100%;
     background-color: #181825bf; // rgba(24, 24, 37, 0.75)
     backdrop-filter: var(--panelBlur);
     border-radius: 12rem;
     color: white;
-    pointer-events: auto;
     display: flex;
     flex-direction: column;
     overflow: hidden;

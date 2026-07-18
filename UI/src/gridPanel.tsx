@@ -142,13 +142,14 @@ export const LegacyGridPanel = () => {
     return (
         <div
             ref={panelRef}
-            className={styles.panel}
+            className={styles.panelWrapper}
             style={{ left: `${panelPosition.x}px`, top: `${panelPosition.y}px` }}>
-            <div className={styles.header} onMouseDown={startDrag}>
-                {translate("GridRoadGenerator.UI.Title", "Grid Road Generator")}
-            </div>
+            <div className={styles.panel}>
+                <div className={styles.header} onMouseDown={startDrag}>
+                    {translate("GridRoadGenerator.UI.Title", "Grid Road Generator")}
+                </div>
 
-            <div className={styles.content}>
+                <div className={styles.content}>
                 {/* Mode : boutons d'outil natifs, état sélectionné violet vanilla. */}
                 <div className={styles.vanillaRow}>
                     <VC.Section
@@ -351,6 +352,7 @@ export const LegacyGridPanel = () => {
                     <Button variant="flat" onSelect={clearSelection}>
                         {translate("GridRoadGenerator.UI.ClearAll", "Clear all")}
                     </Button>
+                </div>
                 </div>
             </div>
 

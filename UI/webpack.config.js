@@ -91,7 +91,22 @@ module.exports = {
                             },
                         },
                     },
-                    "sass-loader",
+                    {
+                        loader: "sass-loader",
+                        options: {
+                            // style: "compressed" (auto en mode production) fait choisir à
+                            // dart-sass la notation la plus courte entre rgb()/hsl() pour
+                            // chaque couleur — les blancs/gris semi-transparents finissent
+                            // en hsla(), que le parseur CSS de cohtml ne sait pas lire
+                            // ("Unable to parse declaration"), et ce indépendamment de la
+                            // notation utilisée dans le SCSS source (hex8 ou rgba()).
+                            // On force "expanded" pour garder du rgba() lisible par cohtml.
+                            // Legacy sass-loader API (avertissement "legacy JS API deprecated"
+                            // dans les logs de build) : la clé de style est `outputStyle`, pas
+                            // `style` (celle-ci n'est utilisée que par l'API "modern").
+                            sassOptions: { outputStyle: "expanded" },
+                        },
+                    },
                 ],
             },
         ],
