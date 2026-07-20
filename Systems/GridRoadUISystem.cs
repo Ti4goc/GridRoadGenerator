@@ -41,20 +41,23 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<float> _angleOffsetBinding;
         private ValueBinding<bool> _followTerrainBinding;
         private ValueBinding<bool> _culDeSacModeBinding;
+        private ValueBinding<int> _culDeSacAxisBinding;
         private ValueBinding<float> _culDeSacDepthBinding;
         private ValueBinding<bool> _staggeredBinding;
         private ValueBinding<float> _culDeSacRatioBinding;
         private ValueBinding<int> _culDeSacCapSizeBinding;
         private ValueBinding<int> _culDeSacCapStyleBinding;
-        private ValueBinding<float> _jitterAmountBinding;
-        private ValueBinding<float> _curveAmountBinding;
-        private ValueBinding<int> _curveStyleBinding;
-        private ValueBinding<int> _orientationModeBinding;
+        private ValueBinding<bool> _adaptiveModeBinding;
+        private ValueBinding<int> _radialConnectionsBinding;
+        private ValueBinding<bool> _adaptiveRoundedCornersBinding;
         private ValueBinding<int> _availableViewsBinding;
         private ValueBinding<int> _selectedViewsBinding;
         private ValueBinding<string> _roadPrefabNameBinding;
         private ValueBinding<string> _roadPrefabIconBinding;
         private ValueBinding<bool> _roadPrefabAutoBinding;
+        private ValueBinding<string> _secondaryRoadPrefabNameBinding;
+        private ValueBinding<string> _secondaryRoadPrefabIconBinding;
+        private ValueBinding<bool> _secondaryRoadPrefabAutoBinding;
         private ValueBinding<bool> _anarchyAvailableBinding;
         private bool _anarchyAvailable;
 
@@ -101,6 +104,7 @@ namespace GridRoadGenerator.Systems
             AddBinding(_angleOffsetBinding = new ValueBinding<float>(BindingGroup, "ANGLE_OFFSET", _settings.AngleOffsetDegrees));
             AddBinding(_followTerrainBinding = new ValueBinding<bool>(BindingGroup, "FOLLOW_TERRAIN", _settings.FollowTerrain));
             AddBinding(_culDeSacModeBinding = new ValueBinding<bool>(BindingGroup, "CULDESAC_MODE", _settings.CulDeSacMode));
+            AddBinding(_culDeSacAxisBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_AXIS", (int)_settings.CulDeSacAxis));
             // Exposée en pourcentage (50-90) côté UI, comme le slider Options > Mods ;
             // stockée en fraction (0.5-0.9) dans les settings pour matcher GridParameters.
             AddBinding(_culDeSacDepthBinding = new ValueBinding<float>(BindingGroup, "CULDESAC_DEPTH", _settings.CulDeSacDepth * 100f));
@@ -108,10 +112,9 @@ namespace GridRoadGenerator.Systems
             AddBinding(_culDeSacRatioBinding = new ValueBinding<float>(BindingGroup, "CULDESAC_RATIO", _settings.CulDeSacRatio));
             AddBinding(_culDeSacCapSizeBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_CAP_SIZE", (int)_settings.CulDeSacCapSize));
             AddBinding(_culDeSacCapStyleBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_CAP_STYLE", (int)_settings.CulDeSacCapStyle));
-            AddBinding(_jitterAmountBinding = new ValueBinding<float>(BindingGroup, "JITTER_AMOUNT", _settings.JitterAmount));
-            AddBinding(_curveAmountBinding = new ValueBinding<float>(BindingGroup, "CURVE_AMOUNT", _settings.CurveAmount));
-            AddBinding(_curveStyleBinding = new ValueBinding<int>(BindingGroup, "CURVE_STYLE", (int)_settings.CurveStyle));
-            AddBinding(_orientationModeBinding = new ValueBinding<int>(BindingGroup, "ORIENTATION_MODE", (int)_settings.OrientationMode));
+            AddBinding(_adaptiveModeBinding = new ValueBinding<bool>(BindingGroup, "ADAPTIVE_MODE", _settings.AdaptiveMode));
+            AddBinding(_radialConnectionsBinding = new ValueBinding<int>(BindingGroup, "RADIAL_CONNECTIONS", _settings.RadialConnections));
+            AddBinding(_adaptiveRoundedCornersBinding = new ValueBinding<bool>(BindingGroup, "ADAPTIVE_ROUNDED_CORNERS", _settings.AdaptiveRoundedCorners));
 
             // Vue (Underground/ZoneGrid/InvisibleNetworks), pattern repris de CS2-NetworkTools.
             // AVAILABLE_VIEWS est fixe (un seul outil, qui les supporte toutes) — exposé quand
@@ -119,10 +122,14 @@ namespace GridRoadGenerator.Systems
             AddBinding(_availableViewsBinding = new ValueBinding<int>(BindingGroup, "AVAILABLE_VIEWS", (int)ViewOption.All));
             AddBinding(_selectedViewsBinding = new ValueBinding<int>(BindingGroup, "SELECTED_VIEWS", (int)_settings.SelectedViews));
 
-            // Prefab de réseau utilisé par la grille (rangée du panneau, ouvre le sélecteur).
+            // Prefab de réseau utilisé par la grille (barre permanente, ouvre le sélecteur).
             AddBinding(_roadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_NAME", string.Empty));
             AddBinding(_roadPrefabIconBinding = new ValueBinding<string>(BindingGroup, "ROAD_PREFAB_ICON", string.Empty));
             AddBinding(_roadPrefabAutoBinding = new ValueBinding<bool>(BindingGroup, "ROAD_PREFAB_AUTO", true));
+            // Réseau secondaire (impasses/rayons) : même trio de bindings, préfixé SECONDARY_.
+            AddBinding(_secondaryRoadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "SECONDARY_ROAD_PREFAB_NAME", string.Empty));
+            AddBinding(_secondaryRoadPrefabIconBinding = new ValueBinding<string>(BindingGroup, "SECONDARY_ROAD_PREFAB_ICON", string.Empty));
+            AddBinding(_secondaryRoadPrefabAutoBinding = new ValueBinding<bool>(BindingGroup, "SECONDARY_ROAD_PREFAB_AUTO", true));
 
             // Sélecteur de réseau : onglet actif, liste des prefabs, récents, choix.
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
@@ -135,6 +142,8 @@ namespace GridRoadGenerator.Systems
             AddBinding(_recentPrefabsBinding = new RawValueBinding(BindingGroup, "RECENT_PREFABS", WriteRecentPrefabs));
             AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB", HandlePickPrefab));
             AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO", () => _toolSystem.SetRoadPrefab(null)));
+            AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB_SECONDARY", HandlePickSecondaryPrefab));
+            AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO_SECONDARY", () => _toolSystem.SetSecondaryRoadPrefab(null)));
 
             // Mod Anarchy (tiers, optionnel) : côté TS la rangée lit/déclenche
             // directement les bindings cohtml d'Anarchy lui-même. La détection est
@@ -181,6 +190,11 @@ namespace GridRoadGenerator.Systems
                 _settings.CulDeSacMode = value;
                 _settings.ApplyAndSave();
             }));
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_CULDESAC_AXIS", value =>
+            {
+                _settings.CulDeSacAxis = (CulDeSacAxis)math.clamp(value, 0, 2);
+                _settings.ApplyAndSave();
+            }));
             AddBinding(new TriggerBinding<float>(BindingGroup, "SET_CULDESAC_DEPTH", value =>
             {
                 // value reçu en pourcentage (50-90) depuis le panneau, converti en fraction.
@@ -207,31 +221,19 @@ namespace GridRoadGenerator.Systems
                 _settings.CulDeSacCapStyle = (CulDeSacCapStyle)math.clamp(value, 0, 2);
                 _settings.ApplyAndSave();
             }));
-            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_JITTER_AMOUNT", value =>
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_ADAPTIVE_MODE", value =>
             {
-                _settings.JitterAmount = math.clamp(value, 0f, 15f);
+                _settings.AdaptiveMode = value;
                 _settings.ApplyAndSave();
             }));
-            AddBinding(new TriggerBinding(BindingGroup, "REGENERATE_JITTER_SEED", () =>
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_RADIAL_CONNECTIONS", value =>
             {
-                // Pas besoin de vrai hasard cryptographique : juste une valeur différente
-                // à chaque clic du bouton "Nova semente" du panneau.
-                _settings.JitterSeed = System.Environment.TickCount;
+                _settings.RadialConnections = math.clamp(value, 0, 24);
                 _settings.ApplyAndSave();
             }));
-            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_CURVE_AMOUNT", value =>
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_ADAPTIVE_ROUNDED_CORNERS", value =>
             {
-                _settings.CurveAmount = math.clamp(value, 0f, 100f);
-                _settings.ApplyAndSave();
-            }));
-            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_CURVE_STYLE", value =>
-            {
-                _settings.CurveStyle = (GridGenerator.CurveStyle)math.clamp(value, 0, 1);
-                _settings.ApplyAndSave();
-            }));
-            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_ORIENTATION_MODE", value =>
-            {
-                _settings.OrientationMode = (OrientationMode)math.clamp(value, 0, 1);
+                _settings.AdaptiveRoundedCorners = value;
                 _settings.ApplyAndSave();
             }));
             AddBinding(new TriggerBinding<int>(BindingGroup, "SET_SELECTED_VIEWS", value =>
@@ -263,15 +265,15 @@ namespace GridRoadGenerator.Systems
             _angleOffsetBinding.Update(_settings.AngleOffsetDegrees);
             _followTerrainBinding.Update(_settings.FollowTerrain);
             _culDeSacModeBinding.Update(_settings.CulDeSacMode);
+            _culDeSacAxisBinding.Update((int)_settings.CulDeSacAxis);
             _culDeSacDepthBinding.Update(_settings.CulDeSacDepth * 100f);
             _staggeredBinding.Update(_settings.Staggered);
             _culDeSacRatioBinding.Update(_settings.CulDeSacRatio);
             _culDeSacCapSizeBinding.Update((int)_settings.CulDeSacCapSize);
             _culDeSacCapStyleBinding.Update((int)_settings.CulDeSacCapStyle);
-            _jitterAmountBinding.Update(_settings.JitterAmount);
-            _curveAmountBinding.Update(_settings.CurveAmount);
-            _curveStyleBinding.Update((int)_settings.CurveStyle);
-            _orientationModeBinding.Update((int)_settings.OrientationMode);
+            _adaptiveModeBinding.Update(_settings.AdaptiveMode);
+            _radialConnectionsBinding.Update(_settings.RadialConnections);
+            _adaptiveRoundedCornersBinding.Update(_settings.AdaptiveRoundedCorners);
             _selectedViewsBinding.Update((int)_settings.SelectedViews);
 
             if (!_anarchyAvailable && IsAnarchyLoaded())
@@ -284,6 +286,11 @@ namespace GridRoadGenerator.Systems
             _roadPrefabNameBinding.Update(roadPrefab != null ? roadPrefab.name : string.Empty);
             _roadPrefabIconBinding.Update(roadPrefab != null ? ImageSystem.GetThumbnail(roadPrefab) ?? string.Empty : string.Empty);
             _roadPrefabAutoBinding.Update(_toolSystem.RoadPrefabIsAuto);
+
+            PrefabBase secondaryRoadPrefab = _toolSystem.GetSecondaryPrefab();
+            _secondaryRoadPrefabNameBinding.Update(secondaryRoadPrefab != null ? secondaryRoadPrefab.name : string.Empty);
+            _secondaryRoadPrefabIconBinding.Update(secondaryRoadPrefab != null ? ImageSystem.GetThumbnail(secondaryRoadPrefab) ?? string.Empty : string.Empty);
+            _secondaryRoadPrefabAutoBinding.Update(_toolSystem.SecondaryRoadPrefabIsAuto);
 
             // Reconstruit la liste du sélecteur quand l'onglet change (coûteux, donc jamais par frame).
             if (_lastPickerType != _pickerTypeBinding.value)
@@ -321,8 +328,23 @@ namespace GridRoadGenerator.Systems
                 return;
             }
             _toolSystem.SetRoadPrefab(prefab);
+            RememberRecentPrefab(entity);
+        }
 
-            // Tête de liste des récents, sans doublon, plafonnée.
+        /// <summary>Identique à HandlePickPrefab, pour le réseau secondaire (impasses/rayons).</summary>
+        private void HandlePickSecondaryPrefab(Entity entity)
+        {
+            if (!_prefabSystem.TryGetPrefab(entity, out PrefabBase prefab) || prefab == null)
+            {
+                return;
+            }
+            _toolSystem.SetSecondaryRoadPrefab(prefab);
+            RememberRecentPrefab(entity);
+        }
+
+        /// <summary>Tête de liste des récents (partagée entre les deux sélecteurs), sans doublon, plafonnée.</summary>
+        private void RememberRecentPrefab(Entity entity)
+        {
             _recentPrefabs.Remove(entity);
             _recentPrefabs.Insert(0, entity);
             if (_recentPrefabs.Count > MaxRecentPrefabs)

@@ -498,6 +498,42 @@ namespace GridRoadGenerator.Tests
                 Assert.InRange(length, 50f - 1f, 90f + 1f); // 0.5..0.9 * bloc de 100 m
             }
         }
+
+        [Fact]
+        public void AxisRows_AppliesCulDeSacToRowsInsteadOfColumns()
+        {
+            // Transposé de Ratio100_NoColumnBlockRemainsFullLength : Columns=2 (au lieu de
+            // Rows=2) fournit les 2 croisements internes à l'UNIQUE ligne de rangée
+            // (Rows=1), qui devient la candidate aux impasses avec CulDeSacAxis.Rows.
+            var parameters = BaseParameters(1);
+            parameters.Columns = 2;
+            parameters.CulDeSacAxis = CulDeSacAxis.Rows;
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            var columns = ColumnSegments(segments); // axisIsU (colonnes) : ne doivent JAMAIS être des impasses ici.
+            var rows = segments.Except(columns).ToList();
+
+            Assert.NotEmpty(columns);
+            Assert.All(columns, s => Assert.False(s.IsCulDeSacEnd));
+            Assert.Contains(rows, s => s.IsCulDeSacEnd);
+        }
+
+        [Fact]
+        public void AxisBoth_AppliesCulDeSacToBothColumnsAndRows()
+        {
+            // Rows=2 ET Columns=2 : les deux axes ont des croisements internes à
+            // proposer comme collectrices de départ pour l'autre axe.
+            var parameters = BaseParameters(2);
+            parameters.Columns = 2;
+            parameters.CulDeSacAxis = CulDeSacAxis.Both;
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            var columns = ColumnSegments(segments);
+            var rows = segments.Except(columns).ToList();
+
+            Assert.Contains(columns, s => s.IsCulDeSacEnd);
+            Assert.Contains(rows, s => s.IsCulDeSacEnd);
+        }
     }
 
     /// <summary>
@@ -803,15 +839,13 @@ namespace GridRoadGenerator.Tests
     }
 
     /// <summary>
-    /// Chantier 6 : JitterAmount/JitterSeed déplacent les lignes internes (colonnes) de
-    /// façon pseudo-aléatoire mais DÉTERMINISTE — jamais les collectrices (rangées) ni
-    /// le périmètre. Le clipping/découpage aux croisements ne fait aucune hypothèse sur
-    /// l'ordre ou la régularité des positions de lignes (voir GenerateGrid), donc rester
-    /// correct après jitter est une propriété automatique de GridGenerator.ApplyJitter
-    /// s'insérant simplement avant ce calcul — ces tests le confirment plutôt que de le
-    /// re-prouver depuis zéro.
+    /// Mode "Adaptativo" (GenerateAdaptiveGrid) : anneaux concentriques par offset inward du
+    /// polygone du périmètre — voir la doc de OffsetPolygonInward pour l'algorithme (miter
+    /// join avec clamp, pas de vrai straight-skeleton). Les trois cas demandés : carré convexe
+    /// (coins nets, distance d'offset exacte), forme en L concave (pas de casse/NaN au coin
+    /// concave), périmètre courbe (les anneaux suivent la courbe plutôt que sa corde).
     /// </summary>
-    public class GridGeneratorJitterTests
+    public class GridGeneratorAdaptiveGridTests
     {
         private static readonly List<float3> SquareNodes = new List<float3>
         {
@@ -821,228 +855,328 @@ namespace GridRoadGenerator.Tests
             new float3(0f, 0f, 300f),
         };
 
-        private static GridParameters JitteredParameters(float amount, int seed) => new GridParameters
-        {
-            Mode = SpacingMode.FitToArea,
-            Rows = 3,
-            Columns = 5,
-            SpacingMeters = 60f,
-            JitterAmount = amount,
-            JitterSeed = seed,
-        };
+        private static GridParameters AdaptiveParams(float spacingMeters, int radialConnections,
+            bool roundedCorners = false, bool culDeSacMode = false, float culDeSacRatio = 100f, float culDeSacDepth = 0.75f) => new GridParameters
+            {
+                SpacingMeters = spacingMeters,
+                RadialConnections = radialConnections,
+                AdaptiveRoundedCorners = roundedCorners,
+                CulDeSacMode = culDeSacMode,
+                CulDeSacRatio = culDeSacRatio,
+                CulDeSacDepth = culDeSacDepth,
+            };
 
         [Fact]
-        public void SameSeed_ProducesIdenticalResultsAcrossGenerations()
+        public void SmallFullRoundaboutPerimeter_SucceedsAtReasonableSpacing()
         {
-            GridParameters parameters = JitteredParameters(10f, 12345);
+            // Régression : un petit giratoire (rayon 25) composé QUE d'arcs (aucun coin net,
+            // périmètre "lisse") échouait totalement (0 anneau, quel que soit l'espacement) avant
+            // la correction de ResamplePolygon — un bug de boucle qui ne parcourait aucun point
+            // pour le tronçon "ancré arbitrairement" d'un polygone entièrement lisse, faisant
+            // silencieusement retomber sur le polygone brut (arêtes trop courtes pour l'offset).
+            float radius = 25f;
+            float k = 0.5522847f; // 4/3*(sqrt(2)-1), quart de cercle en Bézier
+            var center = new float2(0f, 0f);
+            float3 QuarterPoint(float deg) => new float3(
+                center.x + radius * math.cos(math.radians(deg)), 0f, center.y + radius * math.sin(math.radians(deg)));
 
-            var first = GridGenerator.GenerateGrid(SquareNodes, parameters);
-            var second = GridGenerator.GenerateGrid(SquareNodes, parameters);
-
-            Assert.NotEmpty(first);
-            Assert.Equal(first.Count, second.Count);
-            for (int i = 0; i < first.Count; i++)
+            var quarterNodes = new List<float3> { QuarterPoint(0), QuarterPoint(90), QuarterPoint(180), QuarterPoint(270) };
+            var roundabout = new List<float3>();
+            for (int i = 0; i < 4; i++)
             {
-                Assert.Equal(first[i].Start, second[i].Start);
-                Assert.Equal(first[i].End, second[i].End);
+                float3 p0 = quarterNodes[i];
+                float3 p1 = quarterNodes[(i + 1) % 4];
+                roundabout.Add(p0);
+                float startDeg = i * 90f;
+                float endDeg = startDeg + 90f;
+                float3 controlB = new float3(
+                    center.x + radius * math.cos(math.radians(startDeg)) - radius * k * math.sin(math.radians(startDeg)), 0f,
+                    center.y + radius * math.sin(math.radians(startDeg)) + radius * k * math.cos(math.radians(startDeg)));
+                float3 controlC = new float3(
+                    center.x + radius * math.cos(math.radians(endDeg)) + radius * k * math.sin(math.radians(endDeg)), 0f,
+                    center.y + radius * math.sin(math.radians(endDeg)) - radius * k * math.cos(math.radians(endDeg)));
+                roundabout.AddRange(GridGenerator.SampleCurve(p0, controlB, controlC, p1));
             }
-        }
 
-        [Fact]
-        public void DifferentSeeds_ProduceDifferentPositions()
-        {
-            var parametersA = JitteredParameters(10f, 1);
-            var parametersB = JitteredParameters(10f, 2);
-
-            var segmentsA = GridGenerator.GenerateGrid(SquareNodes, parametersA);
-            var segmentsB = GridGenerator.GenerateGrid(SquareNodes, parametersB);
-
-            Assert.NotEmpty(segmentsA);
-            Assert.NotEmpty(segmentsB);
-            bool anyDifferent = false;
-            int count = math.min(segmentsA.Count, segmentsB.Count);
-            for (int i = 0; i < count; i++)
+            // Au moins un espacement raisonnable (plus petit que le rayon) doit réussir à produire
+            // un premier anneau valide — avant la correction, AUCUN espacement n'y arrivait sur ce
+            // périmètre entièrement lisse (sans coin net) : un bug de boucle (AppendResampledRun)
+            // faisait retomber silencieusement ResamplePolygon sur le polygone brut (89 arêtes de
+            // quelques mètres chacune), bien trop fines pour tout espacement d'anneau raisonnable.
+            var poly = roundabout.Select(p => new float2(p.x, p.z)).ToList();
+            bool anySucceeded = false;
+            foreach (float spacing in new[] { 8f, 10f, 12f, 15f, 20f })
             {
-                if (math.distance(segmentsA[i].Start, segmentsB[i].Start) > 0.01f)
+                if (GridGenerator.OffsetPolygonInward(poly, spacing) != null)
                 {
-                    anyDifferent = true;
+                    anySucceeded = true;
                     break;
                 }
             }
-            Assert.True(anyDifferent, "Deux graines différentes devraient produire des positions de lignes différentes.");
+            Assert.True(anySucceeded, "Aucun espacement raisonnable n'a produit de premier anneau valide sur ce petit giratoire entièrement lisse.");
         }
 
         [Fact]
-        public void ZeroAmount_IdenticalToNoJitterField()
+        public void Square_FirstRingCornersAreOffsetInwardByExactlySpacing()
         {
-            GridParameters withExplicitZero = JitteredParameters(0f, 999); // seed sans effet à amplitude nulle
-            var withoutJitterAtAll = new GridParameters
-            {
-                Mode = SpacingMode.FitToArea,
-                Rows = 3,
-                Columns = 5,
-                SpacingMeters = 60f,
-                // JitterAmount/JitterSeed non renseignés = 0 par défaut (struct) : doit se
-                // comporter EXACTEMENT comme avant l'existence du jitter.
-            };
-
-            var a = GridGenerator.GenerateGrid(SquareNodes, withExplicitZero);
-            var b = GridGenerator.GenerateGrid(SquareNodes, withoutJitterAtAll);
-
-            Assert.Equal(a.Count, b.Count);
-            for (int i = 0; i < a.Count; i++)
-            {
-                Assert.Equal(a[i].Start, b[i].Start);
-                Assert.Equal(a[i].End, b[i].End);
-            }
-        }
-
-        [Fact]
-        public void Jittered_IntersectionsRemainCorrectlyConnected()
-        {
-            GridParameters parameters = JitteredParameters(12f, 42);
-
-            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            // Carré axis-aligned, coin convexe à 90° : le miter join dégénère exactement en un
+            // décalage perpendiculaire simple sur chaque arête, donc le coin (0,0) doit se
+            // retrouver exactement à (40,40) après un anneau à 40 m d'espacement — vérifiable
+            // à la main, pas seulement "dans le bon sens".
+            var segments = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0));
 
             Assert.NotEmpty(segments);
-            GridGeneratorTests.AssertCommonInvariants(segments);
+
+            bool HasPointNear(float x, float z) => segments.Any(s =>
+                math.distance(s.Start.xz, new float2(x, z)) < 0.5f
+                || math.distance(s.End.xz, new float2(x, z)) < 0.5f);
+
+            Assert.True(HasPointNear(40f, 40f), "Coin du premier anneau attendu à (40, 40).");
+            Assert.True(HasPointNear(260f, 40f));
+            Assert.True(HasPointNear(260f, 260f));
+            Assert.True(HasPointNear(40f, 260f));
         }
 
         [Fact]
-        public void Jittered_RowsNeverMoveFromTheirRegularPositions()
+        public void Square_RingsShrinkUntilDegenerateThenStop()
         {
-            // Les collectrices (rangées, v) doivent rester identiques à une génération
-            // sans jitter : seules les colonnes (u) sont perturbées.
-            var withJitter = JitteredParameters(12f, 7);
-            var withoutJitter = JitteredParameters(0f, 7);
+            // Côté 300, espacement 40 : anneaux à côté 220, 140, 60 (tous valides), puis un
+            // 4e anneau à côté 60-80=-20 (dégénéré, aire trop petite/signe inversé) — ne doit
+            // jamais être émis. Voir OffsetPolygonInward pour les critères d'arrêt.
+            var segments = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0));
 
-            var jittered = GridGenerator.GenerateGrid(SquareNodes, withJitter);
-            var baseline = GridGenerator.GenerateGrid(SquareNodes, withoutJitter);
+            bool HasPointNear(float x, float z) => segments.Any(s =>
+                math.distance(s.Start.xz, new float2(x, z)) < 0.5f
+                || math.distance(s.End.xz, new float2(x, z)) < 0.5f);
 
-            // Les segments de rangée (isHorizontal true, cf. EmitLine axisIsU: false ->
-            // isHorizontal: !axisIsU = true) doivent avoir le même Z constant qu'au repos
-            // pour chaque rangée — comparé via l'ensemble des Z distincts observés.
-            var jitteredRowZs = jittered.Where(s => s.IsHorizontal).Select(s => math.round(s.Start.z * 100f)).Distinct().OrderBy(z => z).ToList();
-            var baselineRowZs = baseline.Where(s => s.IsHorizontal).Select(s => math.round(s.Start.z * 100f)).Distinct().OrderBy(z => z).ToList();
-
-            Assert.Equal(baselineRowZs, jitteredRowZs);
-        }
-    }
-
-    /// <summary>
-    /// Chantier 7 : ComputeCurveControlPoints (pur, Core) calcule les points de contrôle
-    /// intermédiaires d'une Bézier légèrement bombée pour les collectrices. La construction
-    /// réelle de la NetCourse (Bezier4x3, ECS) se fait dans GridRoadToolSystem.BuildCurvedCourse,
-    /// non testable ici — mais celui-ci ne fait qu'envelopper ce calcul autour de a=start,
-    /// d=end fixes, donc les propriétés critiques (aucun mouvement des extrémités,
-    /// dégénère en ligne droite à 0 %) sont entièrement couvertes au niveau pur.
-    /// </summary>
-    public class GridGeneratorCurveControlPointsTests
-    {
-        [Fact]
-        public void ZeroAmount_ControlPointsLieExactlyOnTheChord()
-        {
-            var start = new float3(0f, 0f, 0f);
-            var end = new float3(90f, 0f, 0f);
-
-            GridGenerator.ComputeCurveControlPoints(start, end, 0f, GridGenerator.CurveStyle.Bulge, out float3 b, out float3 c);
-
-            // À 0 %, b et c sont les points au tiers/deux-tiers de la corde : une évaluation
-            // de Bézier cubique avec a,b,c,d colinéaires dégénère exactement en ligne droite,
-            // identique visuellement à NetUtils.StraightCurve (jamais appelé dans ce cas côté
-            // GridRoadToolSystem, qui garde le chemin d'origine, mais la propriété géométrique
-            // tient indépendamment).
-            Assert.Equal(new float3(30f, 0f, 0f), b);
-            Assert.Equal(new float3(60f, 0f, 0f), c);
+            Assert.True(HasPointNear(80f, 80f), "Coin du 2e anneau attendu à (80, 80).");
+            Assert.True(HasPointNear(120f, 120f), "Coin du 3e anneau (le plus intérieur valide) attendu à (120, 120).");
+            Assert.False(HasPointNear(160f, 160f), "Un 4e anneau (dégénéré) ne devrait jamais être émis.");
         }
 
         [Fact]
-        public void NonZeroAmount_OffsetsPerpendicularToTheChordBySameAmount()
+        public void Square_NeverProducesPointsOutsideTheOriginalPerimeter()
         {
-            var start = new float3(0f, 0f, 0f);
-            var end = new float3(100f, 0f, 0f);
+            // Un offset INWARD ne doit jamais faire sortir un point du polygone d'origine,
+            // même avec le clamp de miter limit sur des coins à 90° (non concerné ici, mais
+            // la propriété doit tenir pour tout spacing raisonnable).
+            var segments = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(25f, 4));
 
-            GridGenerator.ComputeCurveControlPoints(start, end, 100f, GridGenerator.CurveStyle.Bulge, out float3 b, out float3 c);
-
-            // Décalage attendu (perpendiculaire à la corde, donc uniquement sur Z ici) :
-            // 100 % * longueur(100) * MaxCurveBulgeFraction.
-            float expectedOffset = 100f * GridGenerator.MaxCurveBulgeFraction;
-            Assert.Equal(0f, b.y, 3);
-            Assert.Equal(0f, c.y, 3);
-            // Même décalage transversal pour b et c (corde parallèle à l'axe X ici, donc
-            // le décalage perpendiculaire tombe entièrement sur Z).
-            Assert.Equal(expectedOffset, b.z, 3);
-            Assert.Equal(expectedOffset, c.z, 3);
-            // Toujours au tiers/deux-tiers le long de X, la courbure ne change pas ça.
-            Assert.Equal(100f / 3f, b.x, 2);
-            Assert.Equal(200f / 3f, c.x, 2);
+            Assert.NotEmpty(segments);
+            Assert.All(segments, s =>
+            {
+                Assert.InRange(s.Start.x, -0.5f, 300.5f);
+                Assert.InRange(s.Start.z, -0.5f, 300.5f);
+                Assert.InRange(s.End.x, -0.5f, 300.5f);
+                Assert.InRange(s.End.z, -0.5f, 300.5f);
+            });
         }
 
         [Fact]
-        public void OffsetMagnitude_ScalesWithCurveAmountAndSegmentLength()
+        public void Square_RadialConnectionsLinkOuterPerimeterToInnerRings()
         {
-            var shortStart = new float3(0f, 0f, 0f);
-            var shortEnd = new float3(50f, 0f, 0f);
-            var longStart = new float3(0f, 0f, 0f);
-            var longEnd = new float3(150f, 0f, 0f);
+            // radialConnections > 0 : au moins un segment doit partir d'un sommet du périmètre
+            // d'ORIGINE (les 4 coins du carré) vers l'intérieur — sinon les anneaux resteraient
+            // des boucles isolées sans connexion, ce que le paramètre existe pour éviter.
+            var withoutRadials = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0));
+            var withRadials = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 4));
 
-            GridGenerator.ComputeCurveControlPoints(shortStart, shortEnd, 50f, GridGenerator.CurveStyle.Bulge, out float3 shortB, out _);
-            GridGenerator.ComputeCurveControlPoints(longStart, longEnd, 50f, GridGenerator.CurveStyle.Bulge, out float3 longB, out _);
+            Assert.True(withRadials.Count > withoutRadials.Count,
+                "Des connexions radiales devraient ajouter des segments par rapport à radialConnections=0.");
 
-            // Même pourcentage, segment 3x plus long : décalage 3x plus grand.
-            Assert.Equal(shortB.z * 3f, longB.z, 2);
-
-            GridGenerator.ComputeCurveControlPoints(shortStart, shortEnd, 100f, GridGenerator.CurveStyle.Bulge, out float3 fullB, out _);
-            // Même longueur, pourcentage doublé (50→100) : décalage doublé.
-            Assert.Equal(shortB.z * 2f, fullB.z, 2);
+            bool startsAtOriginalCorner = withRadials.Any(s =>
+                SquareNodes.Any(corner => math.distance(corner.xz, s.Start.xz) < 0.5f)
+                || SquareNodes.Any(corner => math.distance(corner.xz, s.End.xz) < 0.5f));
+            Assert.True(startsAtOriginalCorner, "Au moins une connexion radiale devrait partir d'un coin du périmètre d'origine.");
         }
 
         [Fact]
-        public void EndpointsAreNeverPartOfTheComputation_OnlyIntermediateControlPointsReturned()
+        public void Square_OnlyRadialConnectorsAreMarkedIsRadial()
         {
-            // ComputeCurveControlPoints ne retourne QUE b et c : a=start et d=end restent
-            // par construction exactement ce que l'appelant leur a passé (voir
-            // GridRoadToolSystem.BuildCurvedCourse) — le raccordement au périmètre et aux
-            // rues perpendiculaires ne peut donc jamais être affecté par la courbure.
-            var start = new float3(12f, 3f, -7f);
-            var end = new float3(112f, 3f, 43f);
+            // IsRadial distingue les rayons (EmitRadialConnections) des anneaux (EmitRingSegments) —
+            // voir RoadSegmentDef.IsRadial, utilisé par GridRoadToolSystem pour poser le réseau
+            // secondaire uniquement sur les rayons (et les impasses, IsCulDeSacEnd, hors de ce test).
+            var withRadials = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 4));
+            var withoutRadials = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0));
 
-            GridGenerator.ComputeCurveControlPoints(start, end, 80f, GridGenerator.CurveStyle.Bulge, out float3 b, out float3 c);
+            Assert.Contains(withRadials, s => s.IsRadial);
+            Assert.DoesNotContain(withoutRadials, s => s.IsRadial);
 
-            Assert.NotEqual(start, b);
-            Assert.NotEqual(end, c);
-            // b et c restent dans le voisinage du segment (pas d'échappée démesurée) :
-            // la distance à la corde reste dans l'ordre de grandeur de MaxCurveBulgeFraction.
-            float length = math.distance(start.xz, end.xz);
-            float maxExpectedOffset = length * GridGenerator.MaxCurveBulgeFraction * 1.01f;
-            Assert.True(math.distance(b, math.lerp(start, end, 1f / 3f)) <= maxExpectedOffset);
-            Assert.True(math.distance(c, math.lerp(start, end, 2f / 3f)) <= maxExpectedOffset);
+            // Les anneaux eux-mêmes (segments communs aux deux générations) ne sont jamais radiaux.
+            int ringSegmentCount = withRadials.Count(s => !s.IsRadial);
+            Assert.Equal(withoutRadials.Count, ringSegmentCount);
         }
 
         [Fact]
-        public void DegenerateZeroLengthSegment_DoesNotThrow()
+        public void RoundedCorners_ProducesMorePointsThanMiterAtEachSquareCorner()
         {
-            var point = new float3(5f, 0f, 5f);
+            // Coins arrondis : un arc de plusieurs points remplace chaque pointe nette, donc le
+            // premier anneau doit avoir sensiblement plus de sommets qu'en miter (par défaut) —
+            // et chacun de ses points doit rester à ~distance de son sommet d'origine le plus
+            // proche (rayon de l'arc), jamais au-delà (voir RoundCorners).
+            var miter = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0, roundedCorners: false));
+            var rounded = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0, roundedCorners: true));
 
-            GridGenerator.ComputeCurveControlPoints(point, point, 100f, GridGenerator.CurveStyle.Bulge, out float3 b, out float3 c);
+            Assert.NotEmpty(miter);
+            Assert.NotEmpty(rounded);
+            Assert.True(rounded.Count > miter.Count,
+                $"Les coins arrondis devraient ajouter des segments par rapport au miter (miter={miter.Count}, rounded={rounded.Count}).");
 
-            Assert.Equal(point, b);
-            Assert.Equal(point, c);
+            // Toujours à l'intérieur du périmètre d'origine (un arrondi ne doit jamais faire
+            // sortir un point, comme pour le miter — voir Square_NeverProducesPointsOutsideTheOriginalPerimeter).
+            Assert.All(rounded, s =>
+            {
+                Assert.InRange(s.Start.x, -0.5f, 300.5f);
+                Assert.InRange(s.Start.z, -0.5f, 300.5f);
+                Assert.InRange(s.End.x, -0.5f, 300.5f);
+                Assert.InRange(s.End.z, -0.5f, 300.5f);
+            });
         }
 
         [Fact]
-        public void SCurve_OffsetsBAndCOnOppositeSides()
+        public void CulDeSacMode_SomeRadialsStopBeforeTheInnermostRingAsImpasses()
         {
-            var start = new float3(0f, 0f, 0f);
-            var end = new float3(100f, 0f, 0f);
+            // CulDeSacMode réutilisé pour le mode Adaptativo (voir EmitRadialConnections) : à
+            // ratio 50 %, environ un rayon sur deux devrait s'arrêter avant le dernier anneau et
+            // porter IsCulDeSacEnd — jamais les anneaux eux-mêmes (toujours traversants).
+            var withCulDeSac = GridGenerator.GenerateAdaptiveGrid(SquareNodes,
+                AdaptiveParams(40f, 8, culDeSacMode: true, culDeSacRatio: 50f, culDeSacDepth: 0.75f));
 
-            GridGenerator.ComputeCurveControlPoints(start, end, 100f, GridGenerator.CurveStyle.SCurve, out float3 b, out float3 c);
+            Assert.Contains(withCulDeSac, s => s.IsCulDeSacEnd);
+            Assert.All(withCulDeSac.Where(s => s.IsCulDeSacEnd), s => Assert.True(s.IsRadial, "Seuls des rayons devraient porter IsCulDeSacEnd en mode Adaptativo."));
 
-            float expectedOffset = 100f * GridGenerator.MaxCurveBulgeFraction;
-            // Contrairement à Bulge (même signe pour b et c), SCurve décale b et c de part
-            // et d'autre de la corde : la courbe change de sens à mi-segment.
-            Assert.Equal(expectedOffset, b.z, 3);
-            Assert.Equal(-expectedOffset, c.z, 3);
+            var withoutCulDeSac = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 8, culDeSacMode: false));
+            Assert.True(withCulDeSac.Count < withoutCulDeSac.Count,
+                "Des rayons raccourcis en impasse devraient produire moins de segments que des rayons complets.");
+        }
+
+        [Fact]
+        public void ConcaveLShape_DoesNotProduceDegenerateOrNaNGeometry()
+        {
+            // Forme en L (coin réflexe/concave en (150,150)) : le point délicat de
+            // OffsetVertex (miter limit) et de OffsetPolygonInward (détection
+            // d'auto-intersection) doit empêcher toute géométrie cassée, jamais planter.
+            var lShape = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(300f, 0f, 0f),
+                new float3(300f, 0f, 150f),
+                new float3(150f, 0f, 150f),
+                new float3(150f, 0f, 300f),
+                new float3(0f, 0f, 300f),
+            };
+
+            var segments = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(30f, 3));
+
+            Assert.NotEmpty(segments);
+            Assert.All(segments, s =>
+            {
+                Assert.True(math.all(math.isfinite(s.Start)), "Segment.Start doit être fini (pas de NaN/Infinity) même au coin concave.");
+                Assert.True(math.all(math.isfinite(s.End)), "Segment.End doit être fini même au coin concave.");
+                // Marge généreuse : le clamp de miter limit peut légèrement déborder d'un coin
+                // très aigu, mais jamais s'échapper loin de la bounding box du périmètre.
+                Assert.InRange(s.Start.x, -50f, 350f);
+                Assert.InRange(s.Start.z, -50f, 350f);
+            });
+        }
+
+        [Fact]
+        public void ConcaveLShape_EventuallyDegeneratesWithoutInfiniteRings()
+        {
+            // Garde-fou pratique : même sur une forme concave, la boucle de génération doit
+            // s'arrêter (dégénérescence détectée) bien avant MaxAdaptiveRings, jamais tourner
+            // en rond jusqu'à la limite de sécurité.
+            var lShape = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(300f, 0f, 0f),
+                new float3(300f, 0f, 150f),
+                new float3(150f, 0f, 150f),
+                new float3(150f, 0f, 300f),
+                new float3(0f, 0f, 300f),
+            };
+
+            var segments = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(30f, 0));
+
+            // Le bras le plus étroit du L fait 150 m : largement moins de
+            // MaxAdaptiveRings * 30 m d'anneaux possibles avant dégénérescence.
+            int approxRingCount = segments.Count / 6; // 6 arêtes par anneau sur cette forme
+            Assert.True(approxRingCount < GridGenerator.MaxAdaptiveRings,
+                "La génération devrait s'arrêter bien avant la limite de sécurité sur cette forme concave.");
+        }
+
+        [Fact]
+        public void CurvedPerimeter_RingsFollowTheCurveInsteadOfItsChord()
+        {
+            // Renflement doux et tangent-continu (arc de cercle, rayon 75, quasi-circulaire via
+            // k=4/3*(sqrt(2)-1)) plutôt qu'une cuspide extrême (control point Bézier placé
+            // derrière le sommet, comme utilisé par GridGeneratorCurveSamplingTests — pertinent
+            // pour l'ancien clipping pair-impair, qui ne dépend d'aucune continuité de tangente,
+            // mais pas représentatif d'une vraie route courbe pour un algorithme d'offset).
+            float radius = 75f;
+            float k = 0.5522847f;
+            var center = new float2(200f, 100f);
+            float3 a = new float3(center.x, 0f, center.y - radius);
+            float3 d = new float3(center.x - radius, 0f, center.y);
+            float3 b = new float3(center.x, 0f, center.y - radius + radius * k);
+            float3 c = new float3(center.x - radius + radius * k, 0f, center.y);
+            List<float3> curveSamples = GridGenerator.SampleCurve(a, b, c, d);
+
+            var straightChordPerimeter = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(200f, 0f, 0f),
+                new float3(200f, 0f, 200f),
+                new float3(0f, 0f, 200f),
+            };
+            var curveAwarePerimeter = new List<float3> { new float3(0f, 0f, 0f), a };
+            curveAwarePerimeter.AddRange(curveSamples);
+            curveAwarePerimeter.Add(d);
+            curveAwarePerimeter.Add(new float3(0f, 0f, 200f));
+
+            // Comparaison directe du PREMIER anneau (OffsetPolygonInward, internal) plutôt que
+            // de chercher des sommets près de z=100 dans la sortie complète : un anneau carré
+            // n'a que 4 coins, presque jamais pile à z=100, donc regarder les sommets seuls ne
+            // dirait rien d'utile ici. On calcule plutôt où le contour de l'anneau CROISE la
+            // ligne z=100 (interpolation le long de chaque arête), une mesure directement
+            // comparable entre les deux périmètres.
+            var straightPoly = straightChordPerimeter.Select(p => new float2(p.x, p.z)).ToList();
+            var curvedPoly = curveAwarePerimeter.Select(p => new float2(p.x, p.z)).ToList();
+
+            var straightRing1 = GridGenerator.OffsetPolygonInward(straightPoly, 15f);
+            var curvedRing1 = GridGenerator.OffsetPolygonInward(curvedPoly, 15f);
+
+            Assert.NotNull(straightRing1);
+            Assert.NotNull(curvedRing1);
+
+            float RingXAtZ(List<float2> ring, float z)
+            {
+                float maxX = float.MinValue;
+                int n = ring.Count;
+                for (int i = 0; i < n; i++)
+                {
+                    float2 a = ring[i];
+                    float2 b = ring[(i + 1) % n];
+                    bool crosses = (a.y <= z && z < b.y) || (b.y <= z && z < a.y);
+                    if (!crosses) continue;
+                    float t = (z - a.y) / (b.y - a.y);
+                    maxX = math.max(maxX, a.x + t * (b.x - a.x));
+                }
+                return maxX;
+            }
+
+            float straightX = RingXAtZ(straightRing1, 100f);
+            float curvedX = RingXAtZ(curvedRing1, 100f);
+
+            Assert.True(curvedX < straightX - 20f,
+                $"Le premier anneau du périmètre courbe devrait croiser z=100 nettement en retrait du renflement (x attendu nettement < {straightX}), obtenu {curvedX}.");
+        }
+
+        [Fact]
+        public void DegenerateInput_FewerThanTwoNodes_ReturnsEmptyWithoutThrowing()
+        {
+            var segments = GridGenerator.GenerateAdaptiveGrid(new List<float3> { new float3(0f, 0f, 0f) }, AdaptiveParams(40f, 0));
+            Assert.Empty(segments);
         }
     }
 }

@@ -23,6 +23,8 @@ export const spacing$ = bindValue<number>(mod.id, "SPACING", 60);
 export const angleOffset$ = bindValue<number>(mod.id, "ANGLE_OFFSET", 0);
 export const followTerrain$ = bindValue<boolean>(mod.id, "FOLLOW_TERRAIN", true);
 export const culDeSacMode$ = bindValue<boolean>(mod.id, "CULDESAC_MODE", false);
+/// Axe des becos sans saída : 0=Colunas, 1=Linhas, 2=Ambos (miroir de GridGenerator.CulDeSacAxis en C#).
+export const culDeSacAxis$ = bindValue<number>(mod.id, "CULDESAC_AXIS", 0);
 export const culDeSacDepth$ = bindValue<number>(mod.id, "CULDESAC_DEPTH", 75);
 export const staggered$ = bindValue<boolean>(mod.id, "STAGGERED", true);
 export const culDeSacRatio$ = bindValue<number>(mod.id, "CULDESAC_RATIO", 100);
@@ -30,18 +32,20 @@ export const culDeSacRatio$ = bindValue<number>(mod.id, "CULDESAC_RATIO", 100);
 export const culDeSacCapSize$ = bindValue<number>(mod.id, "CULDESAC_CAP_SIZE", 1);
 /// Style du cercle de retournement : 0=Asphalte, 1=Engazonné, 2=Arbres (miroir de CulDeSacCapStyle en C#).
 export const culDeSacCapStyle$ = bindValue<number>(mod.id, "CULDESAC_CAP_STYLE", 0);
-export const jitterAmount$ = bindValue<number>(mod.id, "JITTER_AMOUNT", 0);
-export const curveAmount$ = bindValue<number>(mod.id, "CURVE_AMOUNT", 0);
-/// Forme de la courbure : 0=Bombée (Bulge), 1=En S (SCurve) (miroir de GridGenerator.CurveStyle en C#).
-export const curveStyle$ = bindValue<number>(mod.id, "CURVE_STYLE", 0);
-/// Mode d'orientation : 0=Ângulo fixo, 1=Seguir relevo (miroir de OrientationMode en C#).
-export const orientationMode$ = bindValue<number>(mod.id, "ORIENTATION_MODE", 0);
+/// Mode "Adaptativo" (anneaux concentriques par offset du périmètre) : remplace la grille de lignes droites quand actif.
+export const adaptiveMode$ = bindValue<boolean>(mod.id, "ADAPTIVE_MODE", false);
+export const radialConnections$ = bindValue<number>(mod.id, "RADIAL_CONNECTIONS", 8);
+export const adaptiveRoundedCorners$ = bindValue<boolean>(mod.id, "ADAPTIVE_ROUNDED_CORNERS", false);
 /// Vue disponible/sélectionnée (bitmask, miroir de ViewOption en C#) : 1=Underground, 2=ZoneGrid, 4=InvisibleNetworks.
 export const availableViews$ = bindValue<number>(mod.id, "AVAILABLE_VIEWS", 7);
 export const selectedViews$ = bindValue<number>(mod.id, "SELECTED_VIEWS", 0);
 export const roadPrefabName$ = bindValue<string>(mod.id, "ROAD_PREFAB_NAME", "");
 export const roadPrefabIcon$ = bindValue<string>(mod.id, "ROAD_PREFAB_ICON", "");
 export const roadPrefabAuto$ = bindValue<boolean>(mod.id, "ROAD_PREFAB_AUTO", true);
+/// Réseau secondaire (impasses/rayons) : mêmes trois bindings, préfixés SECONDARY_.
+export const secondaryRoadPrefabName$ = bindValue<string>(mod.id, "SECONDARY_ROAD_PREFAB_NAME", "");
+export const secondaryRoadPrefabIcon$ = bindValue<string>(mod.id, "SECONDARY_ROAD_PREFAB_ICON", "");
+export const secondaryRoadPrefabAuto$ = bindValue<boolean>(mod.id, "SECONDARY_ROAD_PREFAB_AUTO", true);
 export const anarchyAvailable$ = bindValue<boolean>(mod.id, "ANARCHY_AVAILABLE", false);
 export const pickerType$ = bindValue<number>(mod.id, "PICKER_TYPE", 0);
 export const pickerData$ = bindValue<PrefabEntry[]>(mod.id, "PICKER_DATA", []);
@@ -55,16 +59,15 @@ export const setSpacing = (value: number) => trigger(mod.id, "SET_SPACING", valu
 export const setAngleOffset = (value: number) => trigger(mod.id, "SET_ANGLE_OFFSET", value);
 export const setFollowTerrain = (value: boolean) => trigger(mod.id, "SET_FOLLOW_TERRAIN", value);
 export const setCulDeSacMode = (value: boolean) => trigger(mod.id, "SET_CULDESAC_MODE", value);
+export const setCulDeSacAxis = (value: number) => trigger(mod.id, "SET_CULDESAC_AXIS", value);
 export const setCulDeSacDepth = (value: number) => trigger(mod.id, "SET_CULDESAC_DEPTH", value);
 export const setStaggered = (value: boolean) => trigger(mod.id, "SET_STAGGERED", value);
 export const setCulDeSacRatio = (value: number) => trigger(mod.id, "SET_CULDESAC_RATIO", value);
 export const setCulDeSacCapSize = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_SIZE", value);
 export const setCulDeSacCapStyle = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_STYLE", value);
-export const setJitterAmount = (value: number) => trigger(mod.id, "SET_JITTER_AMOUNT", value);
-export const regenerateJitterSeed = () => trigger(mod.id, "REGENERATE_JITTER_SEED");
-export const setCurveAmount = (value: number) => trigger(mod.id, "SET_CURVE_AMOUNT", value);
-export const setCurveStyle = (value: number) => trigger(mod.id, "SET_CURVE_STYLE", value);
-export const setOrientationMode = (value: number) => trigger(mod.id, "SET_ORIENTATION_MODE", value);
+export const setAdaptiveMode = (value: boolean) => trigger(mod.id, "SET_ADAPTIVE_MODE", value);
+export const setRadialConnections = (value: number) => trigger(mod.id, "SET_RADIAL_CONNECTIONS", value);
+export const setAdaptiveRoundedCorners = (value: boolean) => trigger(mod.id, "SET_ADAPTIVE_ROUNDED_CORNERS", value);
 export const setSelectedViews = (value: number) => trigger(mod.id, "SET_SELECTED_VIEWS", value);
 export const generateGrid = () => trigger(mod.id, "GENERATE");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");
@@ -77,3 +80,5 @@ export const anarchyEnabled$ = bindValue<boolean>("Anarchy", "AnarchyEnabled", f
 export const toggleAnarchy = () => trigger("Anarchy", "AnarchyToggled");
 export const pickPrefab = (entity: Entity) => trigger(mod.id, "PICK_PREFAB", entity);
 export const pickAuto = () => trigger(mod.id, "PICK_AUTO");
+export const pickSecondaryPrefab = (entity: Entity) => trigger(mod.id, "PICK_PREFAB_SECONDARY", entity);
+export const pickSecondaryAuto = () => trigger(mod.id, "PICK_AUTO_SECONDARY");

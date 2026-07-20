@@ -6,47 +6,44 @@ import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
 import styles from "./gridPanel.module.scss";
 import { locString } from "./locHelpers";
-import { PrefabPicker } from "./prefabPicker";
+import { RoadSelection } from "./roadSelection";
 import { SafeButton } from "./safeButton";
 import { VC, VF, VT } from "./vanilla";
 import { ViewSelection } from "./viewSelection";
 import {
+    adaptiveMode$,
+    adaptiveRoundedCorners$,
     anarchyAvailable$,
     anarchyEnabled$,
     angleOffset$,
     canApply$,
     columns$,
+    culDeSacAxis$,
     culDeSacCapSize$,
     culDeSacCapStyle$,
     culDeSacDepth$,
     culDeSacMode$,
     culDeSacRatio$,
-    curveAmount$,
-    curveStyle$,
     followTerrain$,
     generateGrid,
-    jitterAmount$,
     mode$,
     nodeCount$,
-    orientationMode$,
     perimeterInvalid$,
-    regenerateJitterSeed,
-    roadPrefabIcon$,
-    roadPrefabName$,
+    radialConnections$,
     rows$,
+    setAdaptiveMode,
+    setAdaptiveRoundedCorners,
     setAngleOffset,
     setColumns,
+    setCulDeSacAxis,
     setCulDeSacCapSize,
     setCulDeSacCapStyle,
     setCulDeSacDepth,
     setCulDeSacMode,
     setCulDeSacRatio,
-    setCurveAmount,
-    setCurveStyle,
     setFollowTerrain,
-    setJitterAmount,
     setMode,
-    setOrientationMode,
+    setRadialConnections,
     setRows,
     setSpacing,
     setStaggered,
@@ -69,11 +66,9 @@ const CAP_STYLE_ASPHALT = 0;
 const CAP_STYLE_GRASS = 1;
 const CAP_STYLE_TREES = 2;
 
-const CURVE_STYLE_BULGE = 0;
-const CURVE_STYLE_S = 1;
-
-const ORIENTATION_FIXED_ANGLE = 0;
-const ORIENTATION_FOLLOW_TERRAIN = 1;
+const CULDESAC_AXIS_COLUMNS = 0;
+const CULDESAC_AXIS_ROWS = 1;
+const CULDESAC_AXIS_BOTH = 2;
 
 // ------------------------------------------------------------------
 // Panneau déplaçable : drag par la barre de titre, position persistée
@@ -172,27 +167,24 @@ export const LegacyGridPanel = () => {
     const angleOffset = useValue(angleOffset$);
     const followTerrain = useValue(followTerrain$);
     const culDeSacMode = useValue(culDeSacMode$);
+    const culDeSacAxis = useValue(culDeSacAxis$);
     const culDeSacDepth = useValue(culDeSacDepth$);
     const staggered = useValue(staggered$);
     const culDeSacRatio = useValue(culDeSacRatio$);
     const culDeSacCapSize = useValue(culDeSacCapSize$);
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
-    const jitterAmount = useValue(jitterAmount$);
-    const curveAmount = useValue(curveAmount$);
-    const curveStyle = useValue(curveStyle$);
-    const orientationMode = useValue(orientationMode$);
-    const roadPrefabName = useValue(roadPrefabName$);
-    const roadPrefabIcon = useValue(roadPrefabIcon$);
+    const adaptiveMode = useValue(adaptiveMode$);
+    const radialConnections = useValue(radialConnections$);
+    const adaptiveRoundedCorners = useValue(adaptiveRoundedCorners$);
     const anarchyAvailable = useValue(anarchyAvailable$);
     const anarchyEnabled = useValue(anarchyEnabled$);
-    const [pickerOpen, setPickerOpen] = useState(false);
     const [panelPosition, setPanelPosition] = useState<PanelPosition>(loadPanelPosition);
     const panelRef = useRef<HTMLDivElement>(null);
     // Seule la géométrie s'ouvre par défaut ; les autres sections restent repliées
     // tant que le joueur ne les déplie pas explicitement.
     const [geometryExpanded, setGeometryExpanded] = useState(true);
     const [culDeSacExpanded, setCulDeSacExpanded] = useState(false);
-    const [organicExpanded, setOrganicExpanded] = useState(false);
+    const [adaptiveExpanded, setAdaptiveExpanded] = useState(false);
     const [selectionExpanded, setSelectionExpanded] = useState(false);
 
     if (!toolActive) {
@@ -226,10 +218,6 @@ export const LegacyGridPanel = () => {
     };
 
     const fitMode = mode === MODE_FIT;
-    // Nom localisé du prefab, comme le fait le jeu (fallback : nom brut).
-    const roadDisplayName = roadPrefabName
-        ? (translate(`Assets.NAME[${roadPrefabName}]`, roadPrefabName) ?? roadPrefabName)
-        : "—";
 
     // Taille et style du cercle de retournement : voir le commentaire équivalent
     // dans gridPanelNative.tsx (même logique, panneau custom éprouvé ici).
@@ -248,9 +236,10 @@ export const LegacyGridPanel = () => {
         { value: CAP_STYLE_GRASS, displayName: loc("GridRoadGenerator.UI.CulDeSacCapStyleGrass", "Grass") },
         { value: CAP_STYLE_TREES, displayName: loc("GridRoadGenerator.UI.CulDeSacCapStyleTrees", "Trees") },
     ];
-    const curveStyleItems = [
-        { value: CURVE_STYLE_BULGE, displayName: loc("GridRoadGenerator.UI.CurveStyleBulge", "Bulge") },
-        { value: CURVE_STYLE_S, displayName: loc("GridRoadGenerator.UI.CurveStyleSCurve", "S-curve") },
+    const culDeSacAxisItems = [
+        { value: CULDESAC_AXIS_COLUMNS, displayName: loc("GridRoadGenerator.UI.CulDeSacAxisColumns", "Columns") },
+        { value: CULDESAC_AXIS_ROWS, displayName: loc("GridRoadGenerator.UI.CulDeSacAxisRows", "Rows") },
+        { value: CULDESAC_AXIS_BOTH, displayName: loc("GridRoadGenerator.UI.CulDeSacAxisBoth", "Both") },
     ];
     const handleCapStyleChange = (value: number) => {
         if (value === CAP_STYLE_ASPHALT && culDeSacCapSize === CAP_SIZE_XL) {
@@ -258,14 +247,6 @@ export const LegacyGridPanel = () => {
         }
         setCulDeSacCapStyle(value);
     };
-
-    // Chantier exploratoire : "Seguir relevo" ne recalcule qu'UN seul angle pour tout
-    // le périmètre (pas une orientation continue par bloc, voir le commentaire équivalent
-    // dans gridPanelNative.tsx et GridRoadToolSystem.ComputeTerrainFollowAngle).
-    const orientationModeItems = [
-        { value: ORIENTATION_FIXED_ANGLE, displayName: loc("GridRoadGenerator.UI.OrientationFixedAngle", "Fixed angle") },
-        { value: ORIENTATION_FOLLOW_TERRAIN, displayName: loc("GridRoadGenerator.UI.OrientationFollowTerrain", "Follow terrain") },
-    ];
 
     return (
         <div
@@ -303,9 +284,10 @@ export const LegacyGridPanel = () => {
                 <div className={styles.content}>
                   <div className={styles.scrollWrapper}>
                     <VC.Scrollable>
-                    {/* "Vista" : pas une section repliable (voir viewSelection.tsx),
-                        toujours visible en haut, avant la première section. */}
+                    {/* "Vista" et "Route" : pas des sections repliables (voir viewSelection.tsx
+                        et roadSelection.tsx), toujours visibles en haut, avant la première section. */}
                     <ViewSelection />
+                    <RoadSelection />
 
                     {/* Géométrie : mode, colonnes/lignes/espacement, angle, suivi du terrain. */}
                     <SectionFoldout
@@ -320,7 +302,7 @@ export const LegacyGridPanel = () => {
                                     src="Media/Tools/Snap Options/ZoneGrid.svg"
                                     selected={fitMode}
                                     multiSelect={false}
-                                    disabled={false}
+                                    disabled={adaptiveMode}
                                     focusKey={VF.FOCUS_DISABLED}
                                     tooltip={translate("GridRoadGenerator.UI.ModeFit", "Fit to area")}
                                     onSelect={() => setMode(MODE_FIT)}
@@ -330,7 +312,7 @@ export const LegacyGridPanel = () => {
                                     src="Media/Glyphs/Length.svg"
                                     selected={!fitMode}
                                     multiSelect={false}
-                                    disabled={false}
+                                    disabled={adaptiveMode}
                                     focusKey={VF.FOCUS_DISABLED}
                                     tooltip={translate("GridRoadGenerator.UI.ModeFixed", "Fixed spacing")}
                                     onSelect={() => setMode(MODE_FIXED)}
@@ -345,7 +327,7 @@ export const LegacyGridPanel = () => {
                                     value={columns}
                                     min={1}
                                     max={12}
-                                    disabled={!fitMode}
+                                    disabled={!fitMode || adaptiveMode}
                                     onChange={(value: number) => setColumns(Math.round(value))}
                                 />
                             </div>
@@ -357,7 +339,7 @@ export const LegacyGridPanel = () => {
                                     value={rows}
                                     min={1}
                                     max={12}
-                                    disabled={!fitMode}
+                                    disabled={!fitMode || adaptiveMode}
                                     onChange={(value: number) => setRows(Math.round(value))}
                                 />
                             </div>
@@ -370,7 +352,7 @@ export const LegacyGridPanel = () => {
                                     min={10}
                                     max={300}
                                     fractionDigits={0}
-                                    disabled={fitMode}
+                                    disabled={fitMode && !adaptiveMode}
                                     onChange={(value: number) => setSpacing(value)}
                                 />
                                 <span className={styles.unitLabel}>m</span>
@@ -384,7 +366,7 @@ export const LegacyGridPanel = () => {
                                     min={-90}
                                     max={90}
                                     fractionDigits={0}
-                                    disabled={orientationMode === ORIENTATION_FOLLOW_TERRAIN}
+                                    disabled={adaptiveMode}
                                     onChange={(value: number) => setAngleOffset(value)}
                                 />
                                 <span className={styles.unitLabel}>°</span>
@@ -433,6 +415,20 @@ export const LegacyGridPanel = () => {
                                 <span className={styles.unitLabel}>%</span>
                             </div>
                         </div>
+                        {/* Axe et alternance haut/bas : concepts propres à la grille de lignes
+                            droites, sans équivalent pour les rayons du mode Adaptativo. */}
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.CulDeSacAxis", "Axis")}>
+                                <VC.DropdownField
+                                    items={culDeSacAxisItems}
+                                    value={culDeSacAxis}
+                                    disabled={!culDeSacMode || adaptiveMode}
+                                    onChange={(value: number) => setCulDeSacAxis(value)}
+                                />
+                            </VC.Section>
+                        </div>
                         <div className={styles.vanillaRow}>
                             <div className={styles.vanillaField}>
                                 <VC.FloatSliderField
@@ -453,7 +449,7 @@ export const LegacyGridPanel = () => {
                                 title={translate("GridRoadGenerator.UI.Staggered", "Staggered")}>
                                 <VC.ToggleField
                                     value={staggered}
-                                    disabled={!culDeSacMode}
+                                    disabled={!culDeSacMode || adaptiveMode}
                                     onChange={(value: boolean) => setStaggered(value)}
                                 />
                             </VC.Section>
@@ -484,70 +480,48 @@ export const LegacyGridPanel = () => {
                         </div>
                     </SectionFoldout>
 
-                    {/* Variation organique : jitter des lignes internes, courbure des
-                        collectrices (chantier suivant : orientation par bloc). */}
+                    {/* Adaptativo : anneaux concentriques par offset du périmètre, en
+                        remplacement de la grille de lignes droites (voir GenerateAdaptiveGrid).
+                        Réutilise le slider Espaçamento (section Géométrie) comme distance entre
+                        deux anneaux. */}
                     <SectionFoldout
-                        title={translate("GridRoadGenerator.UI.SectionOrganic", "Organic variation")}
-                        expanded={organicExpanded}
-                        onToggle={() => setOrganicExpanded((value) => !value)}>
+                        title={translate("GridRoadGenerator.UI.SectionAdaptive", "Adaptive")}
+                        headerExtra={
+                            <VC.ToggleField
+                                value={adaptiveMode}
+                                disabled={false}
+                                onChange={(value: boolean) => setAdaptiveMode(value)}
+                            />
+                        }
+                        expanded={adaptiveMode && adaptiveExpanded}
+                        onToggle={() => adaptiveMode && setAdaptiveExpanded((value) => !value)}
+                        locked={!adaptiveMode}>
                         <div className={styles.vanillaRow}>
                             <div className={styles.vanillaField}>
-                                <VC.FloatSliderField
-                                    label={translate("GridRoadGenerator.UI.JitterAmount", "Jitter")}
-                                    value={jitterAmount}
+                                <VC.IntSliderField
+                                    label={translate("GridRoadGenerator.UI.RadialConnections", "Radial connections")}
+                                    value={radialConnections}
                                     min={0}
-                                    max={15}
-                                    fractionDigits={1}
-                                    disabled={false}
-                                    onChange={(value: number) => setJitterAmount(value)}
+                                    max={24}
+                                    disabled={!adaptiveMode}
+                                    onChange={(value: number) => setRadialConnections(Math.round(value))}
                                 />
-                                <span className={styles.unitLabel}>m</span>
-                            </div>
-                        </div>
-                        <SafeButton variant="flat" className={styles.reseedButton} onSelect={regenerateJitterSeed}>
-                            {translate("GridRoadGenerator.UI.JitterReseedButton", "New seed")}
-                        </SafeButton>
-                        <div className={styles.vanillaRow}>
-                            <div className={styles.vanillaField}>
-                                <VC.FloatSliderField
-                                    label={translate("GridRoadGenerator.UI.CurveAmount", "Curve")}
-                                    value={curveAmount}
-                                    min={0}
-                                    max={100}
-                                    fractionDigits={0}
-                                    disabled={false}
-                                    onChange={(value: number) => setCurveAmount(value)}
-                                />
-                                <span className={styles.unitLabel}>%</span>
                             </div>
                         </div>
                         <div className={styles.vanillaRow}>
                             <VC.Section
                                 focusKey={VF.FOCUS_DISABLED}
-                                title={translate("GridRoadGenerator.UI.CurveStyle", "Curve style")}>
-                                <VC.DropdownField
-                                    items={curveStyleItems}
-                                    value={curveStyle}
-                                    disabled={curveAmount === 0}
-                                    onChange={(value: number) => setCurveStyle(value)}
-                                />
-                            </VC.Section>
-                        </div>
-                        <div className={styles.vanillaRow}>
-                            <VC.Section
-                                focusKey={VF.FOCUS_DISABLED}
-                                title={translate("GridRoadGenerator.UI.OrientationMode", "Orientation mode")}>
-                                <VC.DropdownField
-                                    items={orientationModeItems}
-                                    value={orientationMode}
-                                    disabled={false}
-                                    onChange={(value: number) => setOrientationMode(value)}
+                                title={translate("GridRoadGenerator.UI.AdaptiveRoundedCorners", "Rounded corners")}>
+                                <VC.ToggleField
+                                    value={adaptiveRoundedCorners}
+                                    disabled={!adaptiveMode}
+                                    onChange={(value: boolean) => setAdaptiveRoundedCorners(value)}
                                 />
                             </VC.Section>
                         </div>
                     </SectionFoldout>
 
-                    {/* Sélection en cours + réseau utilisé. */}
+                    {/* Sélection en cours (réseau utilisé : voir la barre permanente "Route" ci-dessus). */}
                     <SectionFoldout
                         title={translate("GridRoadGenerator.UI.SectionSelection", "Selection")}
                         expanded={selectionExpanded}
@@ -564,19 +538,6 @@ export const LegacyGridPanel = () => {
                                     }>
                                     {nodeCount}
                                 </div>
-                            </VC.Section>
-                        </div>
-                        <div className={styles.vanillaRow}>
-                            <VC.Section
-                                focusKey={VF.FOCUS_DISABLED}
-                                title={translate("GridRoadGenerator.UI.RoadPrefab", "Road")}>
-                                <button
-                                    className={styles.prefabRow}
-                                    onClick={() => setPickerOpen((open) => !open)}>
-                                    {roadPrefabIcon && <img src={roadPrefabIcon} className={styles.prefabIcon} />}
-                                    <span className={styles.prefabName}>{roadDisplayName}</span>
-                                    <span className={styles.prefabChevron}>›</span>
-                                </button>
                             </VC.Section>
                         </div>
                     </SectionFoldout>
@@ -605,8 +566,6 @@ export const LegacyGridPanel = () => {
                     </span>
                 </div>
             </div>
-
-            {pickerOpen && <PrefabPicker onClose={() => setPickerOpen(false)} />}
         </div>
     );
 };

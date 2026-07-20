@@ -52,9 +52,12 @@ All other settings (geometry, cul-de-sac, organic variation, road choice) live i
 Node-selection, tooltip and UI architecture patterns adapted from [CS2-NetworkTools](https://github.com/lucarager/CS2-NetworkTools) by Luca Rager, under the MIT license. Thank you!
 	</LongDescription>
 	<!--Thumbnail-->
-	<Thumbnail Value="C:\Dev\GridRoadGenerator\Properties\Thumbnail.jpg" />
+	<Thumbnail Value="C:\Dev\GridRoadGenerator\Properties\Thumbnail.png" />
 	<!--Screenshot, can be set multiple times-->
-	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\1.jpg" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\1.png" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\2.png" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\3.png" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\4.png" />
 	<!--Tag, can be set multiple times-->
 	<Tag Value="Code Mod" />
 	<!--Link to the forum post where the mod can be discussed-->

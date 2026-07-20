@@ -1,0 +1,90 @@
+// Barre "Route" : pas une section repliable, donc son propre module minimal — même
+// raison que viewSelection.module.scss (composant partagé par les deux panneaux, natif
+// et legacy). Repris de gridPanel.module.scss/.prefabRow etc., devenu inutile là-bas
+// puisque la rangée réseau a déménagé ici.
+.roadRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12rem 8rem;
+    border-bottom: 1rem solid #9645ff59; // accent violet, atténué (même teinte que viewSelection)
+    margin-bottom: 8rem;
+}
+
+.roadLabel {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: #ffffffd9;
+}
+
+.roadFields {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    column-gap: 4rem;
+    min-width: 0;
+}
+
+.prefabButton {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+    max-width: 140rem;
+    padding: 2rem 6rem;
+    border-radius: 4rem;
+    background: transparent;
+    border: none;
+    color: white;
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+    }
+}
+
+.prefabIcon {
+    width: 20rem;
+    height: 20rem;
+    margin-right: 4rem;
+    flex-shrink: 0;
+}
+
+.prefabName {
+    font-size: var(--fontSizeS);
+    line-height: 1.25em;
+    coh-font-fit-mode: shrink;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    white-space: nowrap;
+}
+
+.prefabChevron {
+    margin-left: 4rem;
+    color: #ffffff80;
+    font-size: var(--fontSizeM);
+    flex-shrink: 0;
+}
+
+// Bouton "+" : révèle la rangée du réseau secondaire (repliée par défaut, voir roadSelection.tsx).
+.addSecondaryButton {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20rem;
+    height: 20rem;
+    border-radius: 4rem;
+    background: transparent;
+    border: 1rem solid #ffffff4d;
+    color: #ffffffd9;
+    font-size: var(--fontSizeM);
+    line-height: 1;
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+    }
+}

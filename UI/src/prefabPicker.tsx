@@ -10,10 +10,13 @@ import {
     PrefabEntry,
     pickAuto,
     pickPrefab,
+    pickSecondaryAuto,
+    pickSecondaryPrefab,
     pickerData$,
     pickerType$,
     recentPrefabs$,
     roadPrefabAuto$,
+    secondaryRoadPrefabAuto$,
     setPickerType,
 } from "bindings";
 
@@ -26,14 +29,21 @@ const TABS: { type: number; localeKey: string; fallback: string }[] = [
 
 type PrefabPickerProps = {
     onClose: () => void;
+    /// Quel réseau ce picker modifie : "primary" (défaut, réseau principal) ou "secondary"
+    /// (impasses/rayons — voir roadSelection.tsx). Détermine quels bindings/déclencheurs lire.
+    slot?: "primary" | "secondary";
 };
 
-export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose }) => {
+export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose, slot = "primary" }) => {
     const { translate } = useLocalization();
     const pickerType = useValue(pickerType$);
     const pickerData = useValue(pickerData$);
     const recentPrefabs = useValue(recentPrefabs$);
-    const isAuto = useValue(roadPrefabAuto$);
+    const isAutoPrimary = useValue(roadPrefabAuto$);
+    const isAutoSecondary = useValue(secondaryRoadPrefabAuto$);
+    const isAuto = slot === "secondary" ? isAutoSecondary : isAutoPrimary;
+    const pick = slot === "secondary" ? pickSecondaryPrefab : pickPrefab;
+    const pickAutoForSlot = slot === "secondary" ? pickSecondaryAuto : pickAuto;
     const [searchQuery, setSearchQuery] = useState("");
 
     const displayName = (entry: PrefabEntry) =>
@@ -52,7 +62,7 @@ export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose }) => {
     );
 
     const select = (entry: PrefabEntry) => {
-        pickPrefab(entry.Entity);
+        pick(entry.Entity);
         onClose();
     };
 
@@ -95,7 +105,7 @@ export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose }) => {
                     <div
                         className={isAuto ? `${styles.listItem} ${styles.listItemActive}` : styles.listItem}
                         onClick={() => {
-                            pickAuto();
+                            pickAutoForSlot();
                             onClose();
                         }}>
                         <img src="Media/Tools/Snap Options/ExistingGeometry.svg" className={styles.listItemIcon} />

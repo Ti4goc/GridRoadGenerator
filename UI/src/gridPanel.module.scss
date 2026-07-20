@@ -245,45 +245,6 @@ $accent-violet-gradient-start: #c12cea;
     color: #ff8080;
 }
 
-// Rangée du réseau : cliquable, ouvre le sélecteur.
-.prefabRow {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    min-width: 0;
-    padding: 2rem 6rem;
-    border-radius: 4rem;
-    background: transparent;
-    border: none;
-    color: white;
-    cursor: pointer;
-
-    &:hover {
-        background-color: #ffffff1a;
-    }
-}
-
-.prefabChevron {
-    margin-left: 6rem;
-    color: #ffffff80;
-    font-size: var(--fontSizeM);
-}
-
-.prefabIcon {
-    width: 24rem;
-    height: 24rem;
-    margin-right: 6rem;
-}
-
-.prefabName {
-    font-size: var(--fontSizeS);
-    line-height: 1.25em;
-    coh-font-fit-mode: shrink;
-    overflow-x: hidden;
-    overflow-y: hidden;
-    white-space: nowrap;
-}
-
 // Frère de .content (pas un enfant) : reste hors de sa zone défilante, donc
 // toujours visible en bas du panneau, quel que soit l'état des sections.
 .actions {
@@ -313,13 +274,6 @@ $accent-violet-gradient-start: #c12cea;
     padding: 5rem 8rem;
     font-size: var(--fontSizeS);
     font-weight: 600;
-}
-
-// Bouton "Nova semente" (Variação orgânica) : variant flat vanilla, juste un peu
-// d'espace au-dessus du slider de distorção qui le précède.
-.reseedButton {
-    margin-top: 4rem;
-    width: 100%;
 }
 
 // Le bouton "Annuler" (clearButton) n'a plus de classe custom : le variant

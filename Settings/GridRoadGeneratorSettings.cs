@@ -64,6 +64,10 @@ namespace GridRoadGenerator.Settings
         [SettingsUIHidden]
         public bool CulDeSacMode { get; set; }
 
+        /// <summary>Quel(s) axe(s) peuvent devenir des impasses : colonnes (historique), rangées, ou les deux.</summary>
+        [SettingsUIHidden]
+        public CulDeSacAxis CulDeSacAxis { get; set; }
+
         /// <summary>Stocké en fraction (0.5–0.9) ; affiché en pourcentage (50–90 %) dans le panneau.</summary>
         [SettingsUIHidden]
         public float CulDeSacDepth { get; set; }
@@ -83,44 +87,28 @@ namespace GridRoadGenerator.Settings
         public CulDeSacCapStyle CulDeSacCapStyle { get; set; }
 
         /// <summary>
-        /// Amplitude (m, 0–15) du décalage pseudo-aléatoire déterministe des lignes
-        /// internes de la grille (jamais les collectrices ni le périmètre). 0 = désactivé.
+        /// Mode "Adaptativo" : au lieu de la grille de lignes droites (Mode/Rows/Columns/Angle/
+        /// CulDeSac* ci-dessus, tous ignorés quand actif), génère des anneaux concentriques par
+        /// offset successif du polygone du périmètre vers l'intérieur — voir
+        /// GridGenerator.GenerateAdaptiveGrid. Réutilise SpacingMeters comme distance entre
+        /// deux anneaux.
         /// </summary>
         [SettingsUIHidden]
-        public float JitterAmount { get; set; }
+        public bool AdaptiveMode { get; set; }
 
         /// <summary>
-        /// Graine du jitter : régénérée depuis le panneau ("Nova semente").
+        /// Nombre de connexions radiales reliant les anneaux entre eux en mode Adaptativo
+        /// (0 = aucune, anneaux isolés). Voir GridGenerator.GenerateAdaptiveGrid.
         /// </summary>
         [SettingsUIHidden]
-        public int JitterSeed { get; set; }
+        public int RadialConnections { get; set; }
 
         /// <summary>
-        /// Courbure (0–100 %) appliquée aux collectrices (lignes traversantes complètes,
-        /// jamais les impasses ni le périmètre) : purement une affaire de tracé de la
-        /// NetCourse posée (GridRoadToolSystem), pas de la géométrie calculée par
-        /// GridGenerator — la position des nœuds ne change pas, donc les rues
-        /// perpendiculaires s'y raccordent normalement, sans logique particulière.
+        /// Mode Adaptativo : coins arrondis (un arc à chaque sommet net des anneaux) au lieu de
+        /// la jonction en pointe par défaut. Voir GridGenerator.RoundCorners.
         /// </summary>
         [SettingsUIHidden]
-        public float CurveAmount { get; set; }
-
-        /// <summary>
-        /// Forme de la courbure des collectrices : Bulge (bombée d'un seul côté, comportement
-        /// historique) ou SCurve (change de sens à mi-segment). Purement une affaire de tracé,
-        /// comme CurveAmount ci-dessus.
-        /// </summary>
-        [SettingsUIHidden]
-        public GridGenerator.CurveStyle CurveStyle { get; set; }
-
-        /// <summary>
-        /// Ângulo fixo (manuel, AngleOffsetDegrees) ou Seguir relevo (recalculé à chaque
-        /// génération pour suivre le terrain — voir OrientationMode et
-        /// GridRoadToolSystem.ComputeTerrainFollowAngle pour l'étendue réelle, volontairement
-        /// simplifiée, de ce chantier exploratoire).
-        /// </summary>
-        [SettingsUIHidden]
-        public OrientationMode OrientationMode { get; set; }
+        public bool AdaptiveRoundedCorners { get; set; }
 
         /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
@@ -129,6 +117,16 @@ namespace GridRoadGenerator.Settings
         /// </summary>
         [SettingsUIHidden]
         public string RoadPrefabName { get; set; }
+
+        /// <summary>
+        /// Réseau utilisé pour les tronçons "locaux" (impasses en mode CulDeSacMode, rayons en
+        /// mode Adaptativo) — voir RoadSegmentDef.IsCulDeSacEnd/IsRadial. Même format que
+        /// RoadPrefabName. Vide = mode auto, qui suit ici RoadPrefabName (pas indépendamment
+        /// l'outil route natif) : tant qu'aucun réseau secondaire n'est choisi explicitement,
+        /// le comportement reste identique à avant l'existence de ce second réseau.
+        /// </summary>
+        [SettingsUIHidden]
+        public string SecondaryRoadPrefabName { get; set; }
 
         /// <summary>
         /// Vue active (Underground/ZoneGrid/InvisibleNetworks) pendant que l'outil est
@@ -175,17 +173,17 @@ namespace GridRoadGenerator.Settings
             AngleOffsetDegrees = d.AngleOffsetDegrees;
             FollowTerrain = true;
             CulDeSacMode = d.CulDeSacMode;
+            CulDeSacAxis = d.CulDeSacAxis;
             CulDeSacDepth = d.CulDeSacDepth;
             Staggered = d.Staggered;
             CulDeSacRatio = d.CulDeSacRatio;
             CulDeSacCapSize = CulDeSacCapSize.Small;
             CulDeSacCapStyle = CulDeSacCapStyle.Asphalt;
-            JitterAmount = d.JitterAmount;
-            JitterSeed = d.JitterSeed;
-            CurveAmount = 0f;
-            CurveStyle = GridGenerator.CurveStyle.Bulge;
-            OrientationMode = OrientationMode.FixedAngle;
+            AdaptiveMode = false;
+            RadialConnections = 8;
+            AdaptiveRoundedCorners = false;
             RoadPrefabName = string.Empty;
+            SecondaryRoadPrefabName = string.Empty;
             // Comme CS2-NetworkTools : tout coché par défaut à la première ouverture.
             SelectedViews = ViewOption.All;
         }
@@ -198,11 +196,12 @@ namespace GridRoadGenerator.Settings
             SpacingMeters = SpacingMeters,
             AngleOffsetDegrees = AngleOffsetDegrees,
             CulDeSacMode = CulDeSacMode,
+            CulDeSacAxis = CulDeSacAxis,
             CulDeSacDepth = CulDeSacDepth,
             Staggered = Staggered,
             CulDeSacRatio = CulDeSacRatio,
-            JitterAmount = JitterAmount,
-            JitterSeed = JitterSeed
+            RadialConnections = RadialConnections,
+            AdaptiveRoundedCorners = AdaptiveRoundedCorners
         };
     }
 }

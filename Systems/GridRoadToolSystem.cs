@@ -124,6 +124,8 @@ namespace GridRoadGenerator.Systems
         private bool _fallbackSearched;
         private PrefabBase _overridePrefab;
         private bool _overrideResolved;
+        private PrefabBase _secondaryOverridePrefab;
+        private bool _secondaryOverrideResolved;
 
         /// <summary>Arête du périmètre (route existante entre deux nœuds sélectionnés consécutifs).</summary>
         private struct PerimeterEdge
@@ -151,6 +153,9 @@ namespace GridRoadGenerator.Systems
         }
 
         public override PrefabBase GetPrefab() => GetRoadPrefab();
+
+        /// <summary>Réseau secondaire résolu (voir GetSecondaryRoadPrefab) — lu par GridRoadUISystem pour la barre de sélection.</summary>
+        public PrefabBase GetSecondaryPrefab() => GetSecondaryRoadPrefab();
 
         /// <summary>L'outil ne s'active que par son raccourci ou le panneau, jamais via un prefab.</summary>
         public override bool TrySetPrefab(PrefabBase prefab) => false;
@@ -626,6 +631,35 @@ namespace GridRoadGenerator.Systems
             return null;
         }
 
+        /// <summary>Vrai si aucun réseau secondaire n'a été choisi explicitement (suit alors GetRoadPrefab).</summary>
+        public bool SecondaryRoadPrefabIsAuto => string.IsNullOrEmpty(_settings.SecondaryRoadPrefabName);
+
+        /// <summary>Fixe le réseau "local" (impasses/rayons — voir RoadSegmentDef.IsCulDeSacEnd/IsRadial). null = mode auto.</summary>
+        public void SetSecondaryRoadPrefab(PrefabBase prefab)
+        {
+            _secondaryOverridePrefab = prefab;
+            _secondaryOverrideResolved = true;
+            _settings.SecondaryRoadPrefabName = prefab != null ? $"{prefab.GetType().Name}:{prefab.name}" : string.Empty;
+            _settings.ApplyAndSave();
+        }
+
+        /// <summary>
+        /// Prefab utilisé pour les tronçons locaux : le réseau secondaire choisi explicitement,
+        /// sinon GetRoadPrefab() (le réseau principal) — pas de recherche de repli indépendante
+        /// (NetTool/"Small Road") : tant que rien n'est choisi explicitement pour le secondaire,
+        /// les deux réseaux restent synchronisés, comportement identique à avant l'existence du
+        /// second réseau.
+        /// </summary>
+        private PrefabBase GetSecondaryRoadPrefab()
+        {
+            if (!_secondaryOverrideResolved)
+            {
+                _secondaryOverrideResolved = true;
+                _secondaryOverridePrefab = ResolveSavedPrefab(_settings.SecondaryRoadPrefabName);
+            }
+            return _secondaryOverridePrefab != null ? _secondaryOverridePrefab : GetRoadPrefab();
+        }
+
         // ------------------------------------------------------------------
         // Création des définitions réseau (aperçu fantôme + pose réelle)
         // ------------------------------------------------------------------
@@ -650,22 +684,41 @@ namespace GridRoadGenerator.Systems
                 ? geometryData.m_DefaultWidth
                 : 0f;
 
+            // Réseau "local" (impasses/rayons) : voir GetSecondaryRoadPrefab — identique au
+            // principal tant qu'aucun n'est choisi explicitement, donc aucun changement visible
+            // par défaut. Le cercle de retournement (roadWidth ci-dessous) se dimensionne sur CE
+            // réseau, puisque c'est lui qui pose effectivement les impasses.
+            PrefabBase secondaryRoadPrefab = GetSecondaryRoadPrefab();
+            Entity secondaryPrefabEntity = secondaryRoadPrefab != null ? m_PrefabSystem.GetEntity(secondaryRoadPrefab) : prefabEntity;
+            float secondaryRoadWidth = EntityManager.TryGetComponent(secondaryPrefabEntity, out NetGeometryData secondaryGeometryData)
+                ? secondaryGeometryData.m_DefaultWidth
+                : roadWidth;
+
             TerrainHeightData heightData = m_TerrainSystem.GetHeightData();
 
             List<RoadSegmentDef> segments;
             try
             {
-                GridParameters parameters = _settings.ToGridParameters();
-                if (_settings.OrientationMode == OrientationMode.FollowTerrain)
-                {
-                    parameters.AngleOffsetDegrees = ComputeTerrainFollowAngle(ref heightData);
-                }
                 List<float3> perimeterPositions = BuildCurveAwarePerimeterPositions();
-                segments = GridGenerator.GenerateGrid(perimeterPositions, parameters, out int omittedNodeCount);
-                if (omittedNodeCount > 0 && !_omittedNodesLogged)
+                GridParameters parameters = _settings.ToGridParameters();
+                if (_settings.AdaptiveMode)
                 {
-                    _omittedNodesLogged = true;
-                    Mod.Log.Info($"{omittedNodeCount} croisement(s) omis (nœuds trop proches, < {GridGenerator.MinNodeDistance} m).");
+                    // Anneaux concentriques (offset de polygone) : voir GenerateAdaptiveGrid.
+                    // perimeterPositions vient déjà densifié le long des arêtes courbes
+                    // existantes (rond-point...), donc les anneaux suivent naturellement la
+                    // courbe plutôt que de couper au travers de sa corde. Réutilise
+                    // CulDeSacMode/Ratio/Depth (impasses sur les rayons) — voir
+                    // EmitRadialConnections ; CulDeSacAxis/Staggered n'ont pas d'équivalent ici.
+                    segments = GridGenerator.GenerateAdaptiveGrid(perimeterPositions, parameters);
+                }
+                else
+                {
+                    segments = GridGenerator.GenerateGrid(perimeterPositions, parameters, out int omittedNodeCount);
+                    if (omittedNodeCount > 0 && !_omittedNodesLogged)
+                    {
+                        _omittedNodesLogged = true;
+                        Mod.Log.Info($"{omittedNodeCount} croisement(s) omis (nœuds trop proches, < {GridGenerator.MinNodeDistance} m).");
+                    }
                 }
             }
             catch (Exception e)
@@ -695,13 +748,7 @@ namespace GridRoadGenerator.Systems
                 }
 
                 NetCourse course = default;
-                // Courbure organique : seulement les collectrices (IsHorizontal, cf.
-                // EmitLine — jamais les impasses ni, en amont, le périmètre lui-même).
-                // Les extrémités start/end restent exactement les mêmes qu'en ligne
-                // droite : voir BuildCurvedCourse.
-                course.m_Curve = segment.IsHorizontal && _settings.CurveAmount > 0f
-                    ? BuildCurvedCourse(start.m_Position, end.m_Position)
-                    : NetUtils.StraightCurve(start.m_Position, end.m_Position);
+                course.m_Curve = NetUtils.StraightCurve(start.m_Position, end.m_Position);
                 course.m_Length = MathUtils.Length(course.m_Curve);
                 course.m_FixedIndex = -1;
 
@@ -714,10 +761,14 @@ namespace GridRoadGenerator.Systems
                 course.m_StartPosition = start;
                 course.m_EndPosition = end;
 
+                // Tronçon "local" (impasse en mode CulDeSacMode, rayon en mode Adaptativo) :
+                // réseau secondaire — voir GetSecondaryRoadPrefab. Identique au principal tant
+                // qu'aucun n'est choisi explicitement.
+                bool isLocalSegment = segment.IsCulDeSacEnd || segment.IsRadial;
                 Entity definition = commandBuffer.CreateEntity();
                 commandBuffer.AddComponent(definition, new CreationDefinition
                 {
-                    m_Prefab = prefabEntity,
+                    m_Prefab = isLocalSegment ? secondaryPrefabEntity : prefabEntity,
                     m_RandomSeed = random.NextInt()
                 });
                 commandBuffer.AddComponent(definition, default(Updated));
@@ -730,7 +781,7 @@ namespace GridRoadGenerator.Systems
                 // (contrairement à l'ancienne tentative avec Game.Net.Roundabout, ce n'est
                 // pas un composant réseau posé après coup, mais un objet indépendant).
                 if (segment.IsCulDeSacEnd
-                    && TryResolveCulDeSacCapPrefab(roadWidth, _settings.CulDeSacCapSize, _settings.CulDeSacCapStyle, out Entity capPrefab))
+                    && TryResolveCulDeSacCapPrefab(secondaryRoadWidth, _settings.CulDeSacCapSize, _settings.CulDeSacCapStyle, out Entity capPrefab))
                 {
                     Entity capDefinition = commandBuffer.CreateEntity();
                     commandBuffer.AddComponent(capDefinition, new CreationDefinition
@@ -754,25 +805,6 @@ namespace GridRoadGenerator.Systems
                 }
             }
             return created;
-        }
-
-        /// <summary>
-        /// Bézier légèrement bombée entre deux points (collectrices, "variation organique") :
-        /// délègue le calcul des points de contrôle à GridGenerator.ComputeCurveControlPoints
-        /// (pur, testable) et l'enveloppe dans un Bezier4x3 Colossal. Les extrémités (a, d)
-        /// restent EXACTEMENT start/end : le raccordement au périmètre et aux rues
-        /// perpendiculaires n'est jamais affecté, seule la forme du tracé ENTRE les deux
-        /// nœuds change — MathUtils.StartTangent/EndTangent (déjà utilisées plus bas) gèrent
-        /// nativement une Bezier courbe, aucun traitement spécial requis en aval.
-        /// </summary>
-        private Bezier4x3 BuildCurvedCourse(float3 start, float3 end)
-        {
-            if (math.distance(start.xz, end.xz) < 1e-3f)
-            {
-                return NetUtils.StraightCurve(start, end);
-            }
-            GridGenerator.ComputeCurveControlPoints(start, end, _settings.CurveAmount, _settings.CurveStyle, out float3 b, out float3 c);
-            return new Bezier4x3 { a = start, b = b, c = c, d = end };
         }
 
         /// <summary>
@@ -1011,89 +1043,5 @@ namespace GridRoadGenerator.Systems
             return result;
         }
 
-        // ------------------------------------------------------------------
-        // Orientation "Seguir relevo" (chantier exploratoire, voir OrientationMode)
-        // ------------------------------------------------------------------
-
-        /// <summary>Distance (m) utilisée pour échantillonner le gradient de pente par différences finies.</summary>
-        private const float TerrainGradientSampleDistance = 20f;
-
-        /// <summary>
-        /// UNE SEULE orientation pour tout le périmètre sélectionné, alignée sur les
-        /// courbes de niveau du terrain (perpendiculaire à la pente la plus forte) au
-        /// centroïde de la sélection — PAS une orientation continue par bloc.
-        ///
-        /// Une vraie orientation variant en douceur bloc par bloc demanderait de
-        /// subdiviser le polygone en plusieurs zones, calculer un angle par zone, ET
-        /// raccorder proprement les grilles voisines à leurs frontières (nouveau
-        /// clipping polygone-contre-polygone, gestion des coutures) — non tenté ici :
-        /// le risque de grille cassée ou auto-intersectante est réel et le calcul n'est
-        /// pas vérifiable sans lancer le jeu. Cette version traite tout le périmètre
-        /// comme une seule grande zone, en réutilisant tel quel GenerateGrid (déjà
-        /// testé) via le même paramètre AngleOffsetDegrees que le mode manuel — aucune
-        /// nouvelle logique de génération, donc aucun nouveau risque de régression.
-        ///
-        /// Retourne 0° (repli sur l'orientation naturelle "arête la plus longue", sans
-        /// rotation additionnelle) si le terrain est trop plat pour qu'un gradient soit
-        /// significatif à cet endroit.
-        /// </summary>
-        private float ComputeTerrainFollowAngle(ref TerrainHeightData heightData)
-        {
-            if (_selectedPositions.Count < 2)
-            {
-                return 0f;
-            }
-
-            float3 centroid = float3.zero;
-            foreach (float3 p in _selectedPositions)
-            {
-                centroid += p;
-            }
-            centroid /= _selectedPositions.Count;
-
-            // Gradient de hauteur par différences finies centrées (X et Z).
-            float hx1 = TerrainUtils.SampleHeight(ref heightData, centroid + new float3(TerrainGradientSampleDistance, 0f, 0f));
-            float hx2 = TerrainUtils.SampleHeight(ref heightData, centroid - new float3(TerrainGradientSampleDistance, 0f, 0f));
-            float hz1 = TerrainUtils.SampleHeight(ref heightData, centroid + new float3(0f, 0f, TerrainGradientSampleDistance));
-            float hz2 = TerrainUtils.SampleHeight(ref heightData, centroid - new float3(0f, 0f, TerrainGradientSampleDistance));
-            float2 gradient = new float2(hx1 - hx2, hz1 - hz2) / (2f * TerrainGradientSampleDistance);
-
-            if (math.length(gradient) < 0.01f)
-            {
-                return 0f; // terrain trop plat ici : aucune direction de pente significative
-            }
-
-            // Direction des courbes de niveau (constante d'altitude) : perpendiculaire
-            // à la direction de plus forte pente.
-            float2 contourDir = math.normalize(new float2(-gradient.y, gradient.x));
-
-            // Orientation naturelle du polygone (arête la plus longue) : même heuristique
-            // que GridGenerator.BuildLocalFrame (privée à Core, donc reproduite ici —
-            // quelques lignes plutôt que d'exposer une API interne pour ce seul besoin).
-            int count = _selectedPositions.Count;
-            int bestIndex = 0;
-            float bestLengthSq = -1f;
-            for (int i = 0; i < count; i++)
-            {
-                float2 a = _selectedPositions[i].xz;
-                float2 b = _selectedPositions[(i + 1) % count].xz;
-                float lenSq = math.lengthsq(b - a);
-                if (lenSq > bestLengthSq)
-                {
-                    bestLengthSq = lenSq;
-                    bestIndex = i;
-                }
-            }
-            float2 naturalDir = math.normalize(_selectedPositions[(bestIndex + 1) % count].xz - _selectedPositions[bestIndex].xz);
-
-            // Angle signé entre l'orientation naturelle et les courbes de niveau, ramené
-            // dans [-90°, 90°) : la grille a une symétrie de 90° (échange colonnes/rangées),
-            // donc tout angle y est équivalent — c'est aussi la plage du slider manuel.
-            float angleRad = math.atan2(
-                naturalDir.x * contourDir.y - naturalDir.y * contourDir.x,
-                naturalDir.x * contourDir.x + naturalDir.y * contourDir.y);
-            float angleDeg = math.degrees(angleRad);
-            return ((angleDeg + 90f) % 180f + 180f) % 180f - 90f;
-        }
     }
 }
