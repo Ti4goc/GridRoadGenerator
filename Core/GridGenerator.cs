@@ -864,23 +864,27 @@ namespace GridRoadGenerator.Core
             if (!roundedCorners)
                 return result;
 
-            // Cantos arredondados : remplace chaque coin net (miter) par un petit arc de rayon
-            // distance centré sur le sommet D'ORIGINE — le round join classique du offsetting de
-            // polygone. Purement cosmétique, appliqué seulement APRÈS validation : la forme a déjà
-            // été acceptée sur sa version miter ci-dessus, jamais recalculée sur la version arrondie.
+            // Cantos arredondados : remplace chaque coin CONVEXE net (miter) par un petit arc de
+            // rayon distance centré sur le sommet D'ORIGINE — le round join classique du
+            // offsetting de polygone (les coins concaves gardent leur miter, voir RoundCorners).
+            // Purement cosmétique, appliqué seulement APRÈS validation : la forme a déjà été
+            // acceptée sur sa version miter ci-dessus, jamais recalculée sur la version arrondie.
             return RoundCorners(polygon, result, distance, windingSign, isCorner);
         }
 
         /// <summary>
-        /// Remplace, dans un anneau déjà validé (miter), chaque coin marqué isCorner par un arc
-        /// de rayon distance centré sur le sommet D'ORIGINE (polygon[i], PAS son point offset
-        /// miter) — le round join classique de l'offsetting de polygone : au lieu d'une pointe
-        /// nette, le contour suit un petit arc de cercle entre la direction d'arrivée et la
-        /// direction de départ de ce coin. Les points non marqués comme coins (sur un tronçon
-        /// déjà "lisse") sont recopiés tels quels. Le nombre de sommets du résultat change
-        /// (plusieurs points par coin arrondi) — sans conséquence : EmitRadialConnections relie
-        /// les anneaux par intersection géométrique (RayPolygonIntersection), jamais par
-        /// correspondance d'index, donc indifférent au nombre de sommets de chaque anneau.
+        /// Remplace, dans un anneau déjà validé (miter), chaque coin CONVEXE marqué isCorner par
+        /// un arc de rayon distance centré sur le sommet D'ORIGINE (polygon[i], PAS son point
+        /// offset miter) — le round join classique de l'offsetting de polygone : au lieu d'une
+        /// pointe nette, le contour suit un petit arc de cercle entre la direction d'arrivée et
+        /// la direction de départ de ce coin. Les coins CONCAVES/réflexes gardent leur point
+        /// miter tel quel (le round join ne s'applique qu'aux coins convexes en théorie de
+        /// l'offsetting de polygone — voir le test de convexité plus bas). Les points non
+        /// marqués comme coins (sur un tronçon déjà "lisse") sont recopiés tels quels. Le nombre
+        /// de sommets du résultat change (plusieurs points par coin arrondi) — sans conséquence :
+        /// EmitRadialConnections relie les anneaux par intersection géométrique
+        /// (RayPolygonIntersection), jamais par correspondance d'index, donc indifférent au
+        /// nombre de sommets de chaque anneau.
         /// </summary>
         private static List<float2> RoundCorners(List<float2> polygon, List<float2> miterResult, float distance, float windingSign, bool[] isCorner)
         {
@@ -903,6 +907,23 @@ namespace GridRoadGenerator.Core
                 }
                 dirIn = math.normalize(dirIn);
                 dirOut = math.normalize(dirOut);
+
+                // Le round join (arc) n'est géométriquement valide que pour un coin CONVEXE —
+                // un coin concave/réflexe (le sommet tourne dans le sens OPPOSÉ au sens de
+                // parcours global du polygone : cross(dirIn,dirOut) de signe opposé à
+                // windingSign) doit garder son point miter tel quel. Bug corrigé : appliquer la
+                // même formule d'arc à un coin concave produit une boucle qui repart vers
+                // l'intérieur de la forme au lieu de la contourner — un artefact en dents de
+                // scie, jamais détecté car HasSelfIntersection (ci-dessus, OffsetPolygonInward)
+                // valide la version MITER, avant l'arrondi, jamais le résultat arrondi lui-même.
+                // Toute forme réaliste ayant des coins concaves (un simple L, par exemple), ce
+                // bug masquait presque toujours l'effet visuel du réglage.
+                if (Cross(dirIn, dirOut) * windingSign <= 0f)
+                {
+                    result.Add(miterResult[i]);
+                    continue;
+                }
+
                 float2 normalIn = InwardNormal(dirIn, windingSign);
                 float2 normalOut = InwardNormal(dirOut, windingSign);
 

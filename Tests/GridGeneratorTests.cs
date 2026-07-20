@@ -1078,6 +1078,56 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
+        public void ConcaveLShape_RoundedCorners_LeavesTheConcaveVertexUntouched()
+        {
+            // Bug corrigé : RoundCorners appliquait l'arc de round-join même à un coin
+            // concave/réflexe (le coin intérieur du L, (150,150)) — géométriquement invalide
+            // pour l'offsetting de polygone (le round join ne s'applique qu'aux coins
+            // convexes), ce qui produisait une boucle vers l'intérieur de la forme (artefact en
+            // dents de scie), jamais détectée car HasSelfIntersection valide la version miter,
+            // avant l'arrondi. Le point le plus proche du coin concave doit donc rester
+            // EXACTEMENT le même point miter, avec ou sans l'option activée.
+            var lShape = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(300f, 0f, 0f),
+                new float3(300f, 0f, 150f),
+                new float3(150f, 0f, 150f),
+                new float3(150f, 0f, 300f),
+                new float3(0f, 0f, 300f),
+            };
+
+            var miter = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(30f, 0, roundedCorners: false));
+            var rounded = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(30f, 0, roundedCorners: true));
+
+            Assert.NotEmpty(miter);
+            Assert.NotEmpty(rounded);
+            // Les coins convexes (5 des 6 sommets du L) doivent quand même gagner des points.
+            Assert.True(rounded.Count > miter.Count,
+                $"Les coins convexes du L devraient gagner des points avec l'arrondi (miter={miter.Count}, rounded={rounded.Count}).");
+
+            float2 concaveVertex = new float2(150f, 150f);
+            float2 nearestMiter = NearestVertex(miter, concaveVertex);
+            float2 nearestRounded = NearestVertex(rounded, concaveVertex);
+            Assert.True(math.distance(nearestMiter, nearestRounded) < 0.1f,
+                $"Le point le plus proche du coin concave devrait être identique avec/sans arrondi (miter={nearestMiter}, rounded={nearestRounded}).");
+        }
+
+        private static float2 NearestVertex(List<RoadSegmentDef> segments, float2 target)
+        {
+            float2 best = default;
+            float bestDist = float.MaxValue;
+            foreach (RoadSegmentDef s in segments)
+            {
+                float d1 = math.distance(s.Start.xz, target);
+                if (d1 < bestDist) { bestDist = d1; best = s.Start.xz; }
+                float d2 = math.distance(s.End.xz, target);
+                if (d2 < bestDist) { bestDist = d2; best = s.End.xz; }
+            }
+            return best;
+        }
+
+        [Fact]
         public void CulDeSacMode_SomeRadialsStopBeforeTheInnermostRingAsImpasses()
         {
             // CulDeSacMode réutilisé pour le mode Adaptativo (voir EmitRadialConnections) : à
