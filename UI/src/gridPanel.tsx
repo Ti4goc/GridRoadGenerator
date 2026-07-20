@@ -287,7 +287,7 @@ export const LegacyGridPanel = () => {
                     {/* "Vista" et "Route" : pas des sections repliables (voir viewSelection.tsx
                         et roadSelection.tsx), toujours visibles en haut, avant la première section. */}
                     <ViewSelection />
-                    <RoadSelection />
+                    <RoadSelection portalContainer={panelRef.current} />
 
                     {/* Géométrie : mode, colonnes/lignes/espacement, angle, suivi du terrain. */}
                     <SectionFoldout

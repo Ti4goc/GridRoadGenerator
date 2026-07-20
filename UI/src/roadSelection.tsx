@@ -5,6 +5,7 @@
 // (impasses/rayons — voir RoadSegmentDef.IsCulDeSacEnd/IsRadial côté C#), ce dernier replié
 // derrière un bouton "+" tant qu'aucun n'a été choisi explicitement.
 import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
 import { PrefabPicker } from "./prefabPicker";
@@ -19,7 +20,17 @@ import {
 
 type PickerSlot = "primary" | "secondary" | null;
 
-export const RoadSelection = () => {
+type RoadSelectionProps = {
+    /// Nœud DOM frère de .panel, à l'intérieur du wrapper positionné (voir
+    /// gridPanel.tsx/gridPanelNative.tsx, panelRef) — cible du portail pour que
+    /// PrefabPicker s'affiche hors de la zone défilante/overflow:hidden du panneau
+    /// (bug corrigé : le picker était rendu ici même, coupé/mal positionné). Null
+    /// tant que le ref n'est pas encore attaché (premier rendu) : picker non rendu
+    /// ce cas-là, pas d'effet visible puisque pickerOpen part toujours à null.
+    portalContainer: HTMLElement | null;
+};
+
+export const RoadSelection = ({ portalContainer }: RoadSelectionProps) => {
     const { translate } = useLocalization();
     const roadPrefabName = useValue(roadPrefabName$);
     const roadPrefabIcon = useValue(roadPrefabIcon$);
@@ -62,7 +73,12 @@ export const RoadSelection = () => {
                     </button>
                 )}
             </div>
-            {pickerOpen && <PrefabPicker slot={pickerOpen} onClose={() => setPickerOpen(null)} />}
+            {pickerOpen &&
+                portalContainer &&
+                createPortal(
+                    <PrefabPicker slot={pickerOpen} onClose={() => setPickerOpen(null)} />,
+                    portalContainer,
+                )}
         </div>
     );
 };

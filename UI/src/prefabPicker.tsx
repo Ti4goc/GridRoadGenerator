@@ -1,7 +1,7 @@
 // Sélecteur de réseau adapté du PrefabSearchPanel de CS2-NetworkTools
 // (c) Luca Rager, licence MIT — https://github.com/lucarager/CS2-NetworkTools
 // (recherche, onglets de catégories, récents, liste scrollable à miniatures).
-import React, { useMemo, useState } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
 import styles from "./prefabPicker.module.scss";
@@ -46,6 +46,31 @@ export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose, slot = "pri
     const pickAutoForSlot = slot === "secondary" ? pickSecondaryAuto : pickAuto;
     const [searchQuery, setSearchQuery] = useState("");
 
+    // Bascule à gauche du panneau si le côté droit déborde de l'écran (panneau
+    // principal déplacé près du bord droit) — mesure le rendu réel plutôt que de
+    // deviner en rem (pas de conversion rem→px fiable côté cohtml), donc un flash
+    // d'un frame côté droit par défaut avant correction est possible mais discret
+    // (le picker vient déjà de s'ouvrir, pas d'animation en cours à cet instant).
+    // Ne bascule que dans un sens (jamais de retour à droite) : évite toute
+    // oscillation si aucun des deux côtés ne suffit (panneau très large / écran
+    // très étroit, cas limite non traité au-delà de ce choix déterministe).
+    const panelElementRef = useRef<HTMLDivElement>(null);
+    const [flipped, setFlipped] = useState(false);
+    useLayoutEffect(() => {
+        if (flipped) {
+            return;
+        }
+        const measure = () => {
+            const rect = panelElementRef.current?.getBoundingClientRect();
+            if (rect && rect.right > window.innerWidth) {
+                setFlipped(true);
+            }
+        };
+        measure();
+        window.addEventListener("resize", measure);
+        return () => window.removeEventListener("resize", measure);
+    }, [flipped]);
+
     const displayName = (entry: PrefabEntry) =>
         translate(`Assets.NAME[${entry.Name}]`, entry.Name) ?? entry.Name;
 
@@ -67,7 +92,7 @@ export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose, slot = "pri
     };
 
     return (
-        <div className={styles.panel}>
+        <div ref={panelElementRef} className={flipped ? `${styles.panel} ${styles.panelFlipped}` : styles.panel}>
             <div className={styles.header}>
                 <span className={styles.title}>
                     {translate("GridRoadGenerator.UI.PickerTitle", "Select network")}
