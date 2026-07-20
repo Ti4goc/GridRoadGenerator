@@ -1175,6 +1175,34 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
+        public void TinyPerimeter_LargeSpacing_StillEmitsOriginalPerimeterInsteadOfNothing()
+        {
+            // Bug corrigé ("la grille disparaît au-delà de X m") : si l'espacement dépasse la
+            // demi-largeur du périmètre choisi, le tout premier anneau intérieur est déjà
+            // dégénéré (OffsetPolygonInward retourne null immédiatement) — la boucle de
+            // GenerateAdaptiveGrid ne tournait alors jamais, et RIEN n'était émis, alors que le
+            // périmètre d'origine lui-même (déjà validé plus haut dans la fonction) reste une
+            // route parfaitement valide. Pas un plafond codé en dur (aucune valeur de ce genre
+            // trouvée dans le code, vérifié) : une vraie dégénérescence géométrique propre à la
+            // taille du périmètre choisi — mais qui ne doit plus vider le résultat pour autant.
+            var tinySquare = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(100f, 0f, 0f),
+                new float3(100f, 0f, 100f),
+                new float3(0f, 0f, 100f),
+            };
+
+            // Demi-largeur 50 m : un espacement de 60 m dégénère dès le premier anneau intérieur.
+            var segments = GridGenerator.GenerateAdaptiveGrid(tinySquare, AdaptiveParams(60f, 0));
+
+            Assert.NotEmpty(segments);
+            // Doit correspondre au périmètre d'origine tel quel (4 arêtes de 100 m, boucle fermée).
+            Assert.Equal(4, segments.Count);
+            Assert.All(segments, s => Assert.False(s.IsRadial));
+        }
+
+        [Fact]
         public void ConcaveLShape_EventuallyDegeneratesWithoutInfiniteRings()
         {
             // Garde-fou pratique : même sur une forme concave, la boucle de génération doit

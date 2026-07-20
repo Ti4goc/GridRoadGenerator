@@ -745,6 +745,21 @@ namespace GridRoadGenerator.Core
                 current = next;
             }
 
+            // Espacement trop grand pour ce périmètre : même le premier anneau intérieur est
+            // dégénéré (aire trop petite/retournée/auto-intersectante), donc la boucle
+            // ci-dessus n'a jamais tourné — le résultat serait autrement complètement vide,
+            // alors que le périmètre D'ORIGINE (déjà validé plus haut) reste une route
+            // parfaitement valide en lui-même. Il n'était auparavant jamais émis tel quel (seuls
+            // les anneaux OFFSET le sont) : cette limite semblait un plafond arbitraire du
+            // réglage Espacement (ex. "la grille disparaît au-delà de 96 m") alors que c'est une
+            // dégénérescence géométrique normale, propre à la taille du périmètre choisi — pas
+            // une limite codée en dur (aucune valeur de ce genre trouvée ailleurs dans le code).
+            // Comportement inchangé dès qu'au moins un anneau intérieur est généré avec succès.
+            if (rings.Count == 1)
+            {
+                EmitRingSegments(segments, polygon, y);
+            }
+
             if (parameters.RadialConnections > 0 && rings.Count > 1)
             {
                 EmitRadialConnections(segments, rings, parameters.RadialConnections, y,
