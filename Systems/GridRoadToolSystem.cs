@@ -717,7 +717,7 @@ namespace GridRoadGenerator.Systems
                     if (omittedNodeCount > 0 && !_omittedNodesLogged)
                     {
                         _omittedNodesLogged = true;
-                        Mod.Log.Info($"{omittedNodeCount} croisement(s) omis (nœuds trop proches, < {GridGenerator.MinNodeDistance} m).");
+                        Mod.Log.Info($"{omittedNodeCount} nœud(s) trop proche(s) (< {GridGenerator.MinNodeDistance} m) fusionné(s) avec un nœud voisin ou omis (culs-de-sac).");
                     }
                 }
             }

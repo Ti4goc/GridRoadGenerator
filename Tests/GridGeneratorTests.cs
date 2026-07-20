@@ -694,6 +694,73 @@ namespace GridRoadGenerator.Tests
             }
         }
 
+        [Fact]
+        public void NearCoincidentCrossings_MergeIntoASharedNodeInsteadOfDroppingALine()
+        {
+            // Bug corrigé (comme le "Super nó" de NetworkTools) : un croisement à moins de
+            // MinNodeDistance d'un croisement déjà accepté était auparavant purement omis — sa
+            // ligne u ET sa ligne v ne recevaient alors AUCUNE subdivision à cet endroit,
+            // contrairement à toutes les autres lignes de la grille (une des deux, voire les
+            // deux, "perdue"). Il doit maintenant être FUSIONNÉ avec ce point existant : les
+            // DEUX lignes rejoignent le nœud partagé (même position bit-exacte).
+            //
+            // FitToArea sur un petit périmètre avec beaucoup de colonnes/lignes : l'espacement
+            // RÉSULTANT (côté / nombre de colonnes) tombe sous MinNodeDistance (80/12 ≈ 6,7 m
+            // < 8 m), donc deux croisements adjacents sur une même ligne (même u ou même v,
+            // l'autre coordonnée décalée d'un seul pas de grille) tombent nécessairement à
+            // moins de MinNodeDistance l'un de l'autre — contrairement à FixedSpacing avec un
+            // espacement normal (>= 10 m côté UI), où deux croisements DISTINCTS ne peuvent
+            // jamais être plus proches que l'espacement lui-même (réseau parfaitement régulier).
+            // Reproduit ce qu'un joueur peut obtenir via l'UI : petit périmètre + beaucoup de
+            // colonnes/lignes (jusqu'à 12, voir gridPanel.tsx), pas besoin d'un espacement
+            // inaccessible depuis le panneau (min 10 m).
+            var nodes = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(80f, 0f, 0f),
+                new float3(80f, 0f, 80f),
+                new float3(0f, 0f, 80f),
+            };
+            var parameters = new GridParameters
+            {
+                Mode = SpacingMode.FitToArea,
+                Columns = 12,
+                Rows = 12,
+            };
+
+            var segments = GridGenerator.GenerateGrid(nodes, parameters, out int mergedCount);
+            Assert.True(mergedCount > 0, "Ce périmètre dense/oblique devrait produire au moins une fusion de croisements.");
+
+            // Regroupe les extrémités par position bit-exacte (une fusion réussie donne des
+            // floats identiques, pas juste "proches" — voir BuildSubSegments). Tout nœud
+            // partagé par 3 segments ou plus est un vrai croisement multi-branches (ou un
+            // croisement fusionné) : il doit alors avoir des segments des DEUX orientations,
+            // jamais une seule — la signature exacte du bug (une ligne "oubliée" par l'omission).
+            var byPosition = new Dictionary<string, (bool hasHorizontal, bool hasVertical, int count)>();
+            void Record(float3 pos, bool isHorizontal)
+            {
+                string key = $"{pos.x:F3}_{pos.z:F3}";
+                (bool hasHorizontal, bool hasVertical, int count) entry = byPosition.TryGetValue(key, out var existing)
+                    ? existing
+                    : (false, false, 0);
+                byPosition[key] = (entry.hasHorizontal || isHorizontal, entry.hasVertical || !isHorizontal, entry.count + 1);
+            }
+            foreach (RoadSegmentDef s in segments)
+            {
+                Record(s.Start, s.IsHorizontal);
+                Record(s.End, s.IsHorizontal);
+            }
+
+            foreach (var kvp in byPosition)
+            {
+                if (kvp.Value.count >= 3)
+                {
+                    Assert.True(kvp.Value.hasHorizontal && kvp.Value.hasVertical,
+                        $"Nœud à {kvp.Key} avec {kvp.Value.count} segments mais une seule orientation représentée — ligne perdue au lieu de fusionnée.");
+                }
+            }
+        }
+
         private static float MinAcceptableLength(GridParameters parameters)
         {
             // Une impasse peut être aussi courte que MinSegmentLength ; une traversée

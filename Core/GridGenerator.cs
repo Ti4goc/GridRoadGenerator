@@ -140,9 +140,14 @@ namespace GridRoadGenerator.Core
 
         /// <summary>
         /// Distance minimale (m) entre deux nœuds générés distincts (croisements entre
-        /// eux). En dessous, le croisement le plus tardif (ordre de balayage colonnes
-        /// puis rangées) est purement omis plutôt que fusionné ou décalé — un nœud
-        /// omis proprement vaut mieux qu'une intersection dégénérée en jeu.
+        /// eux). En dessous, le croisement le plus tardif (ordre de balayage colonnes puis
+        /// rangées) est FUSIONNÉ avec le croisement déjà accepté le plus proche (comme le
+        /// "Super nó" de NetworkTools — voir BuildSubSegments) : les deux lignes qui s'y
+        /// croisent rejoignent ce nœud existant au lieu de créer une intersection quasi-
+        /// coïncidente séparée. Ce n'est plus une perte de nœud, seulement des lignes de
+        /// grille reconnectées à un nœud voisin déjà là. Les culs-de-sac trop proches de leur
+        /// collectrice cible restent purement omis (EmitLine, motif distinct — pas de nœud
+        /// existant à fusionner à cet endroit).
         /// </summary>
         public const float MinNodeDistance = 8f;
 
@@ -168,8 +173,10 @@ namespace GridRoadGenerator.Core
             => GenerateGrid(selectedNodePositions, parameters, out _);
 
         /// <summary>
-        /// Génère la grille. omittedNodeCount compte les croisements omis pour cause de
-        /// proximité excessive avec un autre nœud généré (MinNodeDistance) — 0 si aucun.
+        /// Génère la grille. omittedNodeCount compte, agrégés : les croisements FUSIONNÉS avec
+        /// un nœud généré déjà accepté trop proche (MinNodeDistance — voir BuildSubSegments,
+        /// le nœud lui-même est conservé, seulement fusionné) et les stubs de cul-de-sac
+        /// purement omis faute de nœud existant à fusionner (EmitLine) — 0 si aucun des deux.
         /// </summary>
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
             GridParameters parameters, out int omittedNodeCount)
@@ -251,9 +258,12 @@ namespace GridRoadGenerator.Core
         ///
         /// Un nouveau croisement à moins de MinNodeDistance d'un croisement DÉJÀ accepté
         /// (nécessairement sur une paire de lignes différente : deux croisements sur la
-        /// même paire seraient le même point) est purement omis — ni fusionné, ni décalé —
-        /// pour éviter une intersection dégénérée en jeu. Balayage colonnes puis rangées,
-        /// donc déterministe : c'est toujours le croisement le plus tardif qui cède.
+        /// même paire seraient le même point) est FUSIONNÉ avec ce point existant le plus
+        /// proche (comme le "Super nó" de NetworkTools) plutôt que purement omis — ses deux
+        /// lignes (u et v) rejoignent le nœud déjà accepté, jamais fusionné en retour vers un
+        /// barycentre (sa position reste fixe, les splits déjà émis pour lui restent valides
+        /// tels quels). Balayage colonnes puis rangées, donc déterministe : c'est toujours le
+        /// croisement le plus tardif qui cède sa position au profit du premier accepté.
         /// </summary>
         private static List<RoadSegmentDef> BuildSubSegments(List<GridLine> uLines, List<GridLine> vLines,
             float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters, out int omittedNodeCount)
@@ -264,6 +274,12 @@ namespace GridRoadGenerator.Core
             for (int i = 0; i < vLines.Count; i++) vSplits[i] = new List<(float, float3)>();
 
             var acceptedWorldPoints = new List<float3>();
+            // Compte les croisements de grille FUSIONNÉS avec un nœud déjà accepté (ci-dessous)
+            // ET les vrais culs-de-sac omis plus loin (EmitLine, motif distinct — un stub
+            // presque à distance de sa collectrice est purement supprimé, pas fusionné : rien
+            // d'existant à fusionner à cet endroit précis). Un seul compteur agrégé pour les
+            // deux, comme avant ce chantier — seule la première catégorie est désormais une
+            // vraie fusion (nœud conservé, segments reconnectés) plutôt qu'une perte.
             omittedNodeCount = 0;
 
             for (int iu = 0; iu < uLines.Count; iu++)
@@ -277,19 +293,34 @@ namespace GridRoadGenerator.Core
 
                     float3 world = ToWorld(origin, uDir, vDir, u, v, y);
 
-                    bool tooClose = false;
+                    // Fusionne avec le point DÉJÀ accepté le plus proche (comme le "Super nó" de
+                    // NetworkTools) plutôt que d'omettre purement ce croisement — les deux lignes
+                    // (u et v) de CE croisement rejoignent alors ce point existant au lieu de créer
+                    // un nœud quasi-coïncident séparé. Le point déjà accepté garde sa position
+                    // FIXE (jamais déplacée vers un barycentre) : les entrées de split déjà
+                    // émises pour de précédents croisements le référencent telles quelles, les
+                    // recalculer rétroactivement ajouterait de la complexité sans bénéfice
+                    // visible (l'écart est par définition < MinNodeDistance).
+                    float3 mergeTarget = world;
+                    float bestDist = float.MaxValue;
+                    bool merged = false;
                     foreach (float3 accepted in acceptedWorldPoints)
                     {
-                        if (math.distance(accepted.xz, world.xz) < MinNodeDistance)
+                        float d = math.distance(accepted.xz, world.xz);
+                        if (d < MinNodeDistance && d < bestDist)
                         {
-                            tooClose = true;
-                            break;
+                            bestDist = d;
+                            mergeTarget = accepted;
+                            merged = true;
                         }
                     }
-                    if (tooClose)
+
+                    if (merged)
                     {
                         omittedNodeCount++;
-                        continue; // omission propre : ni fusion, ni décalage
+                        uSplits[iu].Add((v, mergeTarget));
+                        vSplits[iv].Add((u, mergeTarget));
+                        continue; // ne devient pas lui-même un nouveau point accepté distinct
                     }
 
                     acceptedWorldPoints.Add(world);
@@ -374,7 +405,11 @@ namespace GridRoadGenerator.Core
 
                 for (int i = 0; i + 1 < chain.Count; i++)
                 {
-                    if (chain[i + 1].t - chain[i].t < MinSegmentLength)
+                    // Distance RÉELLE entre les points monde, pas l'écart en t : un point fusionné
+                    // (voir BuildSubSegments) garde son t d'origine mais son world peut être celui
+                    // d'un nœud voisin déjà accepté — les deux ne sont plus forcément proportionnels
+                    // comme avant la fusion (world venait alors toujours directement de t).
+                    if (math.distance(chain[i].world.xz, chain[i + 1].world.xz) < MinSegmentLength)
                         continue; // bloc trop court
 
                     if (!culDeSac)
@@ -423,12 +458,17 @@ namespace GridRoadGenerator.Core
 
             float depth = math.clamp(parameters.CulDeSacDepth, 0.5f, 0.9f);
             float stubT = start.t + (end.t - start.t) * depth;
-            if (math.abs(stubT - start.t) < MinSegmentLength)
+            float3 stubWorld = InterpolateAlongLine(line, axisIsU, stubT, origin, uDir, vDir, y);
+
+            // Distance RÉELLE à start.world, pas l'écart en t : si start est un point fusionné
+            // (voir BuildSubSegments), start.world peut être décalé de son start.t d'origine —
+            // stubWorld, lui, vient directement de stubT (jamais affecté par une fusion), donc
+            // les deux ne sont plus forcément proportionnels comme avant la fusion.
+            if (math.distance(stubWorld.xz, start.world.xz) < MinSegmentLength)
             {
                 return; // impasse trop courte pour être une route viable
             }
 
-            float3 stubWorld = InterpolateAlongLine(line, axisIsU, stubT, origin, uDir, vDir, y);
             if (math.distance(stubWorld.xz, end.world.xz) < MinNodeDistance)
             {
                 omittedNodeCount++;
