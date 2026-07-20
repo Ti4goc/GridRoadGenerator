@@ -803,7 +803,7 @@ namespace GridRoadGenerator.Core
             if (parameters.RadialConnections > 0 && rings.Count > 1)
             {
                 EmitRadialConnections(segments, rings, parameters.RadialConnections, y,
-                    parameters.CulDeSacMode, parameters.CulDeSacRatio, parameters.CulDeSacDepth);
+                    parameters.CulDeSacMode, parameters.CulDeSacRatio, parameters.CulDeSacDepth, parameters.SpacingMeters);
             }
 
             return segments;
@@ -1270,19 +1270,34 @@ namespace GridRoadGenerator.Core
         /// uniformément possible par LONGUEUR D'ARC (pas par index brut : les arêtes courbes
         /// déjà densifiées par SampleCurve auraient sinon une part disproportionnée des rayons).
         ///
-        /// Chaque rayon a une direction FIXE, calculée UNE SEULE FOIS à ce sommet du périmètre
-        /// d'origine (ComputeRadialDirection, normale entrante moyenne des deux arêtes
-        /// adjacentes — même convention qu'OffsetVertex) — jamais recalculée anneau par anneau.
-        /// À chaque anneau, on intersecte cette droite fixe avec les arêtes de l'anneau suivant
-        /// (RayPolygonIntersection) plutôt que de chercher le sommet le plus proche : ancienne
-        /// approche corrigée après un bug de zigzag reproductible (voir ci-dessous) — "point le
-        /// plus proche" est resté vulnérable aux variations de sommets d'un anneau à l'autre
-        /// (ResamplePolygon/RoundCorners) et, pire, faisait dériver le rayon anneau par anneau
-        /// puisque la position ET la direction du pas suivant dépendaient toutes deux du sommet
-        /// choisi précédemment (erreur cumulative). Direction fixe = tous les segments d'un même
-        /// rayon restent colinéaires (un seul rayon droit), zéro dérive possible. Repli sur le
-        /// sommet le plus proche seulement si la droite ne touche aucune arête de l'anneau
-        /// suivant (périmètre très concave/irrégulier, cas rare) plutôt que d'abandonner le rayon.
+        /// Chaque rayon part avec une direction calculée à ce sommet du périmètre d'origine
+        /// (ComputeRadialDirection, normale entrante moyenne des deux arêtes adjacentes — même
+        /// convention qu'OffsetVertex), PUIS intersecte cette droite avec les arêtes de l'anneau
+        /// suivant (RayPolygonIntersection) plutôt que de chercher le sommet le plus proche :
+        /// ancienne approche "plus proche sommet" corrigée après un bug de zigzag reproductible —
+        /// vulnérable aux variations de sommets d'un anneau à l'autre (ResamplePolygon/
+        /// RoundCorners) et, pire, faisait dériver le rayon anneau par anneau puisque la position
+        /// ET la direction du pas suivant dépendaient toutes deux du sommet choisi précédemment
+        /// (erreur cumulative).
+        ///
+        /// La direction est ensuite RECALCULÉE à chaque anneau, à partir de la normale de
+        /// l'arête RÉELLEMENT traversée sur l'anneau qu'on vient d'atteindre (LocalInwardNormal)
+        /// — jamais gardée fixe depuis le périmètre d'origine. Deuxième bug corrigé, observé en
+        /// jeu sur un périmètre courbe/pincé (forme en huit) : une direction figée reste correcte
+        /// pour un polygone à arêtes droites (le décalage garde chaque arête parallèle à
+        /// l'originale, donc la direction ne change jamais réellement), mais sur un contour
+        /// courbe échantillonné, la direction perpendiculaire réellement correcte évolue en
+        /// suivant la courbure locale — une direction figée finit par ne plus du tout
+        /// correspondre à la géométrie réelle après plusieurs anneaux, produisant des connexions
+        /// chaotiques en zigzag traversant toute la forme. Recalculer depuis l'arête locale (pas
+        /// depuis un sommet "le plus proche") évite de réintroduire le premier bug : c'est
+        /// toujours une intersection géométrique réelle, jamais une recherche de proximité.
+        ///
+        /// Une borne de distance par pas (MaxRadialStepFactor × l'espacement entre anneaux)
+        /// s'ajoute en garde-fou : au-delà, ni l'intersection ni le repli "plus proche sommet" ne
+        /// sont acceptés — le rayon s'arrête net plutôt que de sauter vers un point aberrant, loin,
+        /// de l'autre côté d'un périmètre très pincé (où même la meilleure direction locale peut
+        /// encore, dans un cas extrême, croiser l'anneau suivant au mauvais endroit).
         ///
         /// culDeSacMode actif : certains rayons (motif déterministe culDeSacRatio, même fonction
         /// IsCulDeSacBlock qu'en mode classique — un rayon = un "bloc") s'arrêtent avant le
@@ -1291,8 +1306,19 @@ namespace GridRoadGenerator.Core
         /// pour les impasses de la grille classique s'y pose ensuite côté GridRoadToolSystem, qui
         /// ne distingue pas l'origine du segment. Les anneaux eux-mêmes restent toujours complets.
         /// </summary>
+        /// <summary>
+        /// Marge sur l'espacement entre anneaux tolérée pour un pas de rayon (anneau r vers
+        /// anneau r+1) : au-delà, une "correspondance" trouvée (intersection ou plus proche
+        /// voisin) n'est géométriquement pas plausible et est rejetée — voir EmitRadialConnections.
+        /// Nécessaire sur un périmètre pincé (forme en huit/cœur, "col" étroit) : le rayon en
+        /// direction fixe peut sinon croiser l'anneau suivant très loin, de l'AUTRE côté du col,
+        /// au lieu de s'arrêter localement — un bug observé en jeu (connexions chaotiques en
+        /// zigzag traversant toute la forme).
+        /// </summary>
+        private const float MaxRadialStepFactor = 2.5f;
+
         private static void EmitRadialConnections(List<RoadSegmentDef> segments, List<List<float2>> rings, int count, float y,
-            bool culDeSacMode, float culDeSacRatio, float culDeSacDepth)
+            bool culDeSacMode, float culDeSacRatio, float culDeSacDepth, float spacingMeters)
         {
             List<float2> perimeter = rings[0];
             int n = perimeter.Count;
@@ -1341,11 +1367,28 @@ namespace GridRoadGenerator.Core
                     continue; // sommet dégénéré (arêtes adjacentes nulles) : pas de rayon plutôt qu'un rayon aberrant
                 }
 
+                float maxStepDistance = spacingMeters * MaxRadialStepFactor;
                 float2 current = origin;
                 for (int r = 1; r <= stopAtRing; r++)
                 {
-                    float2? hit = RayPolygonIntersection(current, direction, rings[r]);
-                    float2 next = hit ?? NearestPoint(rings[r], current);
+                    (float2 point, int edgeIndex)? hit = RayPolygonIntersection(current, direction, rings[r], maxStepDistance);
+                    float2? candidate = hit?.point;
+                    if (candidate == null)
+                    {
+                        float2 nearest = NearestPoint(rings[r], current);
+                        if (math.distance(current, nearest) <= maxStepDistance)
+                            candidate = nearest;
+                    }
+                    if (candidate == null)
+                    {
+                        // Ni intersection ni plus proche voisin plausibles à cette distance :
+                        // mieux vaut arrêter le rayon ici (comme un cul-de-sac naturel) que de
+                        // le faire sauter vers un point aberrant, loin, de l'autre côté d'un
+                        // périmètre pincé.
+                        break;
+                    }
+
+                    float2 next = candidate.Value;
                     bool isEnd = isCulDeSac && r == stopAtRing;
                     if (math.distance(current, next) >= MinSegmentLength)
                     {
@@ -1353,6 +1396,23 @@ namespace GridRoadGenerator.Core
                             isHorizontal: false, isCulDeSacEnd: isEnd, isRadial: true));
                     }
                     current = next;
+
+                    // Recalcule la direction pour le PROCHAIN pas à partir de l'arête locale de
+                    // l'anneau qu'on vient d'atteindre — jamais gardée fixe depuis le périmètre
+                    // d'origine (bug corrigé : sur un périmètre courbe, la direction réellement
+                    // perpendiculaire évolue d'anneau en anneau en suivant la courbure locale ;
+                    // une direction figée finit par ne plus du tout correspondre à la géométrie
+                    // réelle après plusieurs anneaux, produisant des connexions chaotiques). Pas
+                    // de nouvelle recherche par "plus proche sommet" (le bug de zigzag déjà
+                    // corrigé) : uniquement la normale de l'arête RÉELLEMENT traversée. En repli
+                    // NearestPoint (pas d'edgeIndex fiable), garde la direction précédente plutôt
+                    // que d'en perdre la trace.
+                    if (hit.HasValue)
+                    {
+                        float2 localDirection = LocalInwardNormal(rings[r], hit.Value.edgeIndex, windingSign);
+                        if (math.lengthsq(localDirection) > Epsilon)
+                            direction = localDirection;
+                    }
                 }
                 radialBlockIndex++;
             }
@@ -1382,15 +1442,20 @@ namespace GridRoadGenerator.Core
         /// <summary>
         /// Premier point d'intersection de la demi-droite (origin, direction) avec les arêtes de
         /// ring, en avançant (t > 0 strictement, marge pour ignorer l'arête sur laquelle origin
-        /// repose déjà). Retourne null si aucune arête n'est traversée (anneau suivant trop
-        /// différent localement — périmètre très concave) : l'appelant se replie alors sur
-        /// NearestPoint plutôt que d'abandonner le rayon entier.
+        /// repose déjà) ET jusqu'à maxDistance seulement — au-delà, l'intersection n'est pas
+        /// géométriquement plausible pour un simple pas d'un anneau au suivant (voir
+        /// MaxRadialStepFactor/EmitRadialConnections : sans cette borne, une intersection trouvée
+        /// loin, de l'autre côté d'un périmètre pincé, était acceptée telle quelle). Retourne null
+        /// si aucune arête n'est traversée dans cette limite : l'appelant se replie alors sur
+        /// NearestPoint (avec la même borne) plutôt que d'abandonner le rayon entier. edgeIndex
+        /// (l'arête réellement traversée) sert à recalculer la direction du pas suivant à partir
+        /// de la géométrie locale de CET anneau — voir LocalInwardNormal/EmitRadialConnections.
         /// </summary>
-        private static float2? RayPolygonIntersection(float2 origin, float2 direction, List<float2> ring)
+        private static (float2 point, int edgeIndex)? RayPolygonIntersection(float2 origin, float2 direction, List<float2> ring, float maxDistance)
         {
             int n = ring.Count;
-            float bestT = float.MaxValue;
-            float2? best = null;
+            float bestT = maxDistance;
+            (float2 point, int edgeIndex)? best = null;
             for (int i = 0; i < n; i++)
             {
                 float2 a = ring[i];
@@ -1406,10 +1471,19 @@ namespace GridRoadGenerator.Core
                 if (t > 1e-3f && u >= -uMargin && u <= 1f + uMargin && t < bestT)
                 {
                     bestT = t;
-                    best = origin + direction * t;
+                    best = (origin + direction * t, i);
                 }
             }
             return best;
+        }
+
+        /// <summary>Normale entrante de l'arête [ring[edgeIndex], ring[edgeIndex+1]] — direction locale réelle de cet anneau à ce point, voir EmitRadialConnections.</summary>
+        private static float2 LocalInwardNormal(List<float2> ring, int edgeIndex, float windingSign)
+        {
+            int n = ring.Count;
+            float2 edge = ring[(edgeIndex + 1) % n] - ring[edgeIndex];
+            float len = math.length(edge);
+            return len > Epsilon ? InwardNormal(edge / len, windingSign) : float2.zero;
         }
 
         /// <summary>Sommet de ring le plus proche de target (recherche linéaire, ring reste petit) — repli de RayPolygonIntersection.</summary>

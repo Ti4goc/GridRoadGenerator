@@ -1119,6 +1119,43 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
+        public void PinchedHourglassPerimeter_RadialsNeverJumpAcrossTheNarrowWaist()
+        {
+            // Bug rapporté en jeu : sur un périmètre pincé (forme en huit/cœur, un "col" étroit
+            // entre deux lobes larges — reproduit ici en plus simple par un sablier), un rayon à
+            // direction fixe pouvait croiser l'anneau suivant très loin, de l'AUTRE côté du col,
+            // au lieu d'un point local — connexions chaotiques en zigzag traversant toute la
+            // forme (RayPolygonIntersection/NearestPoint n'avaient aucune borne de distance).
+            var hourglass = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(100f, 0f, 0f),
+                new float3(100f, 0f, 90f),
+                new float3(60f, 0f, 90f),
+                new float3(60f, 0f, 110f),
+                new float3(100f, 0f, 110f),
+                new float3(100f, 0f, 200f),
+                new float3(0f, 0f, 200f),
+                new float3(0f, 0f, 110f),
+                new float3(40f, 0f, 110f),
+                new float3(40f, 0f, 90f),
+                new float3(0f, 0f, 90f),
+            };
+            float spacing = 20f;
+            var segments = GridGenerator.GenerateAdaptiveGrid(hourglass, AdaptiveParams(spacing, 8));
+            var radials = segments.Where(s => s.IsRadial).ToList();
+            Assert.NotEmpty(radials);
+
+            float maxPlausibleStep = spacing * 2.5f + 0.5f; // même borne que EmitRadialConnections, marge d'arrondi
+            Assert.All(radials, s =>
+            {
+                float length = math.distance(s.Start.xz, s.End.xz);
+                Assert.True(length <= maxPlausibleStep,
+                    $"Segment radial de {length} m — bien plus long qu'un pas d'anneau plausible ({maxPlausibleStep} m), signe d'un saut à travers le col étroit.");
+            });
+        }
+
+        [Fact]
         public void RoundedCorners_ProducesMorePointsThanMiterAtEachSquareCorner()
         {
             // Coins arrondis : un arc de plusieurs points remplace chaque pointe nette, donc le
