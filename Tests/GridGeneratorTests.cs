@@ -1008,6 +1008,50 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
+        public void ConcaveLShape_RadialConnectionSegmentsAreCollinear()
+        {
+            // Bug "zigzag" corrigé : EmitRadialConnections choisissait le sommet le plus proche
+            // de l'anneau suivant à chaque étape (NearestPoint), ce qui pouvait faire dériver le
+            // rayon d'un anneau à l'autre au lieu de rester une ligne droite — surtout visible
+            // sur un périmètre irrégulier/concave (carré simple trop symétrique pour exposer le
+            // bug : NearestPoint y retombe presque toujours sur le bon coin par coïncidence).
+            // Chaque rayon a maintenant une direction fixe (ComputeRadialDirection) : tous ses
+            // segments consécutifs doivent rester parfaitement colinéaires (produit vectoriel des
+            // directions ≈ 0), du premier anneau jusqu'au dernier.
+            var lShape = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(300f, 0f, 0f),
+                new float3(300f, 0f, 150f),
+                new float3(150f, 0f, 150f),
+                new float3(150f, 0f, 300f),
+                new float3(0f, 0f, 300f),
+            };
+            var segments = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(20f, 5));
+            var radials = segments.Where(s => s.IsRadial).ToList();
+            Assert.True(radials.Count >= 2, "Il faut plusieurs anneaux pour tester la colinéarité d'un rayon sur plus d'un segment.");
+
+            // Segments d'un même rayon = suite consécutive où la fin de l'un touche le début du
+            // suivant (émis dans cet ordre par EmitRadialConnections, un rayon après l'autre).
+            int chainStart = 0;
+            for (int i = 1; i <= radials.Count; i++)
+            {
+                bool chainBreaks = i == radials.Count || math.distance(radials[i - 1].End.xz, radials[i].Start.xz) > 0.5f;
+                if (!chainBreaks) continue;
+
+                for (int j = chainStart + 1; j < i; j++)
+                {
+                    float2 dirPrev = math.normalize(radials[j - 1].End.xz - radials[j - 1].Start.xz);
+                    float2 dirNext = math.normalize(radials[j].End.xz - radials[j].Start.xz);
+                    float cross = dirPrev.x * dirNext.y - dirPrev.y * dirNext.x;
+                    Assert.True(math.abs(cross) < 0.01f,
+                        $"Segments {j - 1} et {j} d'un même rayon devraient être colinéaires (cross={cross}).");
+                }
+                chainStart = i;
+            }
+        }
+
+        [Fact]
         public void RoundedCorners_ProducesMorePointsThanMiterAtEachSquareCorner()
         {
             // Coins arrondis : un arc de plusieurs points remplace chaque pointe nette, donc le

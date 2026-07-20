@@ -879,7 +879,8 @@ namespace GridRoadGenerator.Core
         /// direction de départ de ce coin. Les points non marqués comme coins (sur un tronçon
         /// déjà "lisse") sont recopiés tels quels. Le nombre de sommets du résultat change
         /// (plusieurs points par coin arrondi) — sans conséquence : EmitRadialConnections relie
-        /// déjà les anneaux par point le plus proche, pas par correspondance d'index.
+        /// les anneaux par intersection géométrique (RayPolygonIntersection), jamais par
+        /// correspondance d'index, donc indifférent au nombre de sommets de chaque anneau.
         /// </summary>
         private static List<float2> RoundCorners(List<float2> polygon, List<float2> miterResult, float distance, float windingSign, bool[] isCorner)
         {
@@ -1193,13 +1194,20 @@ namespace GridRoadGenerator.Core
         /// uniformément possible par LONGUEUR D'ARC (pas par index brut : les arêtes courbes
         /// déjà densifiées par SampleCurve auraient sinon une part disproportionnée des rayons).
         ///
-        /// Chaque rayon avance ensuite anneau par anneau en rejoignant, à chaque étape, le
-        /// sommet le PLUS PROCHE de l'anneau suivant (pas le même index) : SimplifyShortEdges
-        /// (voir OffsetPolygonInward) peut changer le nombre de sommets d'un anneau à l'autre,
-        /// donc la correspondance d'index n'est plus garantie — "point le plus proche" reste
-        /// valide quelle que soit la cardinalité de chaque anneau.
-        /// </summary>
-        /// <summary>
+        /// Chaque rayon a une direction FIXE, calculée UNE SEULE FOIS à ce sommet du périmètre
+        /// d'origine (ComputeRadialDirection, normale entrante moyenne des deux arêtes
+        /// adjacentes — même convention qu'OffsetVertex) — jamais recalculée anneau par anneau.
+        /// À chaque anneau, on intersecte cette droite fixe avec les arêtes de l'anneau suivant
+        /// (RayPolygonIntersection) plutôt que de chercher le sommet le plus proche : ancienne
+        /// approche corrigée après un bug de zigzag reproductible (voir ci-dessous) — "point le
+        /// plus proche" est resté vulnérable aux variations de sommets d'un anneau à l'autre
+        /// (ResamplePolygon/RoundCorners) et, pire, faisait dériver le rayon anneau par anneau
+        /// puisque la position ET la direction du pas suivant dépendaient toutes deux du sommet
+        /// choisi précédemment (erreur cumulative). Direction fixe = tous les segments d'un même
+        /// rayon restent colinéaires (un seul rayon droit), zéro dérive possible. Repli sur le
+        /// sommet le plus proche seulement si la droite ne touche aucune arête de l'anneau
+        /// suivant (périmètre très concave/irrégulier, cas rare) plutôt que d'abandonner le rayon.
+        ///
         /// culDeSacMode actif : certains rayons (motif déterministe culDeSacRatio, même fonction
         /// IsCulDeSacBlock qu'en mode classique — un rayon = un "bloc") s'arrêtent avant le
         /// dernier anneau plutôt que de le traverser, en impasse (IsCulDeSacEnd, culDeSacDepth
@@ -1236,6 +1244,8 @@ namespace GridRoadGenerator.Core
                 if (seen.Add(bestIndex)) chosenIndices.Add(bestIndex);
             }
 
+            float windingSign = math.sign(SignedArea(perimeter));
+
             int radialBlockIndex = 0;
             foreach (int index in chosenIndices)
             {
@@ -1244,23 +1254,89 @@ namespace GridRoadGenerator.Core
                     ? math.max(1, (int)math.round((rings.Count - 1) * math.clamp(culDeSacDepth, 0.5f, 0.9f)))
                     : rings.Count - 1;
 
-                float2 current = perimeter[index];
+                float2 origin = perimeter[index];
+                float2 direction = ComputeRadialDirection(
+                    origin - perimeter[(index - 1 + n) % n],
+                    perimeter[(index + 1) % n] - origin,
+                    windingSign);
+                if (math.lengthsq(direction) < Epsilon)
+                {
+                    radialBlockIndex++;
+                    continue; // sommet dégénéré (arêtes adjacentes nulles) : pas de rayon plutôt qu'un rayon aberrant
+                }
+
+                float2 current = origin;
                 for (int r = 1; r <= stopAtRing; r++)
                 {
-                    float2 nearest = NearestPoint(rings[r], current);
+                    float2? hit = RayPolygonIntersection(current, direction, rings[r]);
+                    float2 next = hit ?? NearestPoint(rings[r], current);
                     bool isEnd = isCulDeSac && r == stopAtRing;
-                    if (math.distance(current, nearest) >= MinSegmentLength)
+                    if (math.distance(current, next) >= MinSegmentLength)
                     {
-                        segments.Add(new RoadSegmentDef(new float3(current.x, y, current.y), new float3(nearest.x, y, nearest.y),
+                        segments.Add(new RoadSegmentDef(new float3(current.x, y, current.y), new float3(next.x, y, next.y),
                             isHorizontal: false, isCulDeSacEnd: isEnd, isRadial: true));
                     }
-                    current = nearest;
+                    current = next;
                 }
                 radialBlockIndex++;
             }
         }
 
-        /// <summary>Sommet de ring le plus proche de target (recherche linéaire, ring reste petit).</summary>
+        /// <summary>
+        /// Direction radiale à un sommet du périmètre d'origine : normale entrante moyenne des
+        /// deux arêtes adjacentes (dirIn/dirOut, non normalisées), même convention que
+        /// InwardNormal/OffsetVertex — mais sans jonction miter à préserver, un rayon n'a besoin
+        /// que d'une direction, pas d'un point de jonction exact. float2.zero (sentinelle,
+        /// testée par l'appelant via lengthsq) si les deux arêtes sont dégénérées.
+        /// </summary>
+        private static float2 ComputeRadialDirection(float2 dirIn, float2 dirOut, float windingSign)
+        {
+            float lenIn = math.length(dirIn);
+            float lenOut = math.length(dirOut);
+            if (lenIn < Epsilon && lenOut < Epsilon) return float2.zero;
+            if (lenIn < Epsilon) return InwardNormal(dirOut / lenOut, windingSign);
+            if (lenOut < Epsilon) return InwardNormal(dirIn / lenIn, windingSign);
+
+            float2 normalIn = InwardNormal(dirIn / lenIn, windingSign);
+            float2 normalOut = InwardNormal(dirOut / lenOut, windingSign);
+            float2 avg = normalIn + normalOut;
+            return math.lengthsq(avg) > Epsilon ? math.normalize(avg) : normalIn;
+        }
+
+        /// <summary>
+        /// Premier point d'intersection de la demi-droite (origin, direction) avec les arêtes de
+        /// ring, en avançant (t > 0 strictement, marge pour ignorer l'arête sur laquelle origin
+        /// repose déjà). Retourne null si aucune arête n'est traversée (anneau suivant trop
+        /// différent localement — périmètre très concave) : l'appelant se replie alors sur
+        /// NearestPoint plutôt que d'abandonner le rayon entier.
+        /// </summary>
+        private static float2? RayPolygonIntersection(float2 origin, float2 direction, List<float2> ring)
+        {
+            int n = ring.Count;
+            float bestT = float.MaxValue;
+            float2? best = null;
+            for (int i = 0; i < n; i++)
+            {
+                float2 a = ring[i];
+                float2 b = ring[(i + 1) % n];
+                float2 edge = b - a;
+                float denom = Cross(direction, edge);
+                if (math.abs(denom) < 1e-6f) continue; // rayon parallèle à cette arête
+
+                float2 diff = a - origin;
+                float t = Cross(diff, edge) / denom;
+                float u = Cross(diff, direction) / denom;
+                const float uMargin = 1e-3f;
+                if (t > 1e-3f && u >= -uMargin && u <= 1f + uMargin && t < bestT)
+                {
+                    bestT = t;
+                    best = origin + direction * t;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>Sommet de ring le plus proche de target (recherche linéaire, ring reste petit) — repli de RayPolygonIntersection.</summary>
         private static float2 NearestPoint(List<float2> ring, float2 target)
         {
             float2 best = ring[0];
