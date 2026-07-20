@@ -411,16 +411,36 @@ namespace GridRoadGenerator.Systems
                     {
                         continue;
                     }
-                    _selectedNodes.Add(pathNode);
-                    _selectedPositions.Add(pathNodeData.m_Position);
-                    SetHighlight(pathNode, true);
+                    AddSelectedNode(pathNode, pathNodeData.m_Position);
                 }
                 return;
             }
 
-            _selectedNodes.Add(node);
             // Position exacte du nœud (composant Node), pas le point d'impact du raycast.
-            _selectedPositions.Add(nodeData.m_Position);
+            AddSelectedNode(node, nodeData.m_Position);
+        }
+
+        /// <summary>
+        /// Ajoute un nœud à la sélection du périmètre, SAUF s'il est à moins de
+        /// GridGenerator.MinNodeDistance du dernier nœud déjà sélectionné — deux vrais nœuds du
+        /// jeu quasi confondus (fréquent près d'une intersection complexe/un raccord de voie)
+        /// produiraient sinon un faux petit cran dans le périmètre, qui perturbe ensuite le
+        /// décalage de polygone en mode Adaptativo. Le nœud "en trop" est fusionné avec le
+        /// précédent : reste surligné (retour visuel du clic inchangé), mais ne devient pas un
+        /// sommet de périmètre distinct — même principe que le "Super nó" de NetworkTools,
+        /// appliqué ici à la sélection plutôt qu'à une fusion en jeu du réseau lui-même.
+        /// </summary>
+        private void AddSelectedNode(Entity node, float3 position)
+        {
+            if (_selectedPositions.Count > 0
+                && math.distance(_selectedPositions[_selectedPositions.Count - 1], position) < GridGenerator.MinNodeDistance)
+            {
+                SetHighlight(node, true);
+                return; // fusionné avec le sommet précédent : pas de doublon quasi confondu
+            }
+
+            _selectedNodes.Add(node);
+            _selectedPositions.Add(position);
             SetHighlight(node, true);
         }
 
@@ -458,9 +478,7 @@ namespace GridRoadGenerator.Systems
                 {
                     continue;
                 }
-                _selectedNodes.Add(node);
-                _selectedPositions.Add(nodeData.m_Position);
-                SetHighlight(node, true);
+                AddSelectedNode(node, nodeData.m_Position);
             }
         }
 
