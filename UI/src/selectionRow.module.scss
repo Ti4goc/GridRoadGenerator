@@ -1,0 +1,23 @@
+// Barre "Seleção" : même langage visuel que roadRow (roadSelection.module.scss) —
+// pas une section repliable, donc son propre module minimal.
+.selectionRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12rem 8rem;
+    border-bottom: 1rem solid #9645ff59; // accent violet, atténué (même teinte que les autres barres fixes)
+    margin-bottom: 8rem;
+}
+
+.selectionLabel {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: #ffffffd9;
+}
+
+.invalid {
+    color: #ff8080;
+}

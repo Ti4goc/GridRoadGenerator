@@ -109,10 +109,6 @@ $accent-violet-gradient-start: #c12cea;
     transform: rotate(-90deg);
 }
 
-.invalid {
-    color: #ff8080;
-}
-
 // Repli par section (NativeSectionFoldout, voir le composant) : chevron composé
 // à la main dans le slot `left` d'un InfoRow uppercase, même langage visuel que
 // le chevron du panneau lui-même (.collapseIcon/.collapseIconCollapsed).

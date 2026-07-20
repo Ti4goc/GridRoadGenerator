@@ -18,6 +18,7 @@ import gridIcon from "./gridIcon.svg";
 import { locString } from "./locHelpers";
 import { RoadSelection } from "./roadSelection";
 import { SafeButton } from "./safeButton";
+import { SelectionRow } from "./selectionRow";
 import { VC, VF, VT } from "./vanilla";
 import { ViewSelection } from "./viewSelection";
 import {
@@ -205,7 +206,6 @@ export const NativeGridPanel = () => {
     const [geometryExpanded, setGeometryExpanded] = useState(true);
     const [culDeSacExpanded, setCulDeSacExpanded] = useState(false);
     const [adaptiveExpanded, setAdaptiveExpanded] = useState(false);
-    const [selectionExpanded, setSelectionExpanded] = useState(false);
 
     if (!toolActive) {
         return null;
@@ -368,10 +368,12 @@ export const NativeGridPanel = () => {
             <Panel header={header} footer={footer} onClose={toggleTool} className={styles.panel}>
                 {!collapsed && (
                     <>
-                        {/* "Vista" et "Route" : pas des sections repliables (voir viewSelection.tsx
-                            et roadSelection.tsx), toujours visibles en haut, avant la première section. */}
+                        {/* "Vista", "Route" et "Seleção" : pas des sections repliables (voir
+                            viewSelection.tsx/roadSelection.tsx/selectionRow.tsx), toujours
+                            visibles en haut, avant la première section repliable. */}
                         <ViewSelection />
                         <RoadSelection portalContainer={panelRef.current} />
+                        <SelectionRow nodeCount={nodeCount} perimeterInvalid={perimeterInvalid} />
 
                         {/* Géométrie : mode, colonnes/lignes/espacement, angle, suivi du terrain. */}
                         <NativeSectionFoldout
@@ -585,17 +587,6 @@ export const NativeGridPanel = () => {
                                         onChange={(value: boolean) => setAdaptiveRoundedCorners(value)}
                                     />
                                 }
-                            />
-                        </NativeSectionFoldout>
-
-                        {/* Sélection en cours (réseau utilisé : voir la barre permanente "Route" ci-dessus). */}
-                        <NativeSectionFoldout
-                            title={translate("GridRoadGenerator.UI.SectionSelection", "Selection")}
-                            expanded={selectionExpanded}
-                            onToggle={() => setSelectionExpanded((value) => !value)}>
-                            <InfoRow
-                                left={translate("GridRoadGenerator.UI.NodesSelected", "Selected nodes")}
-                                right={<span className={perimeterInvalid ? styles.invalid : undefined}>{nodeCount}</span>}
                             />
                         </NativeSectionFoldout>
                     </>

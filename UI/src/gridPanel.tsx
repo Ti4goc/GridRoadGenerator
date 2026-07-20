@@ -8,6 +8,7 @@ import styles from "./gridPanel.module.scss";
 import { locString } from "./locHelpers";
 import { RoadSelection } from "./roadSelection";
 import { SafeButton } from "./safeButton";
+import { SelectionRow } from "./selectionRow";
 import { VC, VF, VT } from "./vanilla";
 import { ViewSelection } from "./viewSelection";
 import {
@@ -185,7 +186,6 @@ export const LegacyGridPanel = () => {
     const [geometryExpanded, setGeometryExpanded] = useState(true);
     const [culDeSacExpanded, setCulDeSacExpanded] = useState(false);
     const [adaptiveExpanded, setAdaptiveExpanded] = useState(false);
-    const [selectionExpanded, setSelectionExpanded] = useState(false);
 
     if (!toolActive) {
         return null;
@@ -284,10 +284,12 @@ export const LegacyGridPanel = () => {
                 <div className={styles.content}>
                   <div className={styles.scrollWrapper}>
                     <VC.Scrollable>
-                    {/* "Vista" et "Route" : pas des sections repliables (voir viewSelection.tsx
-                        et roadSelection.tsx), toujours visibles en haut, avant la première section. */}
+                    {/* "Vista", "Route" et "Seleção" : pas des sections repliables (voir
+                        viewSelection.tsx/roadSelection.tsx/selectionRow.tsx), toujours visibles
+                        en haut, avant la première section repliable. */}
                     <ViewSelection />
                     <RoadSelection portalContainer={panelRef.current} />
+                    <SelectionRow nodeCount={nodeCount} perimeterInvalid={perimeterInvalid} />
 
                     {/* Géométrie : mode, colonnes/lignes/espacement, angle, suivi du terrain. */}
                     <SectionFoldout
@@ -517,27 +519,6 @@ export const LegacyGridPanel = () => {
                                     disabled={!adaptiveMode}
                                     onChange={(value: boolean) => setAdaptiveRoundedCorners(value)}
                                 />
-                            </VC.Section>
-                        </div>
-                    </SectionFoldout>
-
-                    {/* Sélection en cours (réseau utilisé : voir la barre permanente "Route" ci-dessus). */}
-                    <SectionFoldout
-                        title={translate("GridRoadGenerator.UI.SectionSelection", "Selection")}
-                        expanded={selectionExpanded}
-                        onToggle={() => setSelectionExpanded((value) => !value)}>
-                        <div className={styles.vanillaRow}>
-                            <VC.Section
-                                focusKey={VF.FOCUS_DISABLED}
-                                title={translate("GridRoadGenerator.UI.NodesSelected", "Selected nodes")}>
-                                <div
-                                    className={
-                                        perimeterInvalid
-                                            ? `${VT.mouseToolOptions.numberField} ${styles.invalid}`
-                                            : VT.mouseToolOptions.numberField
-                                    }>
-                                    {nodeCount}
-                                </div>
                             </VC.Section>
                         </div>
                     </SectionFoldout>

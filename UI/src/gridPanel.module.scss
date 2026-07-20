@@ -241,10 +241,6 @@ $accent-violet-gradient-start: #c12cea;
     }
 }
 
-.invalid {
-    color: #ff8080;
-}
-
 // Frère de .content (pas un enfant) : reste hors de sa zone défilante, donc
 // toujours visible en bas du panneau, quel que soit l'état des sections.
 .actions {
