@@ -58,6 +58,15 @@ namespace GridRoadGenerator.Systems
         /// <summary>Mode Auto : largeur (m) sous laquelle la taille "Large" est choisie (sinon "XL").</summary>
         private const float CulDeSacCapLargeMaxWidth = 22f;
 
+        // Îlot central de rotonde (avenue, voir EmitAvenueRoundabout) : StaticObjectPrefab
+        // natif du jeu, "<Taille>Roundabout01" (ex. "MediumRoundabout01" — trouvé par
+        // recherche dans les assets du jeu, aucune valeur officielle exposée). Taille déduite
+        // du rayon RÉEL de la rotonde générée (pas une largeur de route) selon les seuils
+        // ci-dessous ; approximatifs, à affiner selon retour visuel en jeu.
+        private const float RoundaboutIslandSmallMaxRadius = 10f;
+        private const float RoundaboutIslandMediumMaxRadius = 15f;
+        private const float RoundaboutIslandLargeMaxRadius = 20f;
+
         public override string toolID => "Grid Road Tool";
 
         private readonly List<Entity> _selectedNodes = new List<Entity>();
@@ -75,6 +84,11 @@ namespace GridRoadGenerator.Systems
         private readonly Dictionary<string, Entity> _culDeSacCapPrefabCache = new Dictionary<string, Entity>();
         /// <summary>Empêche le spam du log de prefab de cercle introuvable : un avis par nom manquant.</summary>
         private readonly HashSet<string> _culDeSacCapMissingLogged = new HashSet<string>();
+
+        /// <summary>Cache "&lt;Taille&gt;Roundabout01" → entité résolue, même principe que _culDeSacCapPrefabCache.</summary>
+        private readonly Dictionary<string, Entity> _roundaboutIslandPrefabCache = new Dictionary<string, Entity>();
+        /// <summary>Empêche le spam du log d'îlot de rotonde introuvable : un avis par nom manquant.</summary>
+        private readonly HashSet<string> _roundaboutIslandMissingLogged = new HashSet<string>();
 
         /// <summary>Vrai si le dernier double-clic n'a pas trouvé de contour fermé (affiché en tooltip).</summary>
         public bool PerimeterDetectionFailed { get; private set; }
@@ -788,6 +802,34 @@ namespace GridRoadGenerator.Systems
                 return 0;
             }
 
+            // Centre/rayon de la rotonde éventuelle (EmitAvenueRoundabout), pour y poser
+            // l'îlot central décoratif natif (voir TryResolveRoundaboutIslandPrefab) une fois
+            // tous les segments de route créés. Dérivé des facettes IsArc elles-mêmes (moyenne
+            // des points, tous équidistants du centre par construction) plutôt que recalculé
+            // indépendamment côté Core : reste valable même si EmitAvenueRoundabout change de
+            // formule de rayon.
+            float3 roundaboutCenterSum = float3.zero;
+            int roundaboutPointCount = 0;
+            foreach (RoadSegmentDef arcSegment in segments)
+            {
+                if (!arcSegment.IsArc) continue;
+                roundaboutCenterSum += arcSegment.Start;
+                roundaboutPointCount++;
+            }
+            bool hasRoundabout = roundaboutPointCount > 0;
+            float3 roundaboutCenter = hasRoundabout ? roundaboutCenterSum / roundaboutPointCount : default;
+            float roundaboutRadius = 0f;
+            if (hasRoundabout)
+            {
+                float radiusSum = 0f;
+                foreach (RoadSegmentDef arcSegment in segments)
+                {
+                    if (!arcSegment.IsArc) continue;
+                    radiusSum += math.distance(arcSegment.Start.xz, roundaboutCenter.xz);
+                }
+                roundaboutRadius = radiusSum / roundaboutPointCount;
+            }
+
             List<PerimeterEdge> perimeter = BuildPerimeterEdges();
             EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
             Unity.Mathematics.Random random = RandomSeed.Next().GetRandom(0);
@@ -871,6 +913,34 @@ namespace GridRoadGenerator.Systems
                     });
                 }
             }
+
+            // Îlot central de la rotonde (voir TryResolveRoundaboutIslandPrefab) : posé une
+            // seule fois, une fois tous les segments de route (dont la boucle elle-même)
+            // créés, comme le cercle de retournement — objet indépendant, pas de composant
+            // réseau posé après coup (même raison que le commentaire ci-dessus).
+            if (hasRoundabout && TryResolveRoundaboutIslandPrefab(roundaboutRadius, out Entity islandPrefab))
+            {
+                Entity islandDefinition = commandBuffer.CreateEntity();
+                commandBuffer.AddComponent(islandDefinition, new CreationDefinition
+                {
+                    m_Prefab = islandPrefab,
+                    m_RandomSeed = random.NextInt()
+                });
+                commandBuffer.AddComponent(islandDefinition, default(Updated));
+                commandBuffer.AddComponent(islandDefinition, new ObjectDefinition
+                {
+                    m_Position = roundaboutCenter,
+                    m_LocalPosition = roundaboutCenter,
+                    m_Rotation = quaternion.identity,
+                    m_LocalRotation = quaternion.identity,
+                    m_Scale = 1f,
+                    m_Intensity = 1f,
+                    m_Probability = 100,
+                    m_PrefabSubIndex = -1,
+                    m_ParentMesh = -1
+                });
+            }
+
             return created;
         }
 
@@ -919,6 +989,38 @@ namespace GridRoadGenerator.Systems
             if (!found && _culDeSacCapMissingLogged.Add(name))
             {
                 Mod.Log.Warn($"Prefab de cercle de retournement introuvable : {name} (StaticObjectPrefab). Impasses posées sans cercle pour cette taille/style.");
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// Résout (avec cache) l'îlot central "&lt;Taille&gt;Roundabout01" pour le rayon réel de
+        /// la rotonde générée (EmitAvenueRoundabout) — même principe que
+        /// TryResolveCulDeSacCapPrefab, taille déduite du rayon plutôt que d'une largeur de
+        /// route. Un seul style (01) : contrairement au cercle de retournement, aucun réglage
+        /// de style n'est exposé pour l'instant. Retourne false (avec un avis loggé une seule
+        /// fois par nom manquant) si le prefab n'existe pas dans cette version du jeu — la
+        /// rotonde reste posée sans îlot plutôt que d'échouer entièrement.
+        /// </summary>
+        private bool TryResolveRoundaboutIslandPrefab(float radius, out Entity prefabEntity)
+        {
+            string size = radius < RoundaboutIslandSmallMaxRadius ? "Small"
+                : radius < RoundaboutIslandMediumMaxRadius ? "Medium"
+                : radius < RoundaboutIslandLargeMaxRadius ? "Large"
+                : "XL";
+
+            string name = $"{size}Roundabout01";
+            if (_roundaboutIslandPrefabCache.TryGetValue(name, out prefabEntity))
+            {
+                return prefabEntity != Entity.Null;
+            }
+
+            bool found = m_PrefabSystem.TryGetPrefab(new PrefabID(nameof(StaticObjectPrefab), name), out PrefabBase prefab);
+            prefabEntity = found ? m_PrefabSystem.GetEntity(prefab) : Entity.Null;
+            _roundaboutIslandPrefabCache[name] = prefabEntity;
+            if (!found && _roundaboutIslandMissingLogged.Add(name))
+            {
+                Mod.Log.Warn($"Prefab d'îlot de rotonde introuvable : {name} (StaticObjectPrefab). Rotonde posée sans îlot pour cette taille.");
             }
             return found;
         }
