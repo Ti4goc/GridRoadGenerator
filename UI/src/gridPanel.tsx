@@ -17,6 +17,10 @@ import {
     anarchyAvailable$,
     anarchyEnabled$,
     angleOffset$,
+    avenueColumnEnabled$,
+    avenueColumnIndex$,
+    avenueRowEnabled$,
+    avenueRowIndex$,
     canApply$,
     columns$,
     culDeSacAxis$,
@@ -35,6 +39,10 @@ import {
     setAdaptiveMode,
     setAdaptiveRoundedCorners,
     setAngleOffset,
+    setAvenueColumnEnabled,
+    setAvenueColumnIndex,
+    setAvenueRowEnabled,
+    setAvenueRowIndex,
     setColumns,
     setCulDeSacAxis,
     setCulDeSacCapSize,
@@ -177,6 +185,10 @@ export const LegacyGridPanel = () => {
     const adaptiveMode = useValue(adaptiveMode$);
     const radialConnections = useValue(radialConnections$);
     const adaptiveRoundedCorners = useValue(adaptiveRoundedCorners$);
+    const avenueColumnEnabled = useValue(avenueColumnEnabled$);
+    const avenueColumnIndex = useValue(avenueColumnIndex$);
+    const avenueRowEnabled = useValue(avenueRowEnabled$);
+    const avenueRowIndex = useValue(avenueRowIndex$);
     const anarchyAvailable = useValue(anarchyAvailable$);
     const anarchyEnabled = useValue(anarchyEnabled$);
     const [panelPosition, setPanelPosition] = useState<PanelPosition>(loadPanelPosition);
@@ -185,6 +197,7 @@ export const LegacyGridPanel = () => {
     // tant que le joueur ne les déplie pas explicitement.
     const [geometryExpanded, setGeometryExpanded] = useState(true);
     const [culDeSacExpanded, setCulDeSacExpanded] = useState(false);
+    const [avenueExpanded, setAvenueExpanded] = useState(false);
     const [adaptiveExpanded, setAdaptiveExpanded] = useState(false);
 
     if (!toolActive) {
@@ -479,6 +492,64 @@ export const LegacyGridPanel = () => {
                                     onChange={handleCapStyleChange}
                                 />
                             </VC.Section>
+                        </div>
+                    </SectionFoldout>
+
+                    {/* Avenue : troisième réseau, colonne et/ou rangée choisie librement par
+                        index (grille de lignes droites uniquement — sans effet en mode
+                        Adaptativo, section verrouillée fermée dans ce cas comme Culs-de-sac
+                        l'est par son propre toggle). Une rotonde est ajoutée automatiquement
+                        côté Core si les deux axes sont actifs (voir EmitAvenueRoundabout). */}
+                    <SectionFoldout
+                        title={translate("GridRoadGenerator.UI.SectionAvenue", "Avenue")}
+                        expanded={avenueExpanded && !adaptiveMode}
+                        onToggle={() => !adaptiveMode && setAvenueExpanded((value) => !value)}
+                        locked={adaptiveMode}>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.AvenueColumn", "Avenue column")}>
+                                <VC.ToggleField
+                                    value={avenueColumnEnabled}
+                                    disabled={adaptiveMode}
+                                    onChange={(value: boolean) => setAvenueColumnEnabled(value)}
+                                />
+                            </VC.Section>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.IntSliderField
+                                    label={translate("GridRoadGenerator.UI.AvenueIndex", "Index")}
+                                    value={avenueColumnIndex}
+                                    min={0}
+                                    max={23}
+                                    disabled={adaptiveMode || !avenueColumnEnabled}
+                                    onChange={(value: number) => setAvenueColumnIndex(Math.round(value))}
+                                />
+                            </div>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <VC.Section
+                                focusKey={VF.FOCUS_DISABLED}
+                                title={translate("GridRoadGenerator.UI.AvenueRow", "Avenue row")}>
+                                <VC.ToggleField
+                                    value={avenueRowEnabled}
+                                    disabled={adaptiveMode}
+                                    onChange={(value: boolean) => setAvenueRowEnabled(value)}
+                                />
+                            </VC.Section>
+                        </div>
+                        <div className={styles.vanillaRow}>
+                            <div className={styles.vanillaField}>
+                                <VC.IntSliderField
+                                    label={translate("GridRoadGenerator.UI.AvenueIndex", "Index")}
+                                    value={avenueRowIndex}
+                                    min={0}
+                                    max={23}
+                                    disabled={adaptiveMode || !avenueRowEnabled}
+                                    onChange={(value: number) => setAvenueRowIndex(Math.round(value))}
+                                />
+                            </div>
                         </div>
                     </SectionFoldout>
 
