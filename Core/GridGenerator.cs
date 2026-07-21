@@ -1487,6 +1487,27 @@ namespace GridRoadGenerator.Core
         /// </summary>
         private const float MaxRadialStepFactor = 2.5f;
 
+        /// <summary>Pas (m) utilisé pour tester si une direction de rayon calculée pointe vraiment vers l'intérieur du périmètre (voir EmitRadialConnections). Petit et arbitraire : seul le SENS compte, pas la distance.</summary>
+        private const float InwardCheckDistance = 1f;
+
+        /// <summary>Test point-dans-polygone standard (pair-impair, ray casting) — polygone quelconque, convexe ou non.</summary>
+        internal static bool PointInPolygon(float2 point, List<float2> polygon)
+        {
+            bool inside = false;
+            int n = polygon.Count;
+            for (int i = 0, j = n - 1; i < n; j = i++)
+            {
+                float2 a = polygon[i];
+                float2 b = polygon[j];
+                if ((a.y > point.y) != (b.y > point.y) &&
+                    point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x)
+                {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+
         /// <summary>
         /// Émet les rayons anneau par anneau (pas rayon par rayon) : nécessaire pour connaître,
         /// à chaque anneau, le nombre de rayons encore actifs AVANT de les faire avancer, afin de
@@ -1566,8 +1587,18 @@ namespace GridRoadGenerator.Core
                     windingSign);
                 current[k] = origin;
                 direction[k] = dir;
-                // Sommet dégénéré (arêtes adjacentes nulles) : pas de rayon plutôt qu'un rayon aberrant.
-                alive[k] = math.lengthsq(dir) >= Epsilon;
+                // Sommet dégénéré (arêtes adjacentes nulles) : pas de rayon plutôt qu'un rayon
+                // aberrant. Bug corrigé : un sommet "en pointe" (deux arêtes adjacentes presque
+                // opposées — typique d'une impasse fine incluse dans le périmètre sélectionné,
+                // aller-retour sur elle-même) fait dévier ComputeRadialDirection vers l'EXTÉRIEUR
+                // du périmètre au lieu de l'intérieur (la moyenne des deux normales entrantes
+                // devient instable quand dirIn ≈ -dirOut). Vérifié en avançant d'un petit pas le
+                // long de la direction calculée : si ce pas atterrit hors du périmètre d'origine,
+                // ce rayon ne part jamais — rien ne doit sortir du périmètre choisi, c'est
+                // justement l'intérêt du mod.
+                bool directionIsInward = math.lengthsq(dir) >= Epsilon
+                    && PointInPolygon(origin + math.normalize(dir) * InwardCheckDistance, perimeter);
+                alive[k] = directionIsInward;
             }
 
             float maxStepDistance = spacingMeters * MaxRadialStepFactor;
@@ -1624,6 +1655,21 @@ namespace GridRoadGenerator.Core
                     }
 
                     float2 next = candidate.Value;
+
+                    // Garde-fou : la corde current->next ne doit jamais sortir du périmètre
+                    // d'origine. Un segment droit entre deux points par ailleurs valides PEUT
+                    // couper à travers une encoche d'un contour concave — vérifié via le MILIEU
+                    // de la corde (moins cher qu'un vrai test d'intersection segment/polygone, et
+                    // suffisant en pratique : une encoche trop fine pour être détectée ainsi est,
+                    // par construction, plus étroite que MinSegmentLength). Même traitement que
+                    // "ni intersection ni plus proche voisin plausibles" ci-dessus : le rayon
+                    // s'arrête ici plutôt que de s'échapper hors du périmètre choisi.
+                    if (!PointInPolygon((current[k] + next) * 0.5f, perimeter))
+                    {
+                        alive[k] = false;
+                        continue;
+                    }
+
                     for (int a = 0; a < acceptedThisRing.Count; a++)
                     {
                         if (math.distance(next, acceptedThisRing[a]) < MinNodeDistance)

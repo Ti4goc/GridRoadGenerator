@@ -1442,6 +1442,64 @@ namespace GridRoadGenerator.Tests
                     "Aucune géométrie NaN/Infinity même avec les deux mécanismes actifs simultanément."));
         }
 
+        [Theory]
+        [InlineData(5f, 5f, true)]    // strictement à l'intérieur
+        [InlineData(-5f, 5f, false)]  // strictement à l'extérieur (à gauche)
+        [InlineData(50f, 5f, false)]  // strictement à l'extérieur (à droite)
+        [InlineData(5f, -50f, false)] // loin en dessous
+        public void PointInPolygon_SquareCases(float x, float y, bool expectedInside)
+        {
+            var square = new List<float2> { new float2(0f, 0f), new float2(10f, 0f), new float2(10f, 10f), new float2(0f, 10f) };
+            Assert.Equal(expectedInside, GridGenerator.PointInPolygon(new float2(x, y), square));
+        }
+
+        [Fact]
+        public void GeneratedAdaptiveGeometry_NeverHasASegmentWhoseMidpointExitsTheOriginalPerimeter()
+        {
+            // Bug rapporté en jeu (grande boucle triangulaire hors du périmètre sélectionné,
+            // "Objetos sobrepostos" persistant) : un rayon peut, sur un périmètre réel complexe
+            // (concave ou avec un sommet "en pointe" — ex. une impasse fine accidentellement
+            // incluse dans la sélection), calculer une direction ou un point d'arrivée qui fait
+            // sortir la corde current->next du périmètre d'origine (voir les gardes-fous
+            // PointInPolygon ajoutés dans EmitRadialConnections, sur la direction initiale ET sur
+            // chaque corde). Vérifié ici sur toutes les formes concaves déjà utilisées par cette
+            // classe de tests (L, sablier, cercle densifié), avec un nombre de rayons généreux
+            // pour maximiser les chances d'atteindre un sommet à risque.
+            var lShape = new List<float3>
+            {
+                new float3(0f, 0f, 0f), new float3(300f, 0f, 0f), new float3(300f, 0f, 150f),
+                new float3(150f, 0f, 150f), new float3(150f, 0f, 300f), new float3(0f, 0f, 300f),
+            };
+            var hourglass = new List<float3>
+            {
+                new float3(0f, 0f, 0f), new float3(100f, 0f, 0f), new float3(100f, 0f, 90f),
+                new float3(60f, 0f, 90f), new float3(60f, 0f, 110f), new float3(100f, 0f, 110f),
+                new float3(100f, 0f, 200f), new float3(0f, 0f, 200f), new float3(0f, 0f, 110f),
+                new float3(40f, 0f, 110f), new float3(40f, 0f, 90f), new float3(0f, 0f, 90f),
+            };
+            var circle = DensifiedCircle(50f, 48);
+
+            var cases = new (string name, List<float3> nodes, float spacing)[]
+            {
+                ("L", lShape, 20f),
+                ("hourglass", hourglass, 15f),
+                ("circle", circle, 10f),
+            };
+
+            foreach (var (name, nodes, spacing) in cases)
+            {
+                var perimeter2D = nodes.Select(p => new float2(p.x, p.z)).ToList();
+                var segments = GridGenerator.GenerateAdaptiveGrid(nodes, AdaptiveParams(spacing, 24));
+
+                Assert.All(segments, s =>
+                {
+                    float2 midpoint = (s.Start.xz + s.End.xz) * 0.5f;
+                    Assert.True(GridGenerator.PointInPolygon(midpoint, perimeter2D) || DistanceToPolylineXZ(midpoint, perimeter2D) < 1f,
+                        $"[{name}] Segment sort du périmètre d'origine (milieu hors polygone) : {s.Start} -> {s.End}");
+                });
+            }
+        }
+
         [Fact]
         public void ConcaveLShape_DoesNotProduceDegenerateOrNaNGeometry()
         {
