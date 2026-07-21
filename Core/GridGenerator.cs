@@ -1487,6 +1487,26 @@ namespace GridRoadGenerator.Core
         /// </summary>
         private const float MaxRadialStepFactor = 2.5f;
 
+        /// <summary>
+        /// Émet les rayons anneau par anneau (pas rayon par rayon) : nécessaire pour connaître,
+        /// à chaque anneau, le nombre de rayons encore actifs AVANT de les faire avancer, afin de
+        /// réduire ce nombre si l'anneau est trop petit pour tous les accueillir à
+        /// MinNodeDistance les uns des autres (voir RingPerimeter/SelectEvenlySpacedIndices ci-
+        /// dessous). Bug corrigé : sur un périmètre resserré (col étroit, extrémité pointue), les
+        /// anneaux intérieurs rétrécissent bien plus que le nombre de rayons qui convergent vers
+        /// eux — chaque rayon calculant son point d'arrivée indépendamment (RayPolygonIntersection),
+        /// deux rayons proches finissaient à des points quasi mais pas exactement confondus,
+        /// jamais fusionnés par le jeu ("Objetos sobrepostos"). Chaque rayon accumule ses segments
+        /// dans son propre buffer, concaténés à `segments` dans l'ordre d'origine à la fin — pour
+        /// que les segments d'un même rayon restent consécutifs dans la liste, comme avant cette
+        /// réécriture (des appelants/tests s'y fient pour détecter les "chaînes" d'un même rayon).
+        ///
+        /// Un rayon écarté par la réduction de capacité s'arrête simplement sur le dernier anneau
+        /// où il tenait encore — un point RÉEL de cet anneau, où les segments de l'anneau lui-même
+        /// se rejoignent déjà. Jamais marqué IsCulDeSacEnd (ça poserait un cercle de retournement
+        /// par-dessus une intersection déjà existante, recréant le même genre de chevauchement) :
+        /// réservé aux arrêts EN COURS DE BLOC demandés par CulDeSacDepth, comme avant.
+        /// </summary>
         private static void EmitRadialConnections(List<RoadSegmentDef> segments, List<List<float2>> rings, int count, float y,
             bool culDeSacMode, float culDeSacRatio, float culDeSacDepth, float spacingMeters)
         {
@@ -1517,36 +1537,80 @@ namespace GridRoadGenerator.Core
             }
 
             float windingSign = math.sign(SignedArea(perimeter));
+            int radialCount = chosenIndices.Count;
 
-            int radialBlockIndex = 0;
-            foreach (int index in chosenIndices)
+            // État par rayon, indexé comme chosenIndices (ordre préservé jusqu'à l'émission finale).
+            var current = new float2[radialCount];
+            var direction = new float2[radialCount];
+            var stopAtRing = new int[radialCount];
+            var isCulDeSac = new bool[radialCount];
+            var alive = new bool[radialCount];
+            var buffers = new List<RoadSegmentDef>[radialCount];
+
+            for (int k = 0; k < radialCount; k++)
             {
-                bool isCulDeSac = culDeSacMode && IsCulDeSacBlock(radialBlockIndex, culDeSacRatio);
-                int stopAtRing = isCulDeSac
+                buffers[k] = new List<RoadSegmentDef>();
+                int index = chosenIndices[k];
+                // Motif déterministe CulDeSacRatio indexé sur k (position dans chosenIndices,
+                // 0-based) — même numérotation que l'ancien radialBlockIndex, qui s'incrémentait
+                // une fois par entrée de chosenIndices, y compris les sommets dégénérés ci-dessous.
+                isCulDeSac[k] = culDeSacMode && IsCulDeSacBlock(k, culDeSacRatio);
+                stopAtRing[k] = isCulDeSac[k]
                     ? math.max(1, (int)math.round((rings.Count - 1) * math.clamp(culDeSacDepth, 0.5f, 0.9f)))
                     : rings.Count - 1;
 
                 float2 origin = perimeter[index];
-                float2 direction = ComputeRadialDirection(
+                float2 dir = ComputeRadialDirection(
                     origin - perimeter[(index - 1 + n) % n],
                     perimeter[(index + 1) % n] - origin,
                     windingSign);
-                if (math.lengthsq(direction) < Epsilon)
+                current[k] = origin;
+                direction[k] = dir;
+                // Sommet dégénéré (arêtes adjacentes nulles) : pas de rayon plutôt qu'un rayon aberrant.
+                alive[k] = math.lengthsq(dir) >= Epsilon;
+            }
+
+            float maxStepDistance = spacingMeters * MaxRadialStepFactor;
+
+            for (int r = 1; r < rings.Count; r++)
+            {
+                var activeIndices = new List<int>();
+                for (int k = 0; k < radialCount; k++)
                 {
-                    radialBlockIndex++;
-                    continue; // sommet dégénéré (arêtes adjacentes nulles) : pas de rayon plutôt qu'un rayon aberrant
+                    if (alive[k] && stopAtRing[k] >= r) activeIndices.Add(k);
+                }
+                if (activeIndices.Count == 0) continue;
+
+                int capacity = math.max(0, (int)math.floor(RingPerimeter(rings[r]) / MinNodeDistance));
+                List<int> survivors = activeIndices.Count > capacity
+                    ? SelectEvenlySpacedIndices(activeIndices, capacity)
+                    : activeIndices;
+
+                if (survivors.Count < activeIndices.Count)
+                {
+                    var survivorSet = new HashSet<int>(survivors);
+                    foreach (int k in activeIndices)
+                    {
+                        if (!survivorSet.Contains(k)) alive[k] = false;
+                    }
                 }
 
-                float maxStepDistance = spacingMeters * MaxRadialStepFactor;
-                float2 current = origin;
-                for (int r = 1; r <= stopAtRing; r++)
+                // Fusion locale entre rayons survivants SUR CET ANNEAU seulement (jamais globale,
+                // jamais contre les propres sommets de l'anneau — RoundCorners y place des points
+                // légitimement proches) : si deux rayons distincts atterrissent à moins de
+                // MinNodeDistance l'un de l'autre malgré la réduction de capacité ci-dessus (peut
+                // arriver sur un anneau non convexe), le second réutilise le point exact du
+                // premier plutôt qu'un quasi-doublon (même principe "Super nó" que BuildSubSegments
+                // pour la grille classique).
+                var acceptedThisRing = new List<float2>();
+                foreach (int k in survivors)
                 {
-                    (float2 point, int edgeIndex)? hit = RayPolygonIntersection(current, direction, rings[r], maxStepDistance);
+                    (float2 point, int edgeIndex)? hit = RayPolygonIntersection(current[k], direction[k], rings[r], maxStepDistance);
                     float2? candidate = hit?.point;
                     if (candidate == null)
                     {
-                        float2 nearest = NearestPoint(rings[r], current);
-                        if (math.distance(current, nearest) <= maxStepDistance)
+                        float2 nearest = NearestPoint(rings[r], current[k]);
+                        if (math.distance(current[k], nearest) <= maxStepDistance)
                             candidate = nearest;
                     }
                     if (candidate == null)
@@ -1555,17 +1619,28 @@ namespace GridRoadGenerator.Core
                         // mieux vaut arrêter le rayon ici (comme un cul-de-sac naturel) que de
                         // le faire sauter vers un point aberrant, loin, de l'autre côté d'un
                         // périmètre pincé.
-                        break;
+                        alive[k] = false;
+                        continue;
                     }
 
                     float2 next = candidate.Value;
-                    bool isEnd = isCulDeSac && r == stopAtRing;
-                    if (math.distance(current, next) >= MinSegmentLength)
+                    for (int a = 0; a < acceptedThisRing.Count; a++)
                     {
-                        segments.Add(new RoadSegmentDef(new float3(current.x, y, current.y), new float3(next.x, y, next.y),
+                        if (math.distance(next, acceptedThisRing[a]) < MinNodeDistance)
+                        {
+                            next = acceptedThisRing[a];
+                            break;
+                        }
+                    }
+                    acceptedThisRing.Add(next);
+
+                    bool isEnd = isCulDeSac[k] && r == stopAtRing[k];
+                    if (math.distance(current[k], next) >= MinSegmentLength)
+                    {
+                        buffers[k].Add(new RoadSegmentDef(new float3(current[k].x, y, current[k].y), new float3(next.x, y, next.y),
                             isHorizontal: false, isCulDeSacEnd: isEnd, isRadial: true));
                     }
-                    current = next;
+                    current[k] = next;
 
                     // Recalcule la direction pour le PROCHAIN pas à partir de l'arête locale de
                     // l'anneau qu'on vient d'atteindre — jamais gardée fixe depuis le périmètre
@@ -1581,11 +1656,42 @@ namespace GridRoadGenerator.Core
                     {
                         float2 localDirection = LocalInwardNormal(rings[r], hit.Value.edgeIndex, windingSign);
                         if (math.lengthsq(localDirection) > Epsilon)
-                            direction = localDirection;
+                            direction[k] = localDirection;
                     }
                 }
-                radialBlockIndex++;
             }
+
+            for (int k = 0; k < radialCount; k++)
+                segments.AddRange(buffers[k]);
+        }
+
+        /// <summary>Somme des longueurs d'arête d'un anneau fermé (voir EmitRadialConnections).</summary>
+        internal static float RingPerimeter(List<float2> ring)
+        {
+            float total = 0f;
+            int count = ring.Count;
+            for (int i = 0; i < count; i++)
+                total += math.distance(ring[i], ring[(i + 1) % count]);
+            return total;
+        }
+
+        /// <summary>
+        /// Sous-ensemble de keepCount éléments de activeIndices, uniformément espacés (indices
+        /// gardés dans leur ordre d'origine, donc dans l'ordre du périmètre extérieur) — préserve
+        /// la répartition angulaire des rayons survivants plutôt que de garder arbitrairement les
+        /// keepCount premiers. Suppose keepCount &lt;= activeIndices.Count (jamais appelé sinon).
+        /// </summary>
+        internal static List<int> SelectEvenlySpacedIndices(List<int> activeIndices, int keepCount)
+        {
+            var result = new List<int>(keepCount);
+            if (keepCount <= 0) return result;
+            int total = activeIndices.Count;
+            for (int i = 0; i < keepCount; i++)
+            {
+                int pos = (int)((long)i * total / keepCount);
+                result.Add(activeIndices[pos]);
+            }
+            return result;
         }
 
         /// <summary>

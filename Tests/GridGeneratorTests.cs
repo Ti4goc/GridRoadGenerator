@@ -1248,6 +1248,200 @@ namespace GridRoadGenerator.Tests
                 "Des rayons raccourcis en impasse devraient produire moins de segments que des rayons complets.");
         }
 
+        // ------------------------------------------------------------------
+        // Réduction adaptative de capacité des rayons (voir EmitRadialConnections/
+        // RingPerimeter/SelectEvenlySpacedIndices) : bug rapporté en jeu sur un périmètre réel
+        // complexe (zones étroites) — trop de rayons convergeant vers un petit anneau intérieur
+        // atterrissaient à des points quasi mais pas exactement confondus (jamais fusionnés par
+        // le jeu, "Objetos sobrepostos"). Reconstruit ici la MÊME chaîne d'anneaux que
+        // GenerateAdaptiveGrid (via OffsetPolygonInward, exposé en internal pour les tests) pour
+        // vérifier précisément le comportement à l'anneau le plus intérieur.
+        // ------------------------------------------------------------------
+
+        /// <summary>Distance d'un point à la ligne brisée FERMÉE `ring` (plus proche arête).</summary>
+        private static float DistanceToPolylineXZ(float2 point, List<float2> ring)
+        {
+            float best = float.MaxValue;
+            int n = ring.Count;
+            for (int i = 0; i < n; i++)
+            {
+                float2 a = ring[i];
+                float2 b = ring[(i + 1) % n];
+                float2 ab = b - a;
+                float t = math.clamp(math.dot(point - a, ab) / math.max(1e-6f, math.lengthsq(ab)), 0f, 1f);
+                float2 closest = a + t * ab;
+                best = math.min(best, math.distance(point, closest));
+            }
+            return best;
+        }
+
+        /// <summary>Reconstruit la chaîne d'anneaux d'un polygone (même processus que GenerateAdaptiveGrid) pour un espacement donné.</summary>
+        private static List<List<float2>> BuildRingChain(List<float3> nodes, float spacing)
+        {
+            var polygon = nodes.Select(p => new float2(p.x, p.z)).ToList();
+            var rings = new List<List<float2>> { polygon };
+            var current = polygon;
+            for (int i = 0; i < 50; i++)
+            {
+                var next = GridGenerator.OffsetPolygonInward(current, spacing);
+                if (next == null) break;
+                rings.Add(next);
+                current = next;
+            }
+            return rings;
+        }
+
+        /// <summary>
+        /// Cercle densifié à vertexCount sommets : un carré (SquareNodes) n'a que 4 sommets,
+        /// donc au plus 4 origines de rayons possibles quel que soit RadialConnections demandé —
+        /// jamais assez pour mettre la réduction de capacité sous pression réelle (vérifié : les
+        /// tests ci-dessous ne détectaient RIEN avec un carré, y compris capacité et fusion
+        /// locale désactivées à la main). Un périmètre réel courbe (rond-point...) est densifié
+        /// par échantillonnage de courbe (BuildCurveAwarePerimeterPositions, CurveSampleSpacing) —
+        /// reproduit ici plus simplement par un cercle à vertexCount sommets, pour permettre
+        /// jusqu'à vertexCount origines de rayons distinctes.
+        /// </summary>
+        private static List<float3> DensifiedCircle(float radius, int vertexCount)
+        {
+            var points = new List<float3>(vertexCount);
+            for (int i = 0; i < vertexCount; i++)
+            {
+                float angle = i * 2f * math.PI / vertexCount;
+                points.Add(new float3(radius * math.cos(angle), 0f, radius * math.sin(angle)));
+            }
+            return points;
+        }
+
+        [Fact]
+        public void PinchedPerimeter_NoTwoDistinctSegmentEndpointsWithinMinNodeDistanceUnlessBitIdentical()
+        {
+            // Cercle densifié (48 sommets, assez pour les 24 rayons max exposés par le panneau)
+            // qui rétrécit anneau après anneau jusqu'à un tout petit anneau intérieur — beaucoup
+            // plus de rayons demandés que ce petit anneau ne peut en accueillir à MinNodeDistance
+            // les uns des autres. Avant réduction de capacité + fusion locale : des points quasi
+            // mais pas exactement confondus près du centre (jamais fusionnés par le jeu,
+            // "Objetos sobrepostos"). Après : soit fusionnés (même float2, distance ~0), soit à
+            // MinNodeDistance ou plus l'un de l'autre — jamais entre les deux.
+            var circle = DensifiedCircle(50f, 48);
+            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(10f, 24, roundedCorners: false));
+            Assert.Contains(segments, s => s.IsRadial);
+
+            var points = new List<float3>();
+            foreach (var s in segments) { points.Add(s.Start); points.Add(s.End); }
+
+            for (int i = 0; i < points.Count; i++)
+            {
+                for (int j = i + 1; j < points.Count; j++)
+                {
+                    float d = math.distance(points[i].xz, points[j].xz);
+                    Assert.True(d < 0.01f || d >= GridGenerator.MinNodeDistance,
+                        $"Points quasi mais pas exactement confondus (fusion impossible pour le jeu) : {points[i]} vs {points[j]} d={d:F3}");
+                }
+            }
+        }
+
+        [Fact]
+        public void ManyRadialsOnSmallInnerRing_CapacityCapsSurvivingRadialsPerRing()
+        {
+            var circle = DensifiedCircle(50f, 48);
+            float spacing = 10f;
+            int requested = 24; // maximum exposé par le panneau (SET_RADIAL_CONNECTIONS, 0-24)
+
+            var rings = BuildRingChain(circle, spacing);
+            Assert.True(rings.Count > 2, "Ce test suppose plusieurs anneaux pour être significatif.");
+            var innermost = rings[rings.Count - 1];
+            int expectedCapacity = (int)math.floor(GridGenerator.RingPerimeter(innermost) / GridGenerator.MinNodeDistance);
+            Assert.True(expectedCapacity < requested, "Ce test suppose une capacité inférieure à la demande pour être significatif.");
+
+            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(spacing, requested));
+            var landedOnInnermost = segments
+                .Where(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) < 1f)
+                .Select(s => s.End.xz)
+                .Distinct()
+                .ToList();
+
+            Assert.True(landedOnInnermost.Count <= expectedCapacity,
+                $"{landedOnInnermost.Count} rayons distincts atteignent l'anneau le plus intérieur, attendu <= {expectedCapacity} " +
+                $"(périmètre {GridGenerator.RingPerimeter(innermost):F1} m / MinNodeDistance {GridGenerator.MinNodeDistance} m).");
+            Assert.True(landedOnInnermost.Count < requested,
+                $"La réduction de capacité devrait limiter nettement moins que les {requested} rayons demandés.");
+        }
+
+        [Fact]
+        public void CapacityDroppedRadial_EndsOnARealRingVertexNeverADanglingStub()
+        {
+            var circle = DensifiedCircle(50f, 48);
+            float spacing = 10f;
+            int requested = 24;
+
+            var rings = BuildRingChain(circle, spacing);
+            Assert.True(rings.Count > 2, "Ce test suppose plusieurs anneaux pour être significatif.");
+            var innermost = rings[rings.Count - 1];
+
+            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(spacing, requested, culDeSacMode: false));
+            var stoppedShortOfInnermost = segments
+                .Where(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) >= 1f)
+                .ToList();
+
+            Assert.NotEmpty(stoppedShortOfInnermost); // sinon la capacité n'a jamais été atteinte, le scénario ne teste rien
+            foreach (var seg in stoppedShortOfInnermost)
+            {
+                Assert.False(seg.IsCulDeSacEnd,
+                    $"Un rayon arrêté par réduction de capacité ne doit jamais porter IsCulDeSacEnd (poserait un cercle de retournement sur une intersection déjà existante) : {seg.Start} -> {seg.End}");
+                bool onSomeRing = rings.Any(ring => DistanceToPolylineXZ(seg.End.xz, ring) < 1f);
+                Assert.True(onSomeRing, $"Le point d'arrêt {seg.End} devrait être sur un anneau réel, jamais un bout suspendu.");
+            }
+        }
+
+        [Fact]
+        public void ModerateRadialCount_NeverReducedWhenCapacityComfortablyExceedsRequest()
+        {
+            // Espacement généreux (peu d'anneaux, chacun encore large) : la réduction de capacité
+            // ne devrait jamais s'activer — les 4 rayons demandés atteignent tous l'anneau le
+            // plus intérieur, exactement comme avant la réécriture en boucle par anneau.
+            var circle = DensifiedCircle(80f, 48);
+            float spacing = 60f;
+            int requested = 4;
+
+            var rings = BuildRingChain(circle, spacing);
+            Assert.True(rings.Count > 1);
+            var innermost = rings[rings.Count - 1];
+
+            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(spacing, requested));
+            int reachedInnermost = segments
+                .Where(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) < 1f)
+                .Select(s => s.End.xz)
+                .Distinct()
+                .Count();
+
+            Assert.Equal(requested, reachedInnermost);
+        }
+
+        [Fact]
+        public void CulDeSacModeAndCapacityReduction_BothMechanismsWorkTogetherWithoutCrashing()
+        {
+            // Espacement minuscule (forte réduction de capacité) ET CulDeSacMode actif en même
+            // temps : les deux mécanismes doivent continuer à fonctionner ensemble, sans qu'aucun
+            // ne supprime l'autre, et sans produire de géométrie invalide (NaN/Infinity).
+            var circle = DensifiedCircle(50f, 48);
+            float spacing = 10f;
+            int requested = 24;
+
+            var rings = BuildRingChain(circle, spacing);
+            Assert.True(rings.Count > 2, "Ce test suppose plusieurs anneaux pour être significatif.");
+            var innermost = rings[rings.Count - 1];
+
+            var withCulDeSac = GridGenerator.GenerateAdaptiveGrid(circle,
+                AdaptiveParams(spacing, requested, culDeSacMode: true, culDeSacRatio: 50f, culDeSacDepth: 0.6f));
+
+            Assert.Contains(withCulDeSac, s => s.IsCulDeSacEnd);
+            Assert.True(withCulDeSac.Count(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) >= 1f) > 0,
+                "Des rayons devraient toujours être coupés court par la réduction de capacité, même avec CulDeSacMode actif.");
+            Assert.All(withCulDeSac, s =>
+                Assert.True(math.all(math.isfinite(s.Start)) && math.all(math.isfinite(s.End)),
+                    "Aucune géométrie NaN/Infinity même avec les deux mécanismes actifs simultanément."));
+        }
+
         [Fact]
         public void ConcaveLShape_DoesNotProduceDegenerateOrNaNGeometry()
         {
