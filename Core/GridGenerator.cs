@@ -25,14 +25,22 @@ namespace GridRoadGenerator.Core
         /// (impasse/rayon), par exemple pour y appliquer un réseau secondaire différent.
         /// </summary>
         public bool IsRadial;
+        /// <summary>
+        /// Vrai pour un tronçon de la colonne/rangée choisie comme avenue (GridParameters.
+        /// AvenueColumnIndex/AvenueRowIndex) — traversant comme une collectrice normale (jamais
+        /// de cul-de-sac sur une avenue), mais avec un troisième prefab dédié. Inclut aussi les
+        /// segments de la rotonde générée à l'intersection de deux avenues (EmitAvenueRoundabout).
+        /// </summary>
+        public bool IsAvenue;
 
-        public RoadSegmentDef(float3 start, float3 end, bool isHorizontal, bool isCulDeSacEnd = false, bool isRadial = false)
+        public RoadSegmentDef(float3 start, float3 end, bool isHorizontal, bool isCulDeSacEnd = false, bool isRadial = false, bool isAvenue = false)
         {
             Start = start;
             End = end;
             IsHorizontal = isHorizontal;
             IsCulDeSacEnd = isCulDeSacEnd;
             IsRadial = isRadial;
+            IsAvenue = isAvenue;
         }
     }
 
@@ -79,6 +87,19 @@ namespace GridRoadGenerator.Core
         public float CulDeSacRatio;
 
         /// <summary>
+        /// Avenue (grille classique uniquement, voir GenerateGrid/EmitLine) : la colonne
+        /// d'index AvenueColumnIndex (parmi les lignes u effectivement générées, 0-based)
+        /// utilise un troisième prefab dédié au lieu du réseau principal, et traverse tout le
+        /// périmètre comme une collectrice normale (jamais de cul-de-sac sur une avenue). Index
+        /// hors plage = silencieusement sans effet (aucune ligne ne correspond), jamais d'erreur.
+        /// </summary>
+        public bool AvenueColumnEnabled;
+        public int AvenueColumnIndex;
+        /// <summary>Même principe qu'AvenueColumnEnabled/AvenueColumnIndex, pour une rangée (ligne v).</summary>
+        public bool AvenueRowEnabled;
+        public int AvenueRowIndex;
+
+        /// <summary>
         /// Mode Adaptativo (voir GridGenerator.GenerateAdaptiveGrid) : nombre de connexions
         /// radiales reliant les anneaux entre eux (0 = aucune, anneaux isolés).
         /// </summary>
@@ -101,6 +122,10 @@ namespace GridRoadGenerator.Core
             CulDeSacDepth = 0.75f,
             Staggered = true,
             CulDeSacRatio = 100f,
+            AvenueColumnEnabled = false,
+            AvenueColumnIndex = 0,
+            AvenueRowEnabled = false,
+            AvenueRowIndex = 0,
             RadialConnections = 8,
             AdaptiveRoundedCorners = false
         };
@@ -332,10 +357,28 @@ namespace GridRoadGenerator.Core
             var segments = new List<RoadSegmentDef>();
             // Culs-de-sac : EmitLine décide, ligne par ligne, si le mode s'applique via
             // AppliesToAxis(parameters.CulDeSacAxis, axisIsU) — colonnes, rangées, ou les deux.
+            // isAvenueLine : la ligne d'index i correspond-elle à l'avenue choisie sur cet axe —
+            // voir EmitLine (jamais de cul-de-sac sur une avenue, prefab dédié côté ECS).
             for (int i = 0; i < uLines.Count; i++)
-                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters, ref omittedNodeCount);
+            {
+                bool isAvenueLine = parameters.AvenueColumnEnabled && i == parameters.AvenueColumnIndex;
+                EmitLine(segments, uLines[i], uSplits[i], axisIsU: true, origin, uDir, vDir, y, parameters, ref omittedNodeCount, isAvenueLine);
+            }
             for (int i = 0; i < vLines.Count; i++)
-                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters, ref omittedNodeCount);
+            {
+                bool isAvenueLine = parameters.AvenueRowEnabled && i == parameters.AvenueRowIndex;
+                EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters, ref omittedNodeCount, isAvenueLine);
+            }
+
+            // Rotonde à l'intersection de deux avenues (colonne ET rangée activées) : rogne les
+            // 4 bras d'avenue qui touchaient le croisement et ajoute une boucle circulaire à la
+            // place — voir EmitAvenueRoundabout. Sans effet si une seule avenue est activée (une
+            // avenue seule traverse simplement tout le périmètre, comme une collectrice normale).
+            if (parameters.AvenueColumnEnabled && parameters.AvenueRowEnabled)
+            {
+                EmitAvenueRoundabout(segments, uLines, vLines, origin, uDir, vDir, y, parameters);
+            }
+
             return segments;
         }
 
@@ -369,10 +412,11 @@ namespace GridRoadGenerator.Core
         /// </summary>
         private static void EmitLine(List<RoadSegmentDef> segments, GridLine line,
             List<(float t, float3 world)> splits, bool axisIsU, float2 origin, float2 uDir, float2 vDir, float y,
-            GridParameters parameters, ref int omittedNodeCount)
+            GridParameters parameters, ref int omittedNodeCount, bool isAvenueLine = false)
         {
             splits.Sort((a, b) => a.t.CompareTo(b.t));
-            bool culDeSac = parameters.CulDeSacMode && AppliesToAxis(parameters.CulDeSacAxis, axisIsU);
+            // Une avenue est toujours traversante, jamais un cul-de-sac (prefab dédié côté ECS).
+            bool culDeSac = parameters.CulDeSacMode && AppliesToAxis(parameters.CulDeSacAxis, axisIsU) && !isAvenueLine;
             int blockIndex = 0;
 
             foreach (var interval in line.Intervals)
@@ -414,7 +458,7 @@ namespace GridRoadGenerator.Core
 
                     if (!culDeSac)
                     {
-                        segments.Add(new RoadSegmentDef(chain[i].world, chain[i + 1].world, isHorizontal: !axisIsU));
+                        segments.Add(new RoadSegmentDef(chain[i].world, chain[i + 1].world, isHorizontal: !axisIsU, isAvenue: isAvenueLine));
                         continue;
                     }
 
@@ -423,6 +467,100 @@ namespace GridRoadGenerator.Core
                     blockIndex++;
                 }
             }
+        }
+
+        /// <summary>
+        /// Si la colonne ET la rangée avenue sont actives simultanément, ajoute une rotonde
+        /// circulaire à leur croisement : recadre les bras d'avenue qui touchent ce point pour
+        /// qu'ils s'arrêtent au bord du cercle plutôt que de se croiser en son centre, puis émet
+        /// la boucle circulaire elle-même (même motif que EmitRingSegments). Sans effet si le
+        /// croisement tombe hors du polygone à cet endroit (ContainsPosition) — les index
+        /// eux-mêmes sont déjà garantis valides par l'appelant (BuildSubSegments).
+        ///
+        /// La correspondance "ce bout de segment est au croisement" tolère jusqu'à
+        /// MinNodeDistance plutôt qu'une égalité stricte : un croisement de grille peut avoir
+        /// été fusionné (voir la fusion de nœuds proches dans BuildSubSegments) vers un point
+        /// world légèrement différent du centre recalculé ici à partir de u/v.
+        /// </summary>
+        private static void EmitAvenueRoundabout(List<RoadSegmentDef> segments, List<GridLine> uLines,
+            List<GridLine> vLines, float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters)
+        {
+            // Index hors plage (ex. Columns/Rows réduit après avoir choisi un index avenue plus
+            // grand) : silencieusement sans effet, comme AvenueColumnIndex/AvenueRowIndex ailleurs.
+            if (parameters.AvenueColumnIndex < 0 || parameters.AvenueColumnIndex >= uLines.Count) return;
+            if (parameters.AvenueRowIndex < 0 || parameters.AvenueRowIndex >= vLines.Count) return;
+
+            GridLine uLine = uLines[parameters.AvenueColumnIndex];
+            GridLine vLine = vLines[parameters.AvenueRowIndex];
+            float u = uLine.Position;
+            float v = vLine.Position;
+            if (!ContainsPosition(uLine.Intervals, v) || !ContainsPosition(vLine.Intervals, u))
+                return;
+
+            float3 center = ToWorld(origin, uDir, vDir, u, v, y);
+            float radius = math.max(MinRoundaboutRadius, math.min(parameters.SpacingMeters * 0.25f, 25f));
+
+            for (int i = segments.Count - 1; i >= 0; i--)
+            {
+                var seg = segments[i];
+                if (!seg.IsAvenue) continue;
+
+                bool startAtCenter = math.distance(seg.Start.xz, center.xz) < MinNodeDistance;
+                bool endAtCenter = math.distance(seg.End.xz, center.xz) < MinNodeDistance;
+                if (!startAtCenter && !endAtCenter) continue;
+
+                float3 anchor = startAtCenter ? seg.End : seg.Start;
+                float2 dir = math.normalizesafe(anchor.xz - center.xz);
+                float3 trimmed = new float3(center.x + dir.x * radius, center.y, center.z + dir.y * radius);
+
+                if (math.distance(trimmed.xz, anchor.xz) < MinSegmentLength)
+                {
+                    segments.RemoveAt(i); // bras d'avenue entièrement avalé par la rotonde
+                    continue;
+                }
+
+                segments[i] = startAtCenter
+                    ? new RoadSegmentDef(trimmed, seg.End, seg.IsHorizontal, seg.IsCulDeSacEnd, seg.IsRadial, seg.IsAvenue)
+                    : new RoadSegmentDef(seg.Start, trimmed, seg.IsHorizontal, seg.IsCulDeSacEnd, seg.IsRadial, seg.IsAvenue);
+            }
+
+            int facets = RoundaboutFacetCount(radius);
+            for (int i = 0; i < facets; i++)
+            {
+                float angleA = i * 2f * math.PI / facets;
+                float angleB = (i + 1) * 2f * math.PI / facets;
+                var a = new float3(center.x + math.cos(angleA) * radius, y, center.z + math.sin(angleA) * radius);
+                var b = new float3(center.x + math.cos(angleB) * radius, y, center.z + math.sin(angleB) * radius);
+                segments.Add(new RoadSegmentDef(a, b, isHorizontal: false, isAvenue: true));
+            }
+        }
+
+        /// <summary>
+        /// Rayon plancher de la rotonde : garantit que même le nombre de facettes minimal
+        /// (RoundaboutMinFacets, un triangle) produit des cordes d'au moins MinSegmentLength —
+        /// sinon RoundaboutFacetCount n'aurait aucun nombre de facettes valide à proposer, et la
+        /// boucle générée violerait la même contrainte "segment trop court" que le reste du
+        /// générateur. Dérivé géométriquement (corde = 2 * rayon * sin(pi / facettes)), pas une
+        /// valeur choisie à l'oeil.
+        /// </summary>
+        private static readonly float MinRoundaboutRadius =
+            MinSegmentLength / (2f * math.sin(math.PI / RoundaboutMinFacets)) + 0.1f;
+
+        private const int RoundaboutMinFacets = 3;
+        private const int RoundaboutMaxFacets = 16;
+
+        /// <summary>
+        /// Nombre de facettes de la rotonde pour un rayon donné : vise des cordes d'environ
+        /// 1.25 * MinSegmentLength (marge de sécurité au-delà du plancher), borné entre
+        /// RoundaboutMinFacets (petit rayon) et RoundaboutMaxFacets (rayon confortable, rond
+        /// visuellement fluide). MinRoundaboutRadius garantit que ce nombre de facettes reste
+        /// toujours géométriquement valide (corde &gt;= MinSegmentLength).
+        /// </summary>
+        private static int RoundaboutFacetCount(float radius)
+        {
+            float circumference = 2f * math.PI * radius;
+            int facets = (int)math.floor(circumference / (MinSegmentLength * 1.25f));
+            return math.clamp(facets, RoundaboutMinFacets, RoundaboutMaxFacets);
         }
 
         /// <summary>

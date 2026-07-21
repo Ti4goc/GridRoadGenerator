@@ -1405,4 +1405,139 @@ namespace GridRoadGenerator.Tests
             Assert.Empty(segments);
         }
     }
+
+    // ------------------------------------------------------------------
+    // Avenue (troisième niveau : colonne/rangée choisie librement, jamais de
+    // cul-de-sac, rotonde optionnelle au croisement des deux) — carré 300×300,
+    // grille 5×5 fixe (spacing 60), axis-aligned pour des coordonnées simples.
+    // ------------------------------------------------------------------
+    public class GridGeneratorAvenueTests
+    {
+        private static readonly List<float3> SquareNodes = new List<float3>
+        {
+            new float3(0f, 0f, 0f),
+            new float3(300f, 0f, 0f),
+            new float3(300f, 0f, 300f),
+            new float3(0f, 0f, 300f),
+        };
+
+        private static GridParameters BaseParameters() => new GridParameters
+        {
+            Mode = SpacingMode.FixedSpacing,
+            Rows = 5,
+            Columns = 5,
+            SpacingMeters = 60f,
+        };
+
+        [Fact]
+        public void AvenueColumnEnabled_MarksOnlyThatColumnsSegmentsAsAvenue()
+        {
+            var parameters = BaseParameters();
+            parameters.AvenueColumnEnabled = true;
+            // DistributeFixed(0, 300, 60) → lignes u = [60, 120, 180, 240] ; index 2 = u=180.
+            parameters.AvenueColumnIndex = 2;
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+
+            var avenueSegments = segments.Where(s => s.IsAvenue).ToList();
+            Assert.NotEmpty(avenueSegments);
+            foreach (var seg in avenueSegments)
+            {
+                // Colonne = ligne u constante → segments verticaux (X constant, non horizontaux).
+                Assert.False(seg.IsHorizontal);
+                Assert.Equal(180f, seg.Start.x, 1);
+                Assert.Equal(180f, seg.End.x, 1);
+            }
+            // Aucun autre segment ne doit être marqué avenue.
+            Assert.All(segments.Except(avenueSegments), s => Assert.False(s.IsAvenue));
+        }
+
+        [Fact]
+        public void AvenueLine_NeverBecomesCulDeSac_EvenWhenCulDeSacModeCoversItsAxis()
+        {
+            var parameters = BaseParameters();
+            parameters.AvenueColumnEnabled = true;
+            parameters.AvenueColumnIndex = 2;
+            parameters.CulDeSacMode = true;
+            parameters.CulDeSacAxis = CulDeSacAxis.Columns;
+            parameters.CulDeSacRatio = 100f; // toutes les colonnes seraient des culs-de-sac sans l'exception avenue
+            parameters.Staggered = false;
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+
+            var avenueSegments = segments.Where(s => s.IsAvenue).ToList();
+            Assert.NotEmpty(avenueSegments);
+            Assert.DoesNotContain(avenueSegments, s => s.IsCulDeSacEnd);
+
+            // Les autres colonnes, elles, sont bien devenues des culs-de-sac (le motif marche
+            // toujours ailleurs — seule la colonne avenue y échappe).
+            Assert.Contains(segments, s => s.IsCulDeSacEnd);
+        }
+
+        [Fact]
+        public void OutOfRangeAvenueIndex_IsSilentlyANoOp()
+        {
+            var parameters = BaseParameters();
+            parameters.AvenueColumnEnabled = true;
+            parameters.AvenueColumnIndex = 999;
+            parameters.AvenueRowEnabled = true;
+            parameters.AvenueRowIndex = -1;
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+
+            Assert.DoesNotContain(segments, s => s.IsAvenue);
+            GridGeneratorTests.AssertCommonInvariants(segments);
+        }
+
+        [Fact]
+        public void BothAvenuesEnabled_AddsRoundaboutLoopAtTheirCrossing_AndTrimsTheFourArms()
+        {
+            var parameters = BaseParameters();
+            parameters.AvenueColumnEnabled = true;
+            parameters.AvenueColumnIndex = 2; // u = 180
+            parameters.AvenueRowEnabled = true;
+            parameters.AvenueRowIndex = 2; // v = 180
+            var center = new float2(180f, 180f);
+            float expectedRadius = math.min(parameters.SpacingMeters * 0.25f, 25f);
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            var avenueSegments = segments.Where(s => s.IsAvenue).ToList();
+
+            // Aucun bras d'avenue ne doit plus passer exactement par le centre du croisement :
+            // tous les points d'avenue sont soit sur le cercle (rotonde), soit à distance du
+            // centre supérieure ou égale au rayon (bras recadrés, pas de croisement en X).
+            foreach (var seg in avenueSegments)
+            {
+                Assert.True(math.distance(seg.Start.xz, center) >= expectedRadius - 0.5f);
+                Assert.True(math.distance(seg.End.xz, center) >= expectedRadius - 0.5f);
+            }
+
+            // La boucle circulaire elle-même : au moins un point d'avenue exactement sur le
+            // cercle (les extrémités des facettes de la rotonde), à distance ~radius du centre.
+            Assert.Contains(avenueSegments, s => math.abs(math.distance(s.Start.xz, center) - expectedRadius) < 0.5f);
+
+            GridGeneratorTests.AssertCommonInvariants(segments);
+        }
+
+        [Fact]
+        public void OnlyOneAvenueAxisEnabled_NeverAddsARoundabout()
+        {
+            var parameters = BaseParameters();
+            parameters.AvenueColumnEnabled = true;
+            parameters.AvenueColumnIndex = 2;
+            // AvenueRowEnabled reste false : un seul axe, pas de croisement à traiter.
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            var avenueSegments = segments.Where(s => s.IsAvenue).ToList();
+
+            // La colonne avenue traverse toujours la grille normalement (sous-segmentée à
+            // chaque croisement avec une ligne v, avenue ou non) — mais sans rotonde
+            // (RoundaboutFacets = 16 segments si elle était ajoutée) : bien moins de segments
+            // avenue qu'une boucle circulaire à elle seule n'en produirait.
+            Assert.NotEmpty(avenueSegments);
+            Assert.True(avenueSegments.Count < 16,
+                $"Pas de rotonde attendue (une seule avenue activée) : {avenueSegments.Count} segments avenue, la boucle seule en ajouterait 16.");
+            GridGeneratorTests.AssertCommonInvariants(segments);
+        }
+    }
 }
