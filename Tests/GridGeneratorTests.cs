@@ -1156,6 +1156,45 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
+        public void OffsetVertex_NearOneEightyDegreeSpike_ClampsToStableBisectorNotWildDirection()
+        {
+            // Bug rapporté en jeu (grande boucle en dents de scie hors du périmètre choisi,
+            // repérée via un diagnostic en jeu : des segments d'ANNEAU, IsRadial=false, à des
+            // distances de 550-850m — proches de MiterLimit(4) x espacement(115) = 460m, le
+            // plafond de recadrage). Root cause mathématique : à un sommet "presque demi-tour"
+            // (dirOut ≈ -dirIn, angle proche de 180°) mais dont le cross-product est juste AU-
+            // DESSUS du seuil "quasi-parallèle" (1e-4) — donc dans la branche intersection, pas
+            // la branche moyenne sûre — le paramètre t de l'intersection de droites explose en
+            // ~1/φ (φ = écart angulaire à 180° exact), une vraie singularité mathématique, pas
+            // juste "un peu trop loin". Avant la correction, le recadrage (clamp) préservait la
+            // direction de ce point de miter déjà explosé — une direction essentiellement
+            // arbitraire, dictée par le bruit numérique de φ. Après : le recadrage retombe
+            // toujours sur la moyenne des deux normales (stable, jamais issue d'une division par
+            // un cross quasi nul), peu importe pourquoi la limite a été dépassée.
+            float phi = 0.0002f; // écart angulaire à 180° exact (rad) — juste au-dessus du seuil 1e-4 en cross
+            float2 prev = new float2(0f, 0f);
+            float2 curr = new float2(100f, 0f);
+            float2 dirOut = new float2(-math.cos(phi), math.sin(phi)); // ~180° moins phi
+            float2 next = curr + 100f * dirOut;
+            float distance = 115f;
+
+            float2 result = GridGenerator.OffsetVertex(prev, curr, next, distance, windingSign: 1f, out bool clamped);
+
+            Assert.True(clamped, "Ce sommet quasi-demi-tour doit dépasser la limite de miter.");
+            Assert.True(math.all(math.isfinite(result)), "Le point recadré doit rester fini (pas de NaN/Infinity).");
+
+            float maxDist = 4f * distance; // MiterLimit x distance
+            Assert.Equal(maxDist, math.distance(result, curr), 1);
+
+            // normalIn pour dirIn=(1,0), windingSign=1 : rotation (-y,x) => (0,1). La bissectrice
+            // stable attendue est donc (curr + (0,1) * maxDist) — jamais un point dérivé de la
+            // direction (numériquement instable) du miter brut.
+            float2 expected = curr + new float2(0f, 1f) * maxDist;
+            Assert.True(math.distance(result, expected) < 1f,
+                $"Direction de recadrage instable : attendu ~{expected}, obtenu {result}.");
+        }
+
+        [Fact]
         public void RoundedCorners_ProducesMorePointsThanMiterAtEachSquareCorner()
         {
             // Coins arrondis : un arc de plusieurs points remplace chaque pointe nette, donc le

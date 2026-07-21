@@ -1329,7 +1329,7 @@ namespace GridRoadGenerator.Core
         /// vérification "arête retournée", un vrai rebroussement — ex. cuspide d'une courbe très
         /// serrée — étant justement le cas que le clamp existe pour absorber du mieux possible).
         /// </summary>
-        private static float2 OffsetVertex(float2 prev, float2 curr, float2 next, float distance, float windingSign, out bool clamped)
+        internal static float2 OffsetVertex(float2 prev, float2 curr, float2 next, float distance, float windingSign, out bool clamped)
         {
             clamped = false;
             float2 dirIn = curr - prev;
@@ -1370,10 +1370,33 @@ namespace GridRoadGenerator.Core
             float maxDist = MiterLimit * distance;
             if (miterDist > maxDist)
             {
-                // Clamp le long de la même direction plutôt que d'ajouter un point de bevel :
-                // garde un seul sommet de sortie par sommet d'entrée (voir OffsetPolygonInward).
-                float2 dir = miterDist > Epsilon ? (miter - curr) / miterDist : (normalIn + normalOut);
-                if (math.lengthsq(dir) > Epsilon) dir = math.normalize(dir);
+                // Bug corrigé : recadrer le long de la direction DU POINT DE MITER lui-même
+                // pouvait préserver une direction numériquement instable — sur un périmètre réel
+                // richement échantillonné (densification des arêtes courbes, voir SampleCurve),
+                // un sommet quasiment aligné avec cross juste AU-DESSUS du seuil 1e-4 (donc dans
+                // la branche intersection, pas la branche "quasi parallèle" ci-dessus) fait
+                // diviser par un cross minuscule mais non nul : t explose, le point de miter part
+                // dans une direction quasi arbitraire (pas juste trop loin, carrément dans le
+                // mauvais sens) — observé en jeu comme une grande boucle en dents de scie hors du
+                // périmètre choisi, plusieurs sommets consécutifs touchés d'affilée sur une
+                // section richement échantillonnée. Repli sur la MÊME moyenne de normales que la
+                // branche quasi-parallèle ci-dessus (toujours stable, jamais issue d'une division
+                // par un cross proche de zéro) plutôt que sur la direction du miter brut, que la
+                // limite soit dépassée pour une vraie pointe aiguë OU pour une instabilité
+                // numérique : dans les deux cas, un sommet recadré doit rester géométriquement
+                // raisonnable, jamais hérité d'un calcul qui a déjà dérapé.
+                float2 dir = normalIn + normalOut;
+                if (math.lengthsq(dir) > Epsilon)
+                {
+                    dir = math.normalize(dir);
+                }
+                else
+                {
+                    // normalIn ≈ -normalOut (repli ultime, quasi-demi-tour à ~180°) : aucune
+                    // bissectrice stable n'existe, la normale d'une seule arête reste le choix le
+                    // moins arbitraire.
+                    dir = normalIn;
+                }
                 miter = curr + dir * maxDist;
                 clamped = true;
             }
