@@ -32,6 +32,16 @@ namespace GridRoadGenerator.Core
         /// segments de la rotonde générée à l'intersection de deux avenues (EmitAvenueRoundabout).
         /// </summary>
         public bool IsAvenue;
+        /// <summary>
+        /// Vrai pour une facette de la boucle circulaire de la rotonde (EmitAvenueRoundabout) :
+        /// l'appelant ECS construit une courbe (NetUtils.FitCurve, tangentes StartTangent/
+        /// EndTangent) plutôt qu'une ligne droite (NetUtils.StraightCurve). Sans effet sur les
+        /// bras d'avenue eux-mêmes, seulement la boucle. StartTangent/EndTangent n'ont de sens
+        /// que si IsArc est vrai.
+        /// </summary>
+        public bool IsArc;
+        public float3 StartTangent;
+        public float3 EndTangent;
 
         public RoadSegmentDef(float3 start, float3 end, bool isHorizontal, bool isCulDeSacEnd = false, bool isRadial = false, bool isAvenue = false)
         {
@@ -41,6 +51,19 @@ namespace GridRoadGenerator.Core
             IsCulDeSacEnd = isCulDeSacEnd;
             IsRadial = isRadial;
             IsAvenue = isAvenue;
+            IsArc = false;
+            StartTangent = default;
+            EndTangent = default;
+        }
+
+        /// <summary>Facette d'arc de rotonde (voir IsArc) : tangentes unitaires, toutes deux orientées dans le sens de parcours.</summary>
+        public static RoadSegmentDef Arc(float3 start, float3 end, float3 startTangent, float3 endTangent)
+        {
+            var def = new RoadSegmentDef(start, end, isHorizontal: false, isAvenue: true);
+            def.IsArc = true;
+            def.StartTangent = startTangent;
+            def.EndTangent = endTangent;
+            return def;
         }
     }
 
@@ -524,6 +547,13 @@ namespace GridRoadGenerator.Core
                     : new RoadSegmentDef(seg.Start, trimmed, seg.IsHorizontal, seg.IsCulDeSacEnd, seg.IsRadial, seg.IsAvenue);
             }
 
+            // Chaque facette est une VRAIE courbe (NetUtils.FitCurve côté ECS, tangentes ci-
+            // dessous), pas une corde droite : un polygone à peu de côtés (RoundaboutFacetCount
+            // reste faible sur un petit rayon, contrainte MinSegmentLength) donnait un rond très
+            // anguleux ("hexagone" visible en jeu) même si géométriquement correct. La tangente
+            // au cercle en un point d'angle θ (paramétrage centre + rayon·(cosθ, 0, sinθ)) est sa
+            // dérivée par rapport à θ, normalisée : (-sinθ, 0, cosθ), dans le sens de parcours
+            // (θ croissant, celui utilisé ci-dessous).
             int facets = RoundaboutFacetCount(radius);
             for (int i = 0; i < facets; i++)
             {
@@ -531,7 +561,9 @@ namespace GridRoadGenerator.Core
                 float angleB = (i + 1) * 2f * math.PI / facets;
                 var a = new float3(center.x + math.cos(angleA) * radius, y, center.z + math.sin(angleA) * radius);
                 var b = new float3(center.x + math.cos(angleB) * radius, y, center.z + math.sin(angleB) * radius);
-                segments.Add(new RoadSegmentDef(a, b, isHorizontal: false, isAvenue: true));
+                var tangentA = new float3(-math.sin(angleA), 0f, math.cos(angleA));
+                var tangentB = new float3(-math.sin(angleB), 0f, math.cos(angleB));
+                segments.Add(RoadSegmentDef.Arc(a, b, tangentA, tangentB));
             }
         }
 

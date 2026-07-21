@@ -805,7 +805,15 @@ namespace GridRoadGenerator.Systems
                 }
 
                 NetCourse course = default;
-                course.m_Curve = NetUtils.StraightCurve(start.m_Position, end.m_Position);
+                // Facette de rotonde (voir RoadSegmentDef.IsArc/EmitAvenueRoundabout) : vraie
+                // courbe ajustée sur les tangentes au cercle, pas une corde droite — un rond
+                // construit à partir de segments droits reste visiblement anguleux en jeu même
+                // avec beaucoup de facettes (contrainte MinSegmentLength limite leur nombre sur
+                // un petit rayon). Tout le reste (bras d'avenue, grille classique, culs-de-sac,
+                // rayons de l'Adaptativo) garde la ligne droite habituelle.
+                course.m_Curve = segment.IsArc
+                    ? NetUtils.FitCurve(start.m_Position, segment.StartTangent, segment.EndTangent, end.m_Position)
+                    : NetUtils.StraightCurve(start.m_Position, end.m_Position);
                 course.m_Length = MathUtils.Length(course.m_Curve);
                 course.m_FixedIndex = -1;
 

@@ -1520,6 +1520,41 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
+        public void RoundaboutLoop_IsBuiltFromArcsWithUnitTangentsPerpendicularToRadius()
+        {
+            var parameters = BaseParameters();
+            parameters.AvenueColumnEnabled = true;
+            parameters.AvenueColumnIndex = 2; // u = 180
+            parameters.AvenueRowEnabled = true;
+            parameters.AvenueRowIndex = 2; // v = 180
+            var center = new float2(180f, 180f);
+            float expectedRadius = math.min(parameters.SpacingMeters * 0.25f, 25f);
+
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            var loopFacets = segments
+                .Where(s => s.IsArc
+                    && math.abs(math.distance(s.Start.xz, center) - expectedRadius) < 0.5f
+                    && math.abs(math.distance(s.End.xz, center) - expectedRadius) < 0.5f)
+                .ToList();
+
+            Assert.NotEmpty(loopFacets);
+            foreach (var facet in loopFacets)
+            {
+                // Tangente unitaire...
+                Assert.Equal(1f, math.length(facet.StartTangent), 2);
+                Assert.Equal(1f, math.length(facet.EndTangent), 2);
+                // ...et perpendiculaire au rayon (produit scalaire nul) à chaque bout.
+                float2 radiusAtStart = facet.Start.xz - center;
+                float2 radiusAtEnd = facet.End.xz - center;
+                Assert.Equal(0f, math.dot(math.normalize(radiusAtStart), facet.StartTangent.xz), 2);
+                Assert.Equal(0f, math.dot(math.normalize(radiusAtEnd), facet.EndTangent.xz), 2);
+            }
+
+            // Les bras d'avenue et le reste de la grille, eux, restent des lignes droites.
+            Assert.Contains(segments, s => !s.IsArc);
+        }
+
+        [Fact]
         public void OnlyOneAvenueAxisEnabled_NeverAddsARoundabout()
         {
             var parameters = BaseParameters();
