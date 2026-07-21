@@ -797,6 +797,7 @@ namespace GridRoadGenerator.Systems
                 Mod.Log.Warn($"Génération de grille impossible : {e.Message}");
                 return 0;
             }
+
             if (segments.Count == 0)
             {
                 return 0;

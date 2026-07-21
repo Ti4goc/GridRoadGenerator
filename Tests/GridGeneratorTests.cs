@@ -922,16 +922,11 @@ namespace GridRoadGenerator.Tests
             new float3(0f, 0f, 300f),
         };
 
-        private static GridParameters AdaptiveParams(float spacingMeters, int radialConnections,
-            bool roundedCorners = false, bool culDeSacMode = false, float culDeSacRatio = 100f, float culDeSacDepth = 0.75f) => new GridParameters
-            {
-                SpacingMeters = spacingMeters,
-                RadialConnections = radialConnections,
-                AdaptiveRoundedCorners = roundedCorners,
-                CulDeSacMode = culDeSacMode,
-                CulDeSacRatio = culDeSacRatio,
-                CulDeSacDepth = culDeSacDepth,
-            };
+        private static GridParameters AdaptiveParams(float spacingMeters, int radialConnections) => new GridParameters
+        {
+            SpacingMeters = spacingMeters,
+            RadialConnections = radialConnections,
+        };
 
         [Fact]
         public void SmallFullRoundaboutPerimeter_SucceedsAtReasonableSpacing()
@@ -1194,99 +1189,6 @@ namespace GridRoadGenerator.Tests
                 $"Direction de recadrage instable : attendu ~{expected}, obtenu {result}.");
         }
 
-        [Fact]
-        public void RoundedCorners_ProducesMorePointsThanMiterAtEachSquareCorner()
-        {
-            // Coins arrondis : un arc de plusieurs points remplace chaque pointe nette, donc le
-            // premier anneau doit avoir sensiblement plus de sommets qu'en miter (par défaut) —
-            // et chacun de ses points doit rester à ~distance de son sommet d'origine le plus
-            // proche (rayon de l'arc), jamais au-delà (voir RoundCorners).
-            var miter = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0, roundedCorners: false));
-            var rounded = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0, roundedCorners: true));
-
-            Assert.NotEmpty(miter);
-            Assert.NotEmpty(rounded);
-            Assert.True(rounded.Count > miter.Count,
-                $"Les coins arrondis devraient ajouter des segments par rapport au miter (miter={miter.Count}, rounded={rounded.Count}).");
-
-            // Toujours à l'intérieur du périmètre d'origine (un arrondi ne doit jamais faire
-            // sortir un point, comme pour le miter — voir Square_NeverProducesPointsOutsideTheOriginalPerimeter).
-            Assert.All(rounded, s =>
-            {
-                Assert.InRange(s.Start.x, -0.5f, 300.5f);
-                Assert.InRange(s.Start.z, -0.5f, 300.5f);
-                Assert.InRange(s.End.x, -0.5f, 300.5f);
-                Assert.InRange(s.End.z, -0.5f, 300.5f);
-            });
-        }
-
-        [Fact]
-        public void ConcaveLShape_RoundedCorners_LeavesTheConcaveVertexUntouched()
-        {
-            // Bug corrigé : RoundCorners appliquait l'arc de round-join même à un coin
-            // concave/réflexe (le coin intérieur du L, (150,150)) — géométriquement invalide
-            // pour l'offsetting de polygone (le round join ne s'applique qu'aux coins
-            // convexes), ce qui produisait une boucle vers l'intérieur de la forme (artefact en
-            // dents de scie), jamais détectée car HasSelfIntersection valide la version miter,
-            // avant l'arrondi. Le point le plus proche du coin concave doit donc rester
-            // EXACTEMENT le même point miter, avec ou sans l'option activée.
-            var lShape = new List<float3>
-            {
-                new float3(0f, 0f, 0f),
-                new float3(300f, 0f, 0f),
-                new float3(300f, 0f, 150f),
-                new float3(150f, 0f, 150f),
-                new float3(150f, 0f, 300f),
-                new float3(0f, 0f, 300f),
-            };
-
-            var miter = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(30f, 0, roundedCorners: false));
-            var rounded = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(30f, 0, roundedCorners: true));
-
-            Assert.NotEmpty(miter);
-            Assert.NotEmpty(rounded);
-            // Les coins convexes (5 des 6 sommets du L) doivent quand même gagner des points.
-            Assert.True(rounded.Count > miter.Count,
-                $"Les coins convexes du L devraient gagner des points avec l'arrondi (miter={miter.Count}, rounded={rounded.Count}).");
-
-            float2 concaveVertex = new float2(150f, 150f);
-            float2 nearestMiter = NearestVertex(miter, concaveVertex);
-            float2 nearestRounded = NearestVertex(rounded, concaveVertex);
-            Assert.True(math.distance(nearestMiter, nearestRounded) < 0.1f,
-                $"Le point le plus proche du coin concave devrait être identique avec/sans arrondi (miter={nearestMiter}, rounded={nearestRounded}).");
-        }
-
-        private static float2 NearestVertex(List<RoadSegmentDef> segments, float2 target)
-        {
-            float2 best = default;
-            float bestDist = float.MaxValue;
-            foreach (RoadSegmentDef s in segments)
-            {
-                float d1 = math.distance(s.Start.xz, target);
-                if (d1 < bestDist) { bestDist = d1; best = s.Start.xz; }
-                float d2 = math.distance(s.End.xz, target);
-                if (d2 < bestDist) { bestDist = d2; best = s.End.xz; }
-            }
-            return best;
-        }
-
-        [Fact]
-        public void CulDeSacMode_SomeRadialsStopBeforeTheInnermostRingAsImpasses()
-        {
-            // CulDeSacMode réutilisé pour le mode Adaptativo (voir EmitRadialConnections) : à
-            // ratio 50 %, environ un rayon sur deux devrait s'arrêter avant le dernier anneau et
-            // porter IsCulDeSacEnd — jamais les anneaux eux-mêmes (toujours traversants).
-            var withCulDeSac = GridGenerator.GenerateAdaptiveGrid(SquareNodes,
-                AdaptiveParams(40f, 8, culDeSacMode: true, culDeSacRatio: 50f, culDeSacDepth: 0.75f));
-
-            Assert.Contains(withCulDeSac, s => s.IsCulDeSacEnd);
-            Assert.All(withCulDeSac.Where(s => s.IsCulDeSacEnd), s => Assert.True(s.IsRadial, "Seuls des rayons devraient porter IsCulDeSacEnd en mode Adaptativo."));
-
-            var withoutCulDeSac = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 8, culDeSacMode: false));
-            Assert.True(withCulDeSac.Count < withoutCulDeSac.Count,
-                "Des rayons raccourcis en impasse devraient produire moins de segments que des rayons complets.");
-        }
-
         // ------------------------------------------------------------------
         // Réduction adaptative de capacité des rayons (voir EmitRadialConnections/
         // RingPerimeter/SelectEvenlySpacedIndices) : bug rapporté en jeu sur un périmètre réel
@@ -1362,7 +1264,7 @@ namespace GridRoadGenerator.Tests
             // "Objetos sobrepostos"). Après : soit fusionnés (même float2, distance ~0), soit à
             // MinNodeDistance ou plus l'un de l'autre — jamais entre les deux.
             var circle = DensifiedCircle(50f, 48);
-            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(10f, 24, roundedCorners: false));
+            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(10f, 24));
             Assert.Contains(segments, s => s.IsRadial);
 
             var points = new List<float3>();
@@ -1417,7 +1319,7 @@ namespace GridRoadGenerator.Tests
             Assert.True(rings.Count > 2, "Ce test suppose plusieurs anneaux pour être significatif.");
             var innermost = rings[rings.Count - 1];
 
-            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(spacing, requested, culDeSacMode: false));
+            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(spacing, requested));
             var stoppedShortOfInnermost = segments
                 .Where(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) >= 1f)
                 .ToList();
@@ -1454,31 +1356,6 @@ namespace GridRoadGenerator.Tests
                 .Count();
 
             Assert.Equal(requested, reachedInnermost);
-        }
-
-        [Fact]
-        public void CulDeSacModeAndCapacityReduction_BothMechanismsWorkTogetherWithoutCrashing()
-        {
-            // Espacement minuscule (forte réduction de capacité) ET CulDeSacMode actif en même
-            // temps : les deux mécanismes doivent continuer à fonctionner ensemble, sans qu'aucun
-            // ne supprime l'autre, et sans produire de géométrie invalide (NaN/Infinity).
-            var circle = DensifiedCircle(50f, 48);
-            float spacing = 10f;
-            int requested = 24;
-
-            var rings = BuildRingChain(circle, spacing);
-            Assert.True(rings.Count > 2, "Ce test suppose plusieurs anneaux pour être significatif.");
-            var innermost = rings[rings.Count - 1];
-
-            var withCulDeSac = GridGenerator.GenerateAdaptiveGrid(circle,
-                AdaptiveParams(spacing, requested, culDeSacMode: true, culDeSacRatio: 50f, culDeSacDepth: 0.6f));
-
-            Assert.Contains(withCulDeSac, s => s.IsCulDeSacEnd);
-            Assert.True(withCulDeSac.Count(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) >= 1f) > 0,
-                "Des rayons devraient toujours être coupés court par la réduction de capacité, même avec CulDeSacMode actif.");
-            Assert.All(withCulDeSac, s =>
-                Assert.True(math.all(math.isfinite(s.Start)) && math.all(math.isfinite(s.End)),
-                    "Aucune géométrie NaN/Infinity même avec les deux mécanismes actifs simultanément."));
         }
 
         [Theory]

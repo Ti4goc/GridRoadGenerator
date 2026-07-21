@@ -49,7 +49,6 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<int> _culDeSacCapStyleBinding;
         private ValueBinding<bool> _adaptiveModeBinding;
         private ValueBinding<int> _radialConnectionsBinding;
-        private ValueBinding<bool> _adaptiveRoundedCornersBinding;
         private ValueBinding<int> _availableViewsBinding;
         private ValueBinding<int> _selectedViewsBinding;
         private ValueBinding<string> _roadPrefabNameBinding;
@@ -127,7 +126,6 @@ namespace GridRoadGenerator.Systems
             AddBinding(_avenueRowIndexBinding = new ValueBinding<int>(BindingGroup, "AVENUE_ROW_INDEX", _settings.AvenueRowIndex));
             AddBinding(_adaptiveModeBinding = new ValueBinding<bool>(BindingGroup, "ADAPTIVE_MODE", _settings.AdaptiveMode));
             AddBinding(_radialConnectionsBinding = new ValueBinding<int>(BindingGroup, "RADIAL_CONNECTIONS", _settings.RadialConnections));
-            AddBinding(_adaptiveRoundedCornersBinding = new ValueBinding<bool>(BindingGroup, "ADAPTIVE_ROUNDED_CORNERS", _settings.AdaptiveRoundedCorners));
 
             // Vue (Underground/ZoneGrid/InvisibleNetworks), pattern repris de CS2-NetworkTools.
             // AVAILABLE_VIEWS est fixe (un seul outil, qui les supporte toutes) — exposé quand
@@ -274,11 +272,6 @@ namespace GridRoadGenerator.Systems
                 _settings.RadialConnections = math.clamp(value, 0, 24);
                 _settings.ApplyAndSave();
             }));
-            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_ADAPTIVE_ROUNDED_CORNERS", value =>
-            {
-                _settings.AdaptiveRoundedCorners = value;
-                _settings.ApplyAndSave();
-            }));
             AddBinding(new TriggerBinding<int>(BindingGroup, "SET_SELECTED_VIEWS", value =>
             {
                 var views = (ViewOption)value & ViewOption.All;
@@ -320,7 +313,6 @@ namespace GridRoadGenerator.Systems
             _avenueRowIndexBinding.Update(_settings.AvenueRowIndex);
             _adaptiveModeBinding.Update(_settings.AdaptiveMode);
             _radialConnectionsBinding.Update(_settings.RadialConnections);
-            _adaptiveRoundedCornersBinding.Update(_settings.AdaptiveRoundedCorners);
             _selectedViewsBinding.Update((int)_settings.SelectedViews);
 
             if (!_anarchyAvailable && IsAnarchyLoaded())

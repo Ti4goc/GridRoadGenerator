@@ -110,24 +110,20 @@ namespace GridRoadGenerator.Settings
         /// CulDeSac* ci-dessus, tous ignorés quand actif), génère des anneaux concentriques par
         /// offset successif du polygone du périmètre vers l'intérieur — voir
         /// GridGenerator.GenerateAdaptiveGrid. Réutilise SpacingMeters comme distance entre
-        /// deux anneaux.
+        /// deux anneaux. Jonction en pointe (miter) à chaque coin, aucune option d'arrondi
+        /// séparée : un périmètre déjà courbe (avenue existante) produit des anneaux
+        /// visuellement arrondis sans traitement de coin spécial.
         /// </summary>
         [SettingsUIHidden]
         public bool AdaptiveMode { get; set; }
 
         /// <summary>
         /// Nombre de connexions radiales reliant les anneaux entre eux en mode Adaptativo
-        /// (0 = aucune, anneaux isolés). Voir GridGenerator.GenerateAdaptiveGrid.
+        /// (0 = aucune, anneaux isolés) — toujours traversantes jusqu'au dernier anneau, jamais
+        /// d'impasse sur un rayon. Voir GridGenerator.GenerateAdaptiveGrid.
         /// </summary>
         [SettingsUIHidden]
         public int RadialConnections { get; set; }
-
-        /// <summary>
-        /// Mode Adaptativo : coins arrondis (un arc à chaque sommet net des anneaux) au lieu de
-        /// la jonction en pointe par défaut. Voir GridGenerator.RoundCorners.
-        /// </summary>
-        [SettingsUIHidden]
-        public bool AdaptiveRoundedCorners { get; set; }
 
         /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
@@ -212,7 +208,6 @@ namespace GridRoadGenerator.Settings
             AvenueRowIndex = d.AvenueRowIndex;
             AdaptiveMode = false;
             RadialConnections = 8;
-            AdaptiveRoundedCorners = false;
             RoadPrefabName = string.Empty;
             SecondaryRoadPrefabName = string.Empty;
             AvenueRoadPrefabName = string.Empty;
@@ -236,8 +231,7 @@ namespace GridRoadGenerator.Settings
             AvenueColumnIndex = AvenueColumnIndex,
             AvenueRowEnabled = AvenueRowEnabled,
             AvenueRowIndex = AvenueRowIndex,
-            RadialConnections = RadialConnections,
-            AdaptiveRoundedCorners = AdaptiveRoundedCorners
+            RadialConnections = RadialConnections
         };
     }
 }

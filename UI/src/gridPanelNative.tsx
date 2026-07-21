@@ -23,7 +23,6 @@ import { VC, VF, VT } from "./vanilla";
 import { ViewSelection } from "./viewSelection";
 import {
     adaptiveMode$,
-    adaptiveRoundedCorners$,
     anarchyAvailable$,
     anarchyEnabled$,
     angleOffset$,
@@ -47,7 +46,6 @@ import {
     radialConnections$,
     rows$,
     setAdaptiveMode,
-    setAdaptiveRoundedCorners,
     setAngleOffset,
     setAvenueColumnEnabled,
     setAvenueColumnIndex,
@@ -202,7 +200,6 @@ export const NativeGridPanel = () => {
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const adaptiveMode = useValue(adaptiveMode$);
     const radialConnections = useValue(radialConnections$);
-    const adaptiveRoundedCorners = useValue(adaptiveRoundedCorners$);
     const avenueColumnEnabled = useValue(avenueColumnEnabled$);
     const avenueColumnIndex = useValue(avenueColumnIndex$);
     const avenueRowEnabled = useValue(avenueRowEnabled$);
@@ -647,16 +644,6 @@ export const NativeGridPanel = () => {
                                     />
                                 </div>
                             </div>
-                            <InfoRow
-                                left={translate("GridRoadGenerator.UI.AdaptiveRoundedCorners", "Rounded corners")}
-                                right={
-                                    <VC.ToggleField
-                                        value={adaptiveRoundedCorners}
-                                        disabled={!adaptiveMode}
-                                        onChange={(value: boolean) => setAdaptiveRoundedCorners(value)}
-                                    />
-                                }
-                            />
                         </NativeSectionFoldout>
                     </>
                 )}

@@ -22,7 +22,7 @@ namespace GridRoadGenerator.Core
         /// Vrai pour une connexion radiale (mode Adaptativo, voir EmitRadialConnections) — jamais
         /// pour un anneau (EmitRingSegments). Comme IsCulDeSacEnd, sert à l'appelant ECS à
         /// distinguer un tronçon "traversant" (collectrice/anneau) d'un tronçon "local/terminal"
-        /// (impasse/rayon), par exemple pour y appliquer un réseau secondaire différent.
+        /// (rayon), par exemple pour y appliquer un réseau secondaire différent.
         /// </summary>
         public bool IsRadial;
         /// <summary>
@@ -124,14 +124,10 @@ namespace GridRoadGenerator.Core
 
         /// <summary>
         /// Mode Adaptativo (voir GridGenerator.GenerateAdaptiveGrid) : nombre de connexions
-        /// radiales reliant les anneaux entre eux (0 = aucune, anneaux isolés).
+        /// radiales reliant les anneaux entre eux (0 = aucune, anneaux isolés). Coins toujours
+        /// arrondis, rayons toujours traversants jusqu'au dernier anneau (pas d'option).
         /// </summary>
         public int RadialConnections;
-        /// <summary>
-        /// Mode Adaptativo : coins arrondis (un arc de rayon SpacingMeters à chaque sommet net)
-        /// au lieu de la jonction en pointe (miter) par défaut — voir RoundCorners.
-        /// </summary>
-        public bool AdaptiveRoundedCorners;
 
         public static GridParameters Default => new GridParameters
         {
@@ -149,8 +145,7 @@ namespace GridRoadGenerator.Core
             AvenueColumnIndex = 0,
             AvenueRowEnabled = false,
             AvenueRowIndex = 0,
-            RadialConnections = 8,
-            AdaptiveRoundedCorners = false
+            RadialConnections = 8
         };
     }
 
@@ -904,17 +899,16 @@ namespace GridRoadGenerator.Core
         /// <summary>
         /// Génère le mode "Adaptativo" : des routes concentriques obtenues en décalant le
         /// polygone du périmètre vers l'intérieur par pas de parameters.SpacingMeters (anneaux,
-        /// comme des courbes de niveau), plus quelques connexions radiales reliant les anneaux
-        /// entre eux (parameters.RadialConnections). Épouse n'importe quelle forme de périmètre
-        /// (convexe, en L, courbe) sans qu'aucun segment ne semble arbitraire : c'est la forme du
-        /// polygone qui crée l'irrégularité, pas du hasard. Voir OffsetPolygonInward pour
-        /// l'algorithme d'offset et sa gestion (volontairement simplifiée) des coins concaves.
-        ///
-        /// Si parameters.CulDeSacMode est actif, certains rayons s'arrêtent avant le dernier
-        /// anneau au lieu de le traverser complètement, en impasse — voir EmitRadialConnections
-        /// (réutilise CulDeSacRatio/CulDeSacDepth, comme en mode classique). Les anneaux eux-mêmes
-        /// restent toujours traversants ; CulDeSacAxis/Staggered ne s'appliquent pas ici (concepts
-        /// propres à la grille de lignes droites, sans équivalent pour des anneaux/rayons).
+        /// comme des courbes de niveau — jonction en pointe/miter à chaque coin, voir
+        /// OffsetPolygonInward ; un périmètre déjà courbe, ex. une avenue existante densifiée par
+        /// SampleCurve, produit donc des anneaux visuellement arrondis SANS traitement de coin
+        /// spécial — c'est la forme d'entrée qui dicte le rendu), plus quelques connexions
+        /// radiales reliant les anneaux entre eux (parameters.RadialConnections, toujours
+        /// traversantes jusqu'au dernier anneau atteignable — jamais d'impasse ici, contrairement
+        /// à la grille classique). Épouse n'importe quelle forme de périmètre (convexe, en L,
+        /// courbe) sans qu'aucun segment ne semble arbitraire : c'est la forme du polygone qui
+        /// crée l'irrégularité, pas du hasard. Voir OffsetPolygonInward pour l'algorithme d'offset
+        /// et sa gestion (volontairement simplifiée) des coins concaves.
         /// </summary>
         public static List<RoadSegmentDef> GenerateAdaptiveGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
         {
@@ -946,7 +940,7 @@ namespace GridRoadGenerator.Core
             List<float2> current = polygon;
             for (int ring = 0; ring < MaxAdaptiveRings; ring++)
             {
-                List<float2> next = OffsetPolygonInward(current, parameters.SpacingMeters, parameters.AdaptiveRoundedCorners);
+                List<float2> next = OffsetPolygonInward(current, parameters.SpacingMeters);
                 if (next == null)
                     break; // dégénéré : aire trop petite, retournée, ou auto-intersectante
 
@@ -959,12 +953,7 @@ namespace GridRoadGenerator.Core
             // dégénéré (aire trop petite/retournée/auto-intersectante), donc la boucle
             // ci-dessus n'a jamais tourné — le résultat serait autrement complètement vide,
             // alors que le périmètre D'ORIGINE (déjà validé plus haut) reste une route
-            // parfaitement valide en lui-même. Il n'était auparavant jamais émis tel quel (seuls
-            // les anneaux OFFSET le sont) : cette limite semblait un plafond arbitraire du
-            // réglage Espacement (ex. "la grille disparaît au-delà de 96 m") alors que c'est une
-            // dégénérescence géométrique normale, propre à la taille du périmètre choisi — pas
-            // une limite codée en dur (aucune valeur de ce genre trouvée ailleurs dans le code).
-            // Comportement inchangé dès qu'au moins un anneau intérieur est généré avec succès.
+            // parfaitement valide en lui-même.
             if (rings.Count == 1)
             {
                 EmitRingSegments(segments, polygon, y);
@@ -972,8 +961,7 @@ namespace GridRoadGenerator.Core
 
             if (parameters.RadialConnections > 0 && rings.Count > 1)
             {
-                EmitRadialConnections(segments, rings, parameters.RadialConnections, y,
-                    parameters.CulDeSacMode, parameters.CulDeSacRatio, parameters.CulDeSacDepth, parameters.SpacingMeters);
+                EmitRadialConnections(segments, rings, parameters.RadialConnections, y, parameters.SpacingMeters);
             }
 
             return segments;
@@ -1019,8 +1007,18 @@ namespace GridRoadGenerator.Core
         /// scinder la forme en sous-polygones (vrai straight-skeleton, hors scope volontairement :
         /// un algorithme simple suffit ici) : sur une forme très concave (ex. un U étroit), les
         /// anneaux s'arrêtent simplement plus tôt qu'un algorithme complet ne le ferait.
+        ///
+        /// Toujours jonction en pointe (miter) — pas d'option d'arrondi de coin ("round join") :
+        /// un essai précédent remplaçait chaque coin convexe par un petit arc centré sur le
+        /// sommet d'origine, mais cet arc rentre TOUJOURS plus près du sommet que ne le fait la
+        /// jonction miter (qui avance le long des deux arêtes adjacentes) — sur un coin nettement
+        /// anguleux (ex. un rectangle), les deux arêtes adjacentes à l'arc continuent alors leur
+        /// tracé jusqu'à LEUR PROPRE point miter théorique et se croisent entre elles avant même
+        /// d'atteindre l'arc, un anneau auto-intersectant à coup sûr. Un périmètre déjà courbe
+        /// (avenue existante densifiée par SampleCurve) n'a pas ce problème et produit des anneaux
+        /// visuellement arrondis avec la seule jonction miter, sans traitement de coin spécial.
         /// </summary>
-        internal static List<float2> OffsetPolygonInward(List<float2> rawPolygon, float distance, bool roundedCorners = false)
+        internal static List<float2> OffsetPolygonInward(List<float2> rawPolygon, float distance)
         {
             List<float2> polygon = ResamplePolygon(rawPolygon, distance);
             int n = polygon.Count;
@@ -1086,95 +1084,10 @@ namespace GridRoadGenerator.Core
             if (HasSelfIntersection(result, clamped))
                 return null;
 
-            if (!roundedCorners)
-                return result;
-
-            // Cantos arredondados : remplace chaque coin CONVEXE net (miter) par un petit arc de
-            // rayon distance centré sur le sommet D'ORIGINE — le round join classique du
-            // offsetting de polygone (les coins concaves gardent leur miter, voir RoundCorners).
-            // Purement cosmétique, appliqué seulement APRÈS validation : la forme a déjà été
-            // acceptée sur sa version miter ci-dessus, jamais recalculée sur la version arrondie.
-            return RoundCorners(polygon, result, distance, windingSign, isCorner);
-        }
-
-        /// <summary>
-        /// Remplace, dans un anneau déjà validé (miter), chaque coin CONVEXE marqué isCorner par
-        /// un arc de rayon distance centré sur le sommet D'ORIGINE (polygon[i], PAS son point
-        /// offset miter) — le round join classique de l'offsetting de polygone : au lieu d'une
-        /// pointe nette, le contour suit un petit arc de cercle entre la direction d'arrivée et
-        /// la direction de départ de ce coin. Les coins CONCAVES/réflexes gardent leur point
-        /// miter tel quel (le round join ne s'applique qu'aux coins convexes en théorie de
-        /// l'offsetting de polygone — voir le test de convexité plus bas). Les points non
-        /// marqués comme coins (sur un tronçon déjà "lisse") sont recopiés tels quels. Le nombre
-        /// de sommets du résultat change (plusieurs points par coin arrondi) — sans conséquence :
-        /// EmitRadialConnections relie les anneaux par intersection géométrique
-        /// (RayPolygonIntersection), jamais par correspondance d'index, donc indifférent au
-        /// nombre de sommets de chaque anneau.
-        /// </summary>
-        private static List<float2> RoundCorners(List<float2> polygon, List<float2> miterResult, float distance, float windingSign, bool[] isCorner)
-        {
-            int n = polygon.Count;
-            var result = new List<float2>(n);
-            for (int i = 0; i < n; i++)
-            {
-                if (!isCorner[i])
-                {
-                    result.Add(miterResult[i]);
-                    continue;
-                }
-
-                float2 dirIn = polygon[i] - polygon[(i - 1 + n) % n];
-                float2 dirOut = polygon[(i + 1) % n] - polygon[i];
-                if (math.lengthsq(dirIn) < Epsilon || math.lengthsq(dirOut) < Epsilon)
-                {
-                    result.Add(miterResult[i]);
-                    continue;
-                }
-                dirIn = math.normalize(dirIn);
-                dirOut = math.normalize(dirOut);
-
-                // Le round join (arc) n'est géométriquement valide que pour un coin CONVEXE —
-                // un coin concave/réflexe (le sommet tourne dans le sens OPPOSÉ au sens de
-                // parcours global du polygone : cross(dirIn,dirOut) de signe opposé à
-                // windingSign) doit garder son point miter tel quel. Bug corrigé : appliquer la
-                // même formule d'arc à un coin concave produit une boucle qui repart vers
-                // l'intérieur de la forme au lieu de la contourner — un artefact en dents de
-                // scie, jamais détecté car HasSelfIntersection (ci-dessus, OffsetPolygonInward)
-                // valide la version MITER, avant l'arrondi, jamais le résultat arrondi lui-même.
-                // Toute forme réaliste ayant des coins concaves (un simple L, par exemple), ce
-                // bug masquait presque toujours l'effet visuel du réglage.
-                if (Cross(dirIn, dirOut) * windingSign <= 0f)
-                {
-                    result.Add(miterResult[i]);
-                    continue;
-                }
-
-                float2 normalIn = InwardNormal(dirIn, windingSign);
-                float2 normalOut = InwardNormal(dirOut, windingSign);
-
-                float fromAngle = math.atan2(normalIn.y, normalIn.x);
-                float toAngle = math.atan2(normalOut.y, normalOut.x);
-                float delta = toAngle - fromAngle;
-                while (delta > math.PI) delta -= 2f * math.PI;
-                while (delta < -math.PI) delta += 2f * math.PI;
-
-                // Échantillons tous les ~20°, plafonnés : une cuspide très serrée (delta proche
-                // de π) ne doit pas produire un nombre déraisonnable de points.
-                int samples = math.clamp((int)math.round(math.abs(delta) / math.radians(20f)), 1, RoundCornerMaxSamples);
-                for (int s = 0; s <= samples; s++)
-                {
-                    float t = (float)s / samples;
-                    float angle = fromAngle + delta * t;
-                    result.Add(polygon[i] + new float2(math.cos(angle), math.sin(angle)) * distance);
-                }
-            }
             return result;
         }
 
-        /// <summary>Nombre max de points insérés par coin arrondi (RoundCorners) — voir aussi MiterLimit pour le cas non arrondi.</summary>
-        private const int RoundCornerMaxSamples = 6;
-
-        /// <summary>Virage (degrés, 0-180) à partir duquel un sommet est considéré comme un "vrai" coin par ResamplePolygon/RoundCorners.</summary>
+        /// <summary>Virage (degrés, 0-180) à partir duquel un sommet est considéré comme un "vrai" coin par ResamplePolygon.</summary>
         private const float CornerAngleThresholdDegrees = 20f;
 
         /// <summary>Vrai pour chaque sommet dont le virage dépasse CornerAngleThresholdDegrees (ou dégénéré) ; realCornerCount = nombre de vrais.</summary>
@@ -1209,16 +1122,10 @@ namespace GridRoadGenerator.Core
         /// Ré-échantillonne les tronçons "denses" (arêtes courtes, typiquement l'échantillonnage
         /// de SampleCurve le long d'un périmètre courbe) à espacement régulier le long de l'arc,
         /// EN CONSERVANT tel quel chaque sommet "réel" — un virage de plus de
-        /// CornerAngleThresholdDegrees, ex. les coins d'un carré ou d'un L. Remplace une ancienne
-        /// version qui fusionnait itérativement l'arête la plus courte : correcte pour un coin
-        /// isolé, mais elle pouvait faire dériver un polygone densément échantillonné (un cercle
-        /// approximant un giratoire, par exemple) vers une forme dégénérée bien avant d'avoir
-        /// réduit son nombre de sommets à quelque chose de raisonnable, en collapsant vers un
-        /// côté plutôt qu'en réduisant uniformément — voir GridGeneratorAdaptiveGridTests pour un
-        /// cas concret. Ici, chaque "tronçon" entre deux coins réels consécutifs est ré-échantillonné
-        /// indépendamment par interpolation le long de son propre tracé (jamais par fusion de
-        /// sommets voisins), donc il reste représentatif de la forme d'origine quel que soit le
-        /// nombre de points retirés.
+        /// CornerAngleThresholdDegrees, ex. les coins d'un carré ou d'un L. Chaque "tronçon" entre
+        /// deux coins réels consécutifs est ré-échantillonné indépendamment par interpolation le
+        /// long de son propre tracé (jamais par fusion de sommets voisins), donc il reste
+        /// représentatif de la forme d'origine quel que soit le nombre de points retirés.
         ///
         /// Si aucun sommet ne dépasse le seuil (polygone déjà lisse, ex. un cercle sans coin net),
         /// tout le polygone est traité comme un seul tronçon ancré arbitrairement au premier sommet.
@@ -1466,47 +1373,22 @@ namespace GridRoadGenerator.Core
         /// Chaque rayon part avec une direction calculée à ce sommet du périmètre d'origine
         /// (ComputeRadialDirection, normale entrante moyenne des deux arêtes adjacentes — même
         /// convention qu'OffsetVertex), PUIS intersecte cette droite avec les arêtes de l'anneau
-        /// suivant (RayPolygonIntersection) plutôt que de chercher le sommet le plus proche :
-        /// ancienne approche "plus proche sommet" corrigée après un bug de zigzag reproductible —
-        /// vulnérable aux variations de sommets d'un anneau à l'autre (ResamplePolygon/
-        /// RoundCorners) et, pire, faisait dériver le rayon anneau par anneau puisque la position
-        /// ET la direction du pas suivant dépendaient toutes deux du sommet choisi précédemment
-        /// (erreur cumulative).
+        /// suivant (RayPolygonIntersection) plutôt que de chercher le sommet le plus proche.
         ///
         /// La direction est ensuite RECALCULÉE à chaque anneau, à partir de la normale de
         /// l'arête RÉELLEMENT traversée sur l'anneau qu'on vient d'atteindre (LocalInwardNormal)
-        /// — jamais gardée fixe depuis le périmètre d'origine. Deuxième bug corrigé, observé en
-        /// jeu sur un périmètre courbe/pincé (forme en huit) : une direction figée reste correcte
-        /// pour un polygone à arêtes droites (le décalage garde chaque arête parallèle à
-        /// l'originale, donc la direction ne change jamais réellement), mais sur un contour
-        /// courbe échantillonné, la direction perpendiculaire réellement correcte évolue en
-        /// suivant la courbure locale — une direction figée finit par ne plus du tout
-        /// correspondre à la géométrie réelle après plusieurs anneaux, produisant des connexions
-        /// chaotiques en zigzag traversant toute la forme. Recalculer depuis l'arête locale (pas
-        /// depuis un sommet "le plus proche") évite de réintroduire le premier bug : c'est
-        /// toujours une intersection géométrique réelle, jamais une recherche de proximité.
+        /// — jamais gardée fixe depuis le périmètre d'origine : sur un contour courbe échantillonné,
+        /// la direction perpendiculaire réellement correcte évolue en suivant la courbure locale.
         ///
         /// Une borne de distance par pas (MaxRadialStepFactor × l'espacement entre anneaux)
         /// s'ajoute en garde-fou : au-delà, ni l'intersection ni le repli "plus proche sommet" ne
         /// sont acceptés — le rayon s'arrête net plutôt que de sauter vers un point aberrant, loin,
-        /// de l'autre côté d'un périmètre très pincé (où même la meilleure direction locale peut
-        /// encore, dans un cas extrême, croiser l'anneau suivant au mauvais endroit).
+        /// de l'autre côté d'un périmètre très pincé.
         ///
-        /// culDeSacMode actif : certains rayons (motif déterministe culDeSacRatio, même fonction
-        /// IsCulDeSacBlock qu'en mode classique — un rayon = un "bloc") s'arrêtent avant le
-        /// dernier anneau plutôt que de le traverser, en impasse (IsCulDeSacEnd, culDeSacDepth
-        /// fraction du nombre total d'anneaux traversés) — le même cercle de retournement que
-        /// pour les impasses de la grille classique s'y pose ensuite côté GridRoadToolSystem, qui
-        /// ne distingue pas l'origine du segment. Les anneaux eux-mêmes restent toujours complets.
-        /// </summary>
-        /// <summary>
-        /// Marge sur l'espacement entre anneaux tolérée pour un pas de rayon (anneau r vers
-        /// anneau r+1) : au-delà, une "correspondance" trouvée (intersection ou plus proche
-        /// voisin) n'est géométriquement pas plausible et est rejetée — voir EmitRadialConnections.
-        /// Nécessaire sur un périmètre pincé (forme en huit/cœur, "col" étroit) : le rayon en
-        /// direction fixe peut sinon croiser l'anneau suivant très loin, de l'AUTRE côté du col,
-        /// au lieu de s'arrêter localement — un bug observé en jeu (connexions chaotiques en
-        /// zigzag traversant toute la forme).
+        /// Tous les rayons visent toujours le dernier anneau généré (plus de cul-de-sac sur un
+        /// rayon, simplification volontaire) : un rayon qui ne peut plus progresser (anneau trop
+        /// petit pour l'accueillir, ou aucune intersection plausible) s'arrête simplement là où
+        /// il tenait encore, jamais marqué IsCulDeSacEnd.
         /// </summary>
         private const float MaxRadialStepFactor = 2.5f;
 
@@ -1536,23 +1418,12 @@ namespace GridRoadGenerator.Core
         /// à chaque anneau, le nombre de rayons encore actifs AVANT de les faire avancer, afin de
         /// réduire ce nombre si l'anneau est trop petit pour tous les accueillir à
         /// MinNodeDistance les uns des autres (voir RingPerimeter/SelectEvenlySpacedIndices ci-
-        /// dessous). Bug corrigé : sur un périmètre resserré (col étroit, extrémité pointue), les
-        /// anneaux intérieurs rétrécissent bien plus que le nombre de rayons qui convergent vers
-        /// eux — chaque rayon calculant son point d'arrivée indépendamment (RayPolygonIntersection),
-        /// deux rayons proches finissaient à des points quasi mais pas exactement confondus,
-        /// jamais fusionnés par le jeu ("Objetos sobrepostos"). Chaque rayon accumule ses segments
-        /// dans son propre buffer, concaténés à `segments` dans l'ordre d'origine à la fin — pour
-        /// que les segments d'un même rayon restent consécutifs dans la liste, comme avant cette
-        /// réécriture (des appelants/tests s'y fient pour détecter les "chaînes" d'un même rayon).
-        ///
-        /// Un rayon écarté par la réduction de capacité s'arrête simplement sur le dernier anneau
-        /// où il tenait encore — un point RÉEL de cet anneau, où les segments de l'anneau lui-même
-        /// se rejoignent déjà. Jamais marqué IsCulDeSacEnd (ça poserait un cercle de retournement
-        /// par-dessus une intersection déjà existante, recréant le même genre de chevauchement) :
-        /// réservé aux arrêts EN COURS DE BLOC demandés par CulDeSacDepth, comme avant.
+        /// dessous). Chaque rayon accumule ses segments dans son propre buffer, concaténés à
+        /// `segments` dans l'ordre d'origine à la fin — pour que les segments d'un même rayon
+        /// restent consécutifs dans la liste, comme avant cette réécriture (des appelants/tests
+        /// s'y fient pour détecter les "chaînes" d'un même rayon).
         /// </summary>
-        private static void EmitRadialConnections(List<RoadSegmentDef> segments, List<List<float2>> rings, int count, float y,
-            bool culDeSacMode, float culDeSacRatio, float culDeSacDepth, float spacingMeters)
+        private static void EmitRadialConnections(List<RoadSegmentDef> segments, List<List<float2>> rings, int count, float y, float spacingMeters)
         {
             List<float2> perimeter = rings[0];
             int n = perimeter.Count;
@@ -1586,8 +1457,6 @@ namespace GridRoadGenerator.Core
             // État par rayon, indexé comme chosenIndices (ordre préservé jusqu'à l'émission finale).
             var current = new float2[radialCount];
             var direction = new float2[radialCount];
-            var stopAtRing = new int[radialCount];
-            var isCulDeSac = new bool[radialCount];
             var alive = new bool[radialCount];
             var buffers = new List<RoadSegmentDef>[radialCount];
 
@@ -1595,13 +1464,6 @@ namespace GridRoadGenerator.Core
             {
                 buffers[k] = new List<RoadSegmentDef>();
                 int index = chosenIndices[k];
-                // Motif déterministe CulDeSacRatio indexé sur k (position dans chosenIndices,
-                // 0-based) — même numérotation que l'ancien radialBlockIndex, qui s'incrémentait
-                // une fois par entrée de chosenIndices, y compris les sommets dégénérés ci-dessous.
-                isCulDeSac[k] = culDeSacMode && IsCulDeSacBlock(k, culDeSacRatio);
-                stopAtRing[k] = isCulDeSac[k]
-                    ? math.max(1, (int)math.round((rings.Count - 1) * math.clamp(culDeSacDepth, 0.5f, 0.9f)))
-                    : rings.Count - 1;
 
                 float2 origin = perimeter[index];
                 float2 dir = ComputeRadialDirection(
@@ -1610,15 +1472,11 @@ namespace GridRoadGenerator.Core
                     windingSign);
                 current[k] = origin;
                 direction[k] = dir;
-                // Sommet dégénéré (arêtes adjacentes nulles) : pas de rayon plutôt qu'un rayon
-                // aberrant. Bug corrigé : un sommet "en pointe" (deux arêtes adjacentes presque
-                // opposées — typique d'une impasse fine incluse dans le périmètre sélectionné,
-                // aller-retour sur elle-même) fait dévier ComputeRadialDirection vers l'EXTÉRIEUR
-                // du périmètre au lieu de l'intérieur (la moyenne des deux normales entrantes
-                // devient instable quand dirIn ≈ -dirOut). Vérifié en avançant d'un petit pas le
-                // long de la direction calculée : si ce pas atterrit hors du périmètre d'origine,
-                // ce rayon ne part jamais — rien ne doit sortir du périmètre choisi, c'est
-                // justement l'intérêt du mod.
+                // Sommet dégénéré (arêtes adjacentes nulles) ou direction qui pointe vers
+                // l'EXTÉRIEUR du périmètre (sommet "en pointe", deux arêtes adjacentes presque
+                // opposées) : pas de rayon plutôt qu'un rayon aberrant — rien ne doit sortir du
+                // périmètre choisi, c'est justement l'intérêt du mod. Vérifié en avançant d'un
+                // petit pas le long de la direction calculée.
                 bool directionIsInward = math.lengthsq(dir) >= Epsilon
                     && PointInPolygon(origin + math.normalize(dir) * InwardCheckDistance, perimeter);
                 alive[k] = directionIsInward;
@@ -1631,7 +1489,7 @@ namespace GridRoadGenerator.Core
                 var activeIndices = new List<int>();
                 for (int k = 0; k < radialCount; k++)
                 {
-                    if (alive[k] && stopAtRing[k] >= r) activeIndices.Add(k);
+                    if (alive[k]) activeIndices.Add(k);
                 }
                 if (activeIndices.Count == 0) continue;
 
@@ -1650,8 +1508,7 @@ namespace GridRoadGenerator.Core
                 }
 
                 // Fusion locale entre rayons survivants SUR CET ANNEAU seulement (jamais globale,
-                // jamais contre les propres sommets de l'anneau — RoundCorners y place des points
-                // légitimement proches) : si deux rayons distincts atterrissent à moins de
+                // jamais contre les propres sommets de l'anneau) : si deux rayons distincts atterrissent à moins de
                 // MinNodeDistance l'un de l'autre malgré la réduction de capacité ci-dessus (peut
                 // arriver sur un anneau non convexe), le second réutilise le point exact du
                 // premier plutôt qu'un quasi-doublon (même principe "Super nó" que BuildSubSegments
@@ -1703,24 +1560,17 @@ namespace GridRoadGenerator.Core
                     }
                     acceptedThisRing.Add(next);
 
-                    bool isEnd = isCulDeSac[k] && r == stopAtRing[k];
                     if (math.distance(current[k], next) >= MinSegmentLength)
                     {
                         buffers[k].Add(new RoadSegmentDef(new float3(current[k].x, y, current[k].y), new float3(next.x, y, next.y),
-                            isHorizontal: false, isCulDeSacEnd: isEnd, isRadial: true));
+                            isHorizontal: false, isCulDeSacEnd: false, isRadial: true));
                     }
                     current[k] = next;
 
                     // Recalcule la direction pour le PROCHAIN pas à partir de l'arête locale de
                     // l'anneau qu'on vient d'atteindre — jamais gardée fixe depuis le périmètre
-                    // d'origine (bug corrigé : sur un périmètre courbe, la direction réellement
-                    // perpendiculaire évolue d'anneau en anneau en suivant la courbure locale ;
-                    // une direction figée finit par ne plus du tout correspondre à la géométrie
-                    // réelle après plusieurs anneaux, produisant des connexions chaotiques). Pas
-                    // de nouvelle recherche par "plus proche sommet" (le bug de zigzag déjà
-                    // corrigé) : uniquement la normale de l'arête RÉELLEMENT traversée. En repli
-                    // NearestPoint (pas d'edgeIndex fiable), garde la direction précédente plutôt
-                    // que d'en perdre la trace.
+                    // d'origine (voir la doc d'EmitRadialConnections). En repli NearestPoint (pas
+                    // d'edgeIndex fiable), garde la direction précédente plutôt que d'en perdre la trace.
                     if (hit.HasValue)
                     {
                         float2 localDirection = LocalInwardNormal(rings[r], hit.Value.edgeIndex, windingSign);
@@ -1789,12 +1639,11 @@ namespace GridRoadGenerator.Core
         /// ring, en avançant (t > 0 strictement, marge pour ignorer l'arête sur laquelle origin
         /// repose déjà) ET jusqu'à maxDistance seulement — au-delà, l'intersection n'est pas
         /// géométriquement plausible pour un simple pas d'un anneau au suivant (voir
-        /// MaxRadialStepFactor/EmitRadialConnections : sans cette borne, une intersection trouvée
-        /// loin, de l'autre côté d'un périmètre pincé, était acceptée telle quelle). Retourne null
-        /// si aucune arête n'est traversée dans cette limite : l'appelant se replie alors sur
-        /// NearestPoint (avec la même borne) plutôt que d'abandonner le rayon entier. edgeIndex
-        /// (l'arête réellement traversée) sert à recalculer la direction du pas suivant à partir
-        /// de la géométrie locale de CET anneau — voir LocalInwardNormal/EmitRadialConnections.
+        /// MaxRadialStepFactor/EmitRadialConnections). Retourne null si aucune arête n'est
+        /// traversée dans cette limite : l'appelant se replie alors sur NearestPoint (avec la
+        /// même borne) plutôt que d'abandonner le rayon entier. edgeIndex (l'arête réellement
+        /// traversée) sert à recalculer la direction du pas suivant à partir de la géométrie
+        /// locale de CET anneau — voir LocalInwardNormal/EmitRadialConnections.
         /// </summary>
         private static (float2 point, int edgeIndex)? RayPolygonIntersection(float2 origin, float2 direction, List<float2> ring, float maxDistance)
         {

@@ -13,7 +13,6 @@ import { VC, VF, VT } from "./vanilla";
 import { ViewSelection } from "./viewSelection";
 import {
     adaptiveMode$,
-    adaptiveRoundedCorners$,
     anarchyAvailable$,
     anarchyEnabled$,
     angleOffset$,
@@ -37,7 +36,6 @@ import {
     radialConnections$,
     rows$,
     setAdaptiveMode,
-    setAdaptiveRoundedCorners,
     setAngleOffset,
     setAvenueColumnEnabled,
     setAvenueColumnIndex,
@@ -184,7 +182,6 @@ export const LegacyGridPanel = () => {
     const culDeSacCapStyle = useValue(culDeSacCapStyle$);
     const adaptiveMode = useValue(adaptiveMode$);
     const radialConnections = useValue(radialConnections$);
-    const adaptiveRoundedCorners = useValue(adaptiveRoundedCorners$);
     const avenueColumnEnabled = useValue(avenueColumnEnabled$);
     const avenueColumnIndex = useValue(avenueColumnIndex$);
     const avenueRowEnabled = useValue(avenueRowEnabled$);
@@ -580,17 +577,6 @@ export const LegacyGridPanel = () => {
                                     onChange={(value: number) => setRadialConnections(Math.round(value))}
                                 />
                             </div>
-                        </div>
-                        <div className={styles.vanillaRow}>
-                            <VC.Section
-                                focusKey={VF.FOCUS_DISABLED}
-                                title={translate("GridRoadGenerator.UI.AdaptiveRoundedCorners", "Rounded corners")}>
-                                <VC.ToggleField
-                                    value={adaptiveRoundedCorners}
-                                    disabled={!adaptiveMode}
-                                    onChange={(value: boolean) => setAdaptiveRoundedCorners(value)}
-                                />
-                            </VC.Section>
                         </div>
                     </SectionFoldout>
                     </VC.Scrollable>

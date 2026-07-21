@@ -41,7 +41,6 @@ export const avenueRowIndex$ = bindValue<number>(mod.id, "AVENUE_ROW_INDEX", 0);
 /// Mode "Adaptativo" (anneaux concentriques par offset du périmètre) : remplace la grille de lignes droites quand actif.
 export const adaptiveMode$ = bindValue<boolean>(mod.id, "ADAPTIVE_MODE", false);
 export const radialConnections$ = bindValue<number>(mod.id, "RADIAL_CONNECTIONS", 8);
-export const adaptiveRoundedCorners$ = bindValue<boolean>(mod.id, "ADAPTIVE_ROUNDED_CORNERS", false);
 /// Vue disponible/sélectionnée (bitmask, miroir de ViewOption en C#) : 1=Underground, 2=ZoneGrid, 4=InvisibleNetworks.
 export const availableViews$ = bindValue<number>(mod.id, "AVAILABLE_VIEWS", 7);
 export const selectedViews$ = bindValue<number>(mod.id, "SELECTED_VIEWS", 0);
@@ -81,7 +80,6 @@ export const setAvenueRowEnabled = (value: boolean) => trigger(mod.id, "SET_AVEN
 export const setAvenueRowIndex = (value: number) => trigger(mod.id, "SET_AVENUE_ROW_INDEX", value);
 export const setAdaptiveMode = (value: boolean) => trigger(mod.id, "SET_ADAPTIVE_MODE", value);
 export const setRadialConnections = (value: number) => trigger(mod.id, "SET_RADIAL_CONNECTIONS", value);
-export const setAdaptiveRoundedCorners = (value: boolean) => trigger(mod.id, "SET_ADAPTIVE_ROUNDED_CORNERS", value);
 export const setSelectedViews = (value: number) => trigger(mod.id, "SET_SELECTED_VIEWS", value);
 export const generateGrid = () => trigger(mod.id, "GENERATE");
 export const toggleTool = () => trigger(mod.id, "TOGGLE_TOOL");
