@@ -58,6 +58,13 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<string> _secondaryRoadPrefabNameBinding;
         private ValueBinding<string> _secondaryRoadPrefabIconBinding;
         private ValueBinding<bool> _secondaryRoadPrefabAutoBinding;
+        private ValueBinding<bool> _avenueColumnEnabledBinding;
+        private ValueBinding<int> _avenueColumnIndexBinding;
+        private ValueBinding<bool> _avenueRowEnabledBinding;
+        private ValueBinding<int> _avenueRowIndexBinding;
+        private ValueBinding<string> _avenueRoadPrefabNameBinding;
+        private ValueBinding<string> _avenueRoadPrefabIconBinding;
+        private ValueBinding<bool> _avenueRoadPrefabAutoBinding;
         private ValueBinding<bool> _anarchyAvailableBinding;
         private bool _anarchyAvailable;
 
@@ -112,6 +119,12 @@ namespace GridRoadGenerator.Systems
             AddBinding(_culDeSacRatioBinding = new ValueBinding<float>(BindingGroup, "CULDESAC_RATIO", _settings.CulDeSacRatio));
             AddBinding(_culDeSacCapSizeBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_CAP_SIZE", (int)_settings.CulDeSacCapSize));
             AddBinding(_culDeSacCapStyleBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_CAP_STYLE", (int)_settings.CulDeSacCapStyle));
+            // Avenue (troisième réseau, grille classique uniquement) : colonne/rangée choisie
+            // librement par index, jamais un cul-de-sac. Voir GridParameters.AvenueColumnEnabled.
+            AddBinding(_avenueColumnEnabledBinding = new ValueBinding<bool>(BindingGroup, "AVENUE_COLUMN_ENABLED", _settings.AvenueColumnEnabled));
+            AddBinding(_avenueColumnIndexBinding = new ValueBinding<int>(BindingGroup, "AVENUE_COLUMN_INDEX", _settings.AvenueColumnIndex));
+            AddBinding(_avenueRowEnabledBinding = new ValueBinding<bool>(BindingGroup, "AVENUE_ROW_ENABLED", _settings.AvenueRowEnabled));
+            AddBinding(_avenueRowIndexBinding = new ValueBinding<int>(BindingGroup, "AVENUE_ROW_INDEX", _settings.AvenueRowIndex));
             AddBinding(_adaptiveModeBinding = new ValueBinding<bool>(BindingGroup, "ADAPTIVE_MODE", _settings.AdaptiveMode));
             AddBinding(_radialConnectionsBinding = new ValueBinding<int>(BindingGroup, "RADIAL_CONNECTIONS", _settings.RadialConnections));
             AddBinding(_adaptiveRoundedCornersBinding = new ValueBinding<bool>(BindingGroup, "ADAPTIVE_ROUNDED_CORNERS", _settings.AdaptiveRoundedCorners));
@@ -130,6 +143,10 @@ namespace GridRoadGenerator.Systems
             AddBinding(_secondaryRoadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "SECONDARY_ROAD_PREFAB_NAME", string.Empty));
             AddBinding(_secondaryRoadPrefabIconBinding = new ValueBinding<string>(BindingGroup, "SECONDARY_ROAD_PREFAB_ICON", string.Empty));
             AddBinding(_secondaryRoadPrefabAutoBinding = new ValueBinding<bool>(BindingGroup, "SECONDARY_ROAD_PREFAB_AUTO", true));
+            // Réseau avenue : même trio de bindings, préfixé AVENUE_.
+            AddBinding(_avenueRoadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "AVENUE_ROAD_PREFAB_NAME", string.Empty));
+            AddBinding(_avenueRoadPrefabIconBinding = new ValueBinding<string>(BindingGroup, "AVENUE_ROAD_PREFAB_ICON", string.Empty));
+            AddBinding(_avenueRoadPrefabAutoBinding = new ValueBinding<bool>(BindingGroup, "AVENUE_ROAD_PREFAB_AUTO", true));
 
             // Sélecteur de réseau : onglet actif, liste des prefabs, récents, choix.
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
@@ -144,6 +161,8 @@ namespace GridRoadGenerator.Systems
             AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO", () => _toolSystem.SetRoadPrefab(null)));
             AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB_SECONDARY", HandlePickSecondaryPrefab));
             AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO_SECONDARY", () => _toolSystem.SetSecondaryRoadPrefab(null)));
+            AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB_AVENUE", HandlePickAvenuePrefab));
+            AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO_AVENUE", () => _toolSystem.SetAvenueRoadPrefab(null)));
 
             // Mod Anarchy (tiers, optionnel) : côté TS la rangée lit/déclenche
             // directement les bindings cohtml d'Anarchy lui-même. La détection est
@@ -221,6 +240,30 @@ namespace GridRoadGenerator.Systems
                 _settings.CulDeSacCapStyle = (CulDeSacCapStyle)math.clamp(value, 0, 2);
                 _settings.ApplyAndSave();
             }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_AVENUE_COLUMN_ENABLED", value =>
+            {
+                _settings.AvenueColumnEnabled = value;
+                _settings.ApplyAndSave();
+            }));
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_AVENUE_COLUMN_INDEX", value =>
+            {
+                // Bornage large et permissif : un index hors de la plage réellement générée
+                // (dépend de Columns/Spacing/mode) est déjà un no-op silencieux côté Core
+                // (GridParameters.AvenueColumnIndex) — pas besoin de connaître ici le nombre
+                // exact de lignes pour rester sûr.
+                _settings.AvenueColumnIndex = math.clamp(value, 0, 63);
+                _settings.ApplyAndSave();
+            }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_AVENUE_ROW_ENABLED", value =>
+            {
+                _settings.AvenueRowEnabled = value;
+                _settings.ApplyAndSave();
+            }));
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_AVENUE_ROW_INDEX", value =>
+            {
+                _settings.AvenueRowIndex = math.clamp(value, 0, 63);
+                _settings.ApplyAndSave();
+            }));
             AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_ADAPTIVE_MODE", value =>
             {
                 _settings.AdaptiveMode = value;
@@ -271,6 +314,10 @@ namespace GridRoadGenerator.Systems
             _culDeSacRatioBinding.Update(_settings.CulDeSacRatio);
             _culDeSacCapSizeBinding.Update((int)_settings.CulDeSacCapSize);
             _culDeSacCapStyleBinding.Update((int)_settings.CulDeSacCapStyle);
+            _avenueColumnEnabledBinding.Update(_settings.AvenueColumnEnabled);
+            _avenueColumnIndexBinding.Update(_settings.AvenueColumnIndex);
+            _avenueRowEnabledBinding.Update(_settings.AvenueRowEnabled);
+            _avenueRowIndexBinding.Update(_settings.AvenueRowIndex);
             _adaptiveModeBinding.Update(_settings.AdaptiveMode);
             _radialConnectionsBinding.Update(_settings.RadialConnections);
             _adaptiveRoundedCornersBinding.Update(_settings.AdaptiveRoundedCorners);
@@ -291,6 +338,11 @@ namespace GridRoadGenerator.Systems
             _secondaryRoadPrefabNameBinding.Update(secondaryRoadPrefab != null ? secondaryRoadPrefab.name : string.Empty);
             _secondaryRoadPrefabIconBinding.Update(secondaryRoadPrefab != null ? ImageSystem.GetThumbnail(secondaryRoadPrefab) ?? string.Empty : string.Empty);
             _secondaryRoadPrefabAutoBinding.Update(_toolSystem.SecondaryRoadPrefabIsAuto);
+
+            PrefabBase avenueRoadPrefab = _toolSystem.GetAvenuePrefab();
+            _avenueRoadPrefabNameBinding.Update(avenueRoadPrefab != null ? avenueRoadPrefab.name : string.Empty);
+            _avenueRoadPrefabIconBinding.Update(avenueRoadPrefab != null ? ImageSystem.GetThumbnail(avenueRoadPrefab) ?? string.Empty : string.Empty);
+            _avenueRoadPrefabAutoBinding.Update(_toolSystem.AvenueRoadPrefabIsAuto);
 
             // Reconstruit la liste du sélecteur quand l'onglet change (coûteux, donc jamais par frame).
             if (_lastPickerType != _pickerTypeBinding.value)
@@ -342,7 +394,18 @@ namespace GridRoadGenerator.Systems
             RememberRecentPrefab(entity);
         }
 
-        /// <summary>Tête de liste des récents (partagée entre les deux sélecteurs), sans doublon, plafonnée.</summary>
+        /// <summary>Identique à HandlePickPrefab, pour le réseau avenue.</summary>
+        private void HandlePickAvenuePrefab(Entity entity)
+        {
+            if (!_prefabSystem.TryGetPrefab(entity, out PrefabBase prefab) || prefab == null)
+            {
+                return;
+            }
+            _toolSystem.SetAvenueRoadPrefab(prefab);
+            RememberRecentPrefab(entity);
+        }
+
+        /// <summary>Tête de liste des récents (partagée entre les trois sélecteurs), sans doublon, plafonnée.</summary>
         private void RememberRecentPrefab(Entity entity)
         {
             _recentPrefabs.Remove(entity);
