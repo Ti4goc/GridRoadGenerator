@@ -32,6 +32,12 @@ export const culDeSacRatio$ = bindValue<number>(mod.id, "CULDESAC_RATIO", 100);
 export const culDeSacCapSize$ = bindValue<number>(mod.id, "CULDESAC_CAP_SIZE", 1);
 /// Style du cercle de retournement : 0=Asphalte, 1=Engazonné, 2=Arbres (miroir de CulDeSacCapStyle en C#).
 export const culDeSacCapStyle$ = bindValue<number>(mod.id, "CULDESAC_CAP_STYLE", 0);
+/// Avenue (troisième réseau, grille classique uniquement) : colonne/rangée choisie librement
+/// par index (parmi les lignes réellement générées, 0-based), jamais un cul-de-sac.
+export const avenueColumnEnabled$ = bindValue<boolean>(mod.id, "AVENUE_COLUMN_ENABLED", false);
+export const avenueColumnIndex$ = bindValue<number>(mod.id, "AVENUE_COLUMN_INDEX", 0);
+export const avenueRowEnabled$ = bindValue<boolean>(mod.id, "AVENUE_ROW_ENABLED", false);
+export const avenueRowIndex$ = bindValue<number>(mod.id, "AVENUE_ROW_INDEX", 0);
 /// Mode "Adaptativo" (anneaux concentriques par offset du périmètre) : remplace la grille de lignes droites quand actif.
 export const adaptiveMode$ = bindValue<boolean>(mod.id, "ADAPTIVE_MODE", false);
 export const radialConnections$ = bindValue<number>(mod.id, "RADIAL_CONNECTIONS", 8);
@@ -46,6 +52,10 @@ export const roadPrefabAuto$ = bindValue<boolean>(mod.id, "ROAD_PREFAB_AUTO", tr
 export const secondaryRoadPrefabName$ = bindValue<string>(mod.id, "SECONDARY_ROAD_PREFAB_NAME", "");
 export const secondaryRoadPrefabIcon$ = bindValue<string>(mod.id, "SECONDARY_ROAD_PREFAB_ICON", "");
 export const secondaryRoadPrefabAuto$ = bindValue<boolean>(mod.id, "SECONDARY_ROAD_PREFAB_AUTO", true);
+/// Réseau avenue : mêmes trois bindings, préfixés AVENUE_.
+export const avenueRoadPrefabName$ = bindValue<string>(mod.id, "AVENUE_ROAD_PREFAB_NAME", "");
+export const avenueRoadPrefabIcon$ = bindValue<string>(mod.id, "AVENUE_ROAD_PREFAB_ICON", "");
+export const avenueRoadPrefabAuto$ = bindValue<boolean>(mod.id, "AVENUE_ROAD_PREFAB_AUTO", true);
 export const anarchyAvailable$ = bindValue<boolean>(mod.id, "ANARCHY_AVAILABLE", false);
 export const pickerType$ = bindValue<number>(mod.id, "PICKER_TYPE", 0);
 export const pickerData$ = bindValue<PrefabEntry[]>(mod.id, "PICKER_DATA", []);
@@ -65,6 +75,10 @@ export const setStaggered = (value: boolean) => trigger(mod.id, "SET_STAGGERED",
 export const setCulDeSacRatio = (value: number) => trigger(mod.id, "SET_CULDESAC_RATIO", value);
 export const setCulDeSacCapSize = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_SIZE", value);
 export const setCulDeSacCapStyle = (value: number) => trigger(mod.id, "SET_CULDESAC_CAP_STYLE", value);
+export const setAvenueColumnEnabled = (value: boolean) => trigger(mod.id, "SET_AVENUE_COLUMN_ENABLED", value);
+export const setAvenueColumnIndex = (value: number) => trigger(mod.id, "SET_AVENUE_COLUMN_INDEX", value);
+export const setAvenueRowEnabled = (value: boolean) => trigger(mod.id, "SET_AVENUE_ROW_ENABLED", value);
+export const setAvenueRowIndex = (value: number) => trigger(mod.id, "SET_AVENUE_ROW_INDEX", value);
 export const setAdaptiveMode = (value: boolean) => trigger(mod.id, "SET_ADAPTIVE_MODE", value);
 export const setRadialConnections = (value: number) => trigger(mod.id, "SET_RADIAL_CONNECTIONS", value);
 export const setAdaptiveRoundedCorners = (value: boolean) => trigger(mod.id, "SET_ADAPTIVE_ROUNDED_CORNERS", value);
@@ -82,3 +96,5 @@ export const pickPrefab = (entity: Entity) => trigger(mod.id, "PICK_PREFAB", ent
 export const pickAuto = () => trigger(mod.id, "PICK_AUTO");
 export const pickSecondaryPrefab = (entity: Entity) => trigger(mod.id, "PICK_PREFAB_SECONDARY", entity);
 export const pickSecondaryAuto = () => trigger(mod.id, "PICK_AUTO_SECONDARY");
+export const pickAvenuePrefab = (entity: Entity) => trigger(mod.id, "PICK_PREFAB_AVENUE", entity);
+export const pickAvenueAuto = () => trigger(mod.id, "PICK_AUTO_AVENUE");

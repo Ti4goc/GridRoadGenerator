@@ -11,6 +11,9 @@ import { useLocalization } from "cs2/l10n";
 import { PrefabPicker } from "./prefabPicker";
 import styles from "./roadSelection.module.scss";
 import {
+    avenueRoadPrefabAuto$,
+    avenueRoadPrefabIcon$,
+    avenueRoadPrefabName$,
     roadPrefabIcon$,
     roadPrefabName$,
     secondaryRoadPrefabAuto$,
@@ -18,7 +21,7 @@ import {
     secondaryRoadPrefabName$,
 } from "bindings";
 
-type PickerSlot = "primary" | "secondary" | null;
+type PickerSlot = "primary" | "secondary" | "avenue" | null;
 
 type RoadSelectionProps = {
     /// Nœud DOM frère de .panel, à l'intérieur du wrapper positionné (voir
@@ -37,14 +40,21 @@ export const RoadSelection = ({ portalContainer }: RoadSelectionProps) => {
     const secondaryRoadPrefabName = useValue(secondaryRoadPrefabName$);
     const secondaryRoadPrefabIcon = useValue(secondaryRoadPrefabIcon$);
     const secondaryRoadPrefabAuto = useValue(secondaryRoadPrefabAuto$);
+    const avenueRoadPrefabName = useValue(avenueRoadPrefabName$);
+    const avenueRoadPrefabIcon = useValue(avenueRoadPrefabIcon$);
+    const avenueRoadPrefabAuto = useValue(avenueRoadPrefabAuto$);
     const [pickerOpen, setPickerOpen] = useState<PickerSlot>(null);
-    // Repliée par défaut ; déjà dépliée si un réseau secondaire a été choisi explicitement
-    // lors d'une session précédente (persisté côté C#, donc plus vraiment "auto" au chargement).
+    // Repliées par défaut ; déjà dépliées si un réseau secondaire/avenue a été choisi
+    // explicitement lors d'une session précédente (persisté côté C#, donc plus vraiment
+    // "auto" au chargement).
     const [secondaryExpanded, setSecondaryExpanded] = useState(false);
     const showSecondary = secondaryExpanded || !secondaryRoadPrefabAuto;
+    const [avenueExpanded, setAvenueExpanded] = useState(false);
+    const showAvenue = avenueExpanded || !avenueRoadPrefabAuto;
 
     const displayName = (name: string) => (name ? (translate(`Assets.NAME[${name}]`, name) ?? name) : "—");
     const secondaryLabel = translate("GridRoadGenerator.UI.SecondaryRoadPrefab", "Secondary road") ?? "Secondary road";
+    const avenueLabel = translate("GridRoadGenerator.UI.AvenueRoadPrefab", "Avenue road") ?? "Avenue road";
 
     return (
         <div className={styles.roadRow}>
@@ -69,6 +79,23 @@ export const RoadSelection = ({ portalContainer }: RoadSelectionProps) => {
                         className={styles.addSecondaryButton}
                         title={secondaryLabel}
                         onClick={() => setSecondaryExpanded(true)}>
+                        +
+                    </button>
+                )}
+                {showAvenue ? (
+                    <button
+                        className={styles.prefabButton}
+                        title={avenueLabel}
+                        onClick={() => setPickerOpen("avenue")}>
+                        {avenueRoadPrefabIcon && <img src={avenueRoadPrefabIcon} className={styles.prefabIcon} />}
+                        <span className={styles.prefabName}>{displayName(avenueRoadPrefabName)}</span>
+                        <span className={styles.prefabChevron}>›</span>
+                    </button>
+                ) : (
+                    <button
+                        className={styles.addSecondaryButton}
+                        title={avenueLabel}
+                        onClick={() => setAvenueExpanded(true)}>
                         +
                     </button>
                 )}

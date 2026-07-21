@@ -9,6 +9,8 @@ import { VC } from "./vanilla";
 import {
     PrefabEntry,
     pickAuto,
+    pickAvenueAuto,
+    pickAvenuePrefab,
     pickPrefab,
     pickSecondaryAuto,
     pickSecondaryPrefab,
@@ -16,6 +18,7 @@ import {
     pickerType$,
     recentPrefabs$,
     roadPrefabAuto$,
+    avenueRoadPrefabAuto$,
     secondaryRoadPrefabAuto$,
     setPickerType,
 } from "bindings";
@@ -29,9 +32,10 @@ const TABS: { type: number; localeKey: string; fallback: string }[] = [
 
 type PrefabPickerProps = {
     onClose: () => void;
-    /// Quel réseau ce picker modifie : "primary" (défaut, réseau principal) ou "secondary"
-    /// (impasses/rayons — voir roadSelection.tsx). Détermine quels bindings/déclencheurs lire.
-    slot?: "primary" | "secondary";
+    /// Quel réseau ce picker modifie : "primary" (défaut, réseau principal), "secondary"
+    /// (impasses/rayons) ou "avenue" (voir roadSelection.tsx). Détermine quels bindings/
+    /// déclencheurs lire.
+    slot?: "primary" | "secondary" | "avenue";
 };
 
 export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose, slot = "primary" }) => {
@@ -41,9 +45,11 @@ export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose, slot = "pri
     const recentPrefabs = useValue(recentPrefabs$);
     const isAutoPrimary = useValue(roadPrefabAuto$);
     const isAutoSecondary = useValue(secondaryRoadPrefabAuto$);
-    const isAuto = slot === "secondary" ? isAutoSecondary : isAutoPrimary;
-    const pick = slot === "secondary" ? pickSecondaryPrefab : pickPrefab;
-    const pickAutoForSlot = slot === "secondary" ? pickSecondaryAuto : pickAuto;
+    const isAutoAvenue = useValue(avenueRoadPrefabAuto$);
+    const isAuto = slot === "secondary" ? isAutoSecondary : slot === "avenue" ? isAutoAvenue : isAutoPrimary;
+    const pick = slot === "secondary" ? pickSecondaryPrefab : slot === "avenue" ? pickAvenuePrefab : pickPrefab;
+    const pickAutoForSlot =
+        slot === "secondary" ? pickSecondaryAuto : slot === "avenue" ? pickAvenueAuto : pickAuto;
     const [searchQuery, setSearchQuery] = useState("");
 
     // Bascule à gauche du panneau si le côté droit déborde de l'écran (panneau
