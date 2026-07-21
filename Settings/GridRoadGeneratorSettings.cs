@@ -87,6 +87,25 @@ namespace GridRoadGenerator.Settings
         public CulDeSacCapStyle CulDeSacCapStyle { get; set; }
 
         /// <summary>
+        /// Avenue (grille classique uniquement) : la colonne d'index AvenueColumnIndex (parmi
+        /// les lignes u effectivement générées, 0-based) devient un troisième réseau dédié,
+        /// traversant tout le périmètre, jamais un cul-de-sac. Voir GridParameters.
+        /// AvenueColumnEnabled/GridGenerator.EmitLine.
+        /// </summary>
+        [SettingsUIHidden]
+        public bool AvenueColumnEnabled { get; set; }
+
+        [SettingsUIHidden]
+        public int AvenueColumnIndex { get; set; }
+
+        /// <summary>Même principe qu'AvenueColumnEnabled/AvenueColumnIndex, pour une rangée (ligne v).</summary>
+        [SettingsUIHidden]
+        public bool AvenueRowEnabled { get; set; }
+
+        [SettingsUIHidden]
+        public int AvenueRowIndex { get; set; }
+
+        /// <summary>
         /// Mode "Adaptativo" : au lieu de la grille de lignes droites (Mode/Rows/Columns/Angle/
         /// CulDeSac* ci-dessus, tous ignorés quand actif), génère des anneaux concentriques par
         /// offset successif du polygone du périmètre vers l'intérieur — voir
@@ -127,6 +146,14 @@ namespace GridRoadGenerator.Settings
         /// </summary>
         [SettingsUIHidden]
         public string SecondaryRoadPrefabName { get; set; }
+
+        /// <summary>
+        /// Réseau utilisé pour les tronçons "avenue" (voir RoadSegmentDef.IsAvenue,
+        /// AvenueColumnEnabled/AvenueRowEnabled). Même format et même logique de mode auto que
+        /// SecondaryRoadPrefabName, indépendant de lui.
+        /// </summary>
+        [SettingsUIHidden]
+        public string AvenueRoadPrefabName { get; set; }
 
         /// <summary>
         /// Vue active (Underground/ZoneGrid/InvisibleNetworks) pendant que l'outil est
@@ -179,11 +206,16 @@ namespace GridRoadGenerator.Settings
             CulDeSacRatio = d.CulDeSacRatio;
             CulDeSacCapSize = CulDeSacCapSize.Small;
             CulDeSacCapStyle = CulDeSacCapStyle.Asphalt;
+            AvenueColumnEnabled = d.AvenueColumnEnabled;
+            AvenueColumnIndex = d.AvenueColumnIndex;
+            AvenueRowEnabled = d.AvenueRowEnabled;
+            AvenueRowIndex = d.AvenueRowIndex;
             AdaptiveMode = false;
             RadialConnections = 8;
             AdaptiveRoundedCorners = false;
             RoadPrefabName = string.Empty;
             SecondaryRoadPrefabName = string.Empty;
+            AvenueRoadPrefabName = string.Empty;
             // Comme CS2-NetworkTools : tout coché par défaut à la première ouverture.
             SelectedViews = ViewOption.All;
         }
@@ -200,6 +232,10 @@ namespace GridRoadGenerator.Settings
             CulDeSacDepth = CulDeSacDepth,
             Staggered = Staggered,
             CulDeSacRatio = CulDeSacRatio,
+            AvenueColumnEnabled = AvenueColumnEnabled,
+            AvenueColumnIndex = AvenueColumnIndex,
+            AvenueRowEnabled = AvenueRowEnabled,
+            AvenueRowIndex = AvenueRowIndex,
             RadialConnections = RadialConnections,
             AdaptiveRoundedCorners = AdaptiveRoundedCorners
         };

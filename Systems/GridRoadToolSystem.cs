@@ -126,6 +126,8 @@ namespace GridRoadGenerator.Systems
         private bool _overrideResolved;
         private PrefabBase _secondaryOverridePrefab;
         private bool _secondaryOverrideResolved;
+        private PrefabBase _avenueOverridePrefab;
+        private bool _avenueOverrideResolved;
 
         /// <summary>Arête du périmètre (route existante entre deux nœuds sélectionnés consécutifs).</summary>
         private struct PerimeterEdge
@@ -156,6 +158,9 @@ namespace GridRoadGenerator.Systems
 
         /// <summary>Réseau secondaire résolu (voir GetSecondaryRoadPrefab) — lu par GridRoadUISystem pour la barre de sélection.</summary>
         public PrefabBase GetSecondaryPrefab() => GetSecondaryRoadPrefab();
+
+        /// <summary>Réseau avenue résolu (voir GetAvenueRoadPrefab) — lu par GridRoadUISystem pour la barre de sélection.</summary>
+        public PrefabBase GetAvenuePrefab() => GetAvenueRoadPrefab();
 
         /// <summary>L'outil ne s'active que par son raccourci ou le panneau, jamais via un prefab.</summary>
         public override bool TrySetPrefab(PrefabBase prefab) => false;
@@ -678,6 +683,34 @@ namespace GridRoadGenerator.Systems
             return _secondaryOverridePrefab != null ? _secondaryOverridePrefab : GetRoadPrefab();
         }
 
+        /// <summary>Vrai si aucun réseau avenue n'a été choisi explicitement (suit alors GetRoadPrefab).</summary>
+        public bool AvenueRoadPrefabIsAuto => string.IsNullOrEmpty(_settings.AvenueRoadPrefabName);
+
+        /// <summary>Fixe le réseau "avenue" (voir RoadSegmentDef.IsAvenue). null = mode auto.</summary>
+        public void SetAvenueRoadPrefab(PrefabBase prefab)
+        {
+            _avenueOverridePrefab = prefab;
+            _avenueOverrideResolved = true;
+            _settings.AvenueRoadPrefabName = prefab != null ? $"{prefab.GetType().Name}:{prefab.name}" : string.Empty;
+            _settings.ApplyAndSave();
+        }
+
+        /// <summary>
+        /// Prefab utilisé pour les tronçons avenue (RoadSegmentDef.IsAvenue) : le réseau avenue
+        /// choisi explicitement, sinon GetRoadPrefab() (le réseau principal) — même principe
+        /// que GetSecondaryRoadPrefab, indépendant de lui (une avenue n'est ni une impasse ni
+        /// un rayon).
+        /// </summary>
+        private PrefabBase GetAvenueRoadPrefab()
+        {
+            if (!_avenueOverrideResolved)
+            {
+                _avenueOverrideResolved = true;
+                _avenueOverridePrefab = ResolveSavedPrefab(_settings.AvenueRoadPrefabName);
+            }
+            return _avenueOverridePrefab != null ? _avenueOverridePrefab : GetRoadPrefab();
+        }
+
         // ------------------------------------------------------------------
         // Création des définitions réseau (aperçu fantôme + pose réelle)
         // ------------------------------------------------------------------
@@ -711,6 +744,12 @@ namespace GridRoadGenerator.Systems
             float secondaryRoadWidth = EntityManager.TryGetComponent(secondaryPrefabEntity, out NetGeometryData secondaryGeometryData)
                 ? secondaryGeometryData.m_DefaultWidth
                 : roadWidth;
+
+            // Troisième réseau (RoadSegmentDef.IsAvenue) : voir GetAvenueRoadPrefab. Aucun
+            // dimensionnement particulier n'en dépend (contrairement au secondaire, l'avenue
+            // ne pose pas de cercle de retournement).
+            PrefabBase avenueRoadPrefab = GetAvenueRoadPrefab();
+            Entity avenuePrefabEntity = avenueRoadPrefab != null ? m_PrefabSystem.GetEntity(avenueRoadPrefab) : prefabEntity;
 
             TerrainHeightData heightData = m_TerrainSystem.GetHeightData();
 
@@ -780,13 +819,15 @@ namespace GridRoadGenerator.Systems
                 course.m_EndPosition = end;
 
                 // Tronçon "local" (impasse en mode CulDeSacMode, rayon en mode Adaptativo) :
-                // réseau secondaire — voir GetSecondaryRoadPrefab. Identique au principal tant
-                // qu'aucun n'est choisi explicitement.
+                // réseau secondaire — voir GetSecondaryRoadPrefab. Tronçon avenue (voir
+                // GetAvenueRoadPrefab) : troisième réseau indépendant, jamais local (EmitLine
+                // exclut le cul-de-sac sur une ligne avenue, et l'Adaptativo n'a pas d'avenue).
+                // Identique au principal tant qu'aucun n'est choisi explicitement.
                 bool isLocalSegment = segment.IsCulDeSacEnd || segment.IsRadial;
                 Entity definition = commandBuffer.CreateEntity();
                 commandBuffer.AddComponent(definition, new CreationDefinition
                 {
-                    m_Prefab = isLocalSegment ? secondaryPrefabEntity : prefabEntity,
+                    m_Prefab = segment.IsAvenue ? avenuePrefabEntity : isLocalSegment ? secondaryPrefabEntity : prefabEntity,
                     m_RandomSeed = random.NextInt()
                 });
                 commandBuffer.AddComponent(definition, default(Updated));
