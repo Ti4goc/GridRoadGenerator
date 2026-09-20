@@ -211,8 +211,17 @@ namespace GridRoadGenerator.Systems
             {
                 _confirmAction.shouldBeEnabled = false;
             }
-            // Purge les définitions restantes pour ne pas laisser d'aperçu fantôme derrière soi.
-            Dependency = DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, Dependency);
+            // Purge leftover CreationDefinitions so the ghost preview does not linger.
+            // Do NOT call DestroyDefinitions here: ToolOutputBarrier is a
+            // SafeCommandBufferSystem and CreateCommandBuffer is forbidden outside
+            // ToolUpdate ("Trying to create EntityCommandBuffer when it's not allowed!").
+            // That exception fires when leaving the tool (Esc with empty selection,
+            // toolbar toggle, or switching to another tool). Destroy synchronously.
+            Dependency.Complete();
+            if (!m_DefinitionQuery.IsEmptyIgnoreFilter)
+            {
+                EntityManager.DestroyEntity(m_DefinitionQuery);
+            }
             // Nettoie l'état de rendu (requireUnderground/requireZones sont des champs
             // ToolBaseSystem propres à cette instance, jamais relus une fois l'outil inactif ;
             // markersVisible vit sur le RenderingSystem partagé du monde, donc explicitement
@@ -258,11 +267,15 @@ namespace GridRoadGenerator.Systems
                 {
                     bool hadSelection = _selectedNodes.Count > 0;
                     ResetState();
+                    // Destroy while still in ToolUpdate (barrier allowed), then deactivate.
+                    // Switching activeTool first would call OnStopRunning and used to throw
+                    // when DestroyDefinitions ran against ToolOutputBarrier there.
+                    inputDeps = DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                     if (!hadSelection)
                     {
                         m_ToolSystem.activeTool = m_DefaultToolSystem;
                     }
-                    return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
+                    return inputDeps;
                 }
 
                 // Entrée ou bouton "Générer" : concrétise l'aperçu de la frame précédente.
