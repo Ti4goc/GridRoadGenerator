@@ -157,7 +157,11 @@ namespace GridRoadGenerator.Core
             // Premier pas : direction déterministe indépendante de l'ordre du graphe
             // (angle horaire minimal depuis le nord, +Y) — seule la géométrie compte,
             // pour que le résultat ne dépende pas de l'ordre d'itération de l'adaptateur.
-            GraphEdge<TNode> firstEdge = PickSmallestClockwiseAngle(initialNeighbors, new float2(0f, 1f));
+            // Ignore d'abord les détours courts (voir IgnoreShortDetours) : le nœud de
+            // départ du double-clic peut lui-même être à une intersection avec un beco
+            // sem saída.
+            IReadOnlyList<GraphEdge<TNode>> initialCandidates = IgnoreShortDetours(graph, initialNeighbors, startNode);
+            GraphEdge<TNode> firstEdge = PickSmallestClockwiseAngle(initialCandidates, new float2(0f, 1f));
 
             outLoop.Add(startNode);
             var visited = new HashSet<TNode> { startNode };
@@ -195,8 +199,17 @@ namespace GridRoadGenerator.Core
                     return false; // impasse : aucune autre arête que celle empruntée
                 }
 
+                // Ignore les détours courts (beco sem saída, petit rond-point de
+                // retournement) tant qu'une autre direction continue la boucle
+                // principale — voir IgnoreShortDetours. Bug corrigé : le double-clic
+                // sur un anneau qui touche par ailleurs une rue secondaire pouvait
+                // dévier dedans (un beco sem saída "gagne" parfois l'angle horaire
+                // minimal), produisant soit un échec de détection soit un contour qui
+                // inclut un aller-retour hors du périmètre voulu.
+                IReadOnlyList<GraphEdge<TNode>> filteredCandidates = IgnoreShortDetours(graph, candidates, next);
+
                 float2 refDirection = -arrivalDirection;
-                GraphEdge<TNode> chosen = PickSmallestClockwiseAngle(candidates, refDirection);
+                GraphEdge<TNode> chosen = PickSmallestClockwiseAngle(filteredCandidates, refDirection);
 
                 current = next;
                 arrivalDirection = chosen.Direction;
@@ -204,6 +217,109 @@ namespace GridRoadGenerator.Core
             }
 
             return false; // garde-fou : trop de nœuds sans refermer la boucle
+        }
+
+        /// <summary>
+        /// Longueur totale (m) en dessous de laquelle une excursion depuis une intersection
+        /// du contour est considérée comme un simple détour court (beco sem saída ou petit
+        /// rond-point de retournement) à ignorer plutôt qu'une vraie continuation du réseau —
+        /// voir IsShortDetour/IgnoreShortDetours. Volontairement plus petit qu'un pâté de
+        /// maisons typique : ne doit écarter qu'un vrai cul-de-sac local, jamais une rue qui
+        /// continue réellement ailleurs.
+        /// </summary>
+        private const float ShortDetourMaxLength = 150f;
+
+        /// <summary>Nombre max de nœuds explorés par IsShortDetour avant d'abandonner (traité alors comme PAS un détour court).</summary>
+        private const int ShortDetourMaxNodes = 30;
+
+        /// <summary>
+        /// Parmi candidates (arêtes sortantes d'une intersection junction), écarte celles qui
+        /// mènent à un détour court (voir IsShortDetour) — SAUF si ça viderait la liste
+        /// entièrement (aucune vraie continuation disponible : mieux vaut suivre le détour
+        /// que d'échouer) ou s'il n'y a qu'un seul candidat de toute façon (rien à préférer).
+        /// </summary>
+        private static IReadOnlyList<GraphEdge<TNode>> IgnoreShortDetours<TNode>(
+            INetworkGraph<TNode> graph, IReadOnlyList<GraphEdge<TNode>> candidates, TNode junction)
+        {
+            if (candidates.Count <= 1)
+            {
+                return candidates;
+            }
+
+            var filtered = new List<GraphEdge<TNode>>();
+            foreach (GraphEdge<TNode> candidate in candidates)
+            {
+                if (!IsShortDetour(graph, candidate.Neighbor, junction, candidate.Cost))
+                {
+                    filtered.Add(candidate);
+                }
+            }
+            return filtered.Count > 0 ? filtered : candidates;
+        }
+
+        /// <summary>
+        /// Vrai si, en partant de viaNode (atteint depuis junction avec un premier tronçon de
+        /// longueur initialCost), tout chemin qui ne revient pas immédiatement en arrière se
+        /// termine RAPIDEMENT — soit une impasse simple (plus aucune arête), soit une petite
+        /// boucle de retournement qui referme directement sur junction — sans jamais croiser
+        /// une vraie intersection (2+ directions possibles) ni dépasser ShortDetourMaxLength de
+        /// distance cumulée. Un chemin qui continue au-delà de cette limite, ou qui atteint une
+        /// vraie intersection, n'est PAS considéré comme un détour court : c'est une rue qui
+        /// continue réellement, pas un simple beco sem saída/rond-point local.
+        /// </summary>
+        private static bool IsShortDetour<TNode>(INetworkGraph<TNode> graph, TNode viaNode, TNode junction, float initialCost)
+        {
+            var comparer = EqualityComparer<TNode>.Default;
+            TNode previous = junction;
+            TNode current = viaNode;
+            float accumulated = initialCost;
+            if (accumulated > ShortDetourMaxLength)
+            {
+                return false;
+            }
+
+            for (int step = 0; step < ShortDetourMaxNodes; step++)
+            {
+                GraphEdge<TNode>? onlyForward = null;
+                int forwardCount = 0;
+                foreach (GraphEdge<TNode> edge in graph.GetNeighbors(current))
+                {
+                    if (comparer.Equals(edge.Neighbor, previous))
+                    {
+                        continue;
+                    }
+                    forwardCount++;
+                    onlyForward = edge;
+                    if (forwardCount > 1)
+                    {
+                        break;
+                    }
+                }
+
+                if (forwardCount == 0)
+                {
+                    return true; // impasse simple atteinte, dans la limite de distance
+                }
+                if (forwardCount > 1)
+                {
+                    return false; // vraie intersection : pas un simple détour court
+                }
+
+                accumulated += onlyForward.Value.Cost;
+                if (accumulated > ShortDetourMaxLength)
+                {
+                    return false;
+                }
+                if (comparer.Equals(onlyForward.Value.Neighbor, junction))
+                {
+                    return true; // petite boucle de retournement refermée sur l'intersection de départ
+                }
+
+                previous = current;
+                current = onlyForward.Value.Neighbor;
+            }
+
+            return false; // garde-fou : n'a rien résolu dans la limite, traité comme une vraie continuation
         }
 
         /// <summary>Parmi les candidats, celui dont la direction demande la plus petite rotation horaire depuis referenceDirection.</summary>

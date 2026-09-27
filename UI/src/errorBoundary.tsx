@@ -9,19 +9,23 @@ import React from "react";
 
 interface ErrorBoundaryProps {
     children: React.ReactNode;
-    /// Rendu à la place des enfants si leur rendu lève une exception.
-    fallback: React.ReactNode;
+    /// Rendu à la place des enfants si leur rendu lève une exception. Fonction plutôt que
+    /// noeud statique quand l'appelant veut afficher le message d'erreur lui-même (aucun
+    /// des logs C# du jeu ne capture les erreurs JS/React, donc c'est le seul moyen pour le
+    /// joueur de nous rapporter le message exact sans console de dev).
+    fallback: React.ReactNode | ((error: unknown) => React.ReactNode);
 }
 
 interface ErrorBoundaryState {
     hasError: boolean;
+    error: unknown;
 }
 
 export class RenderErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-    state: ErrorBoundaryState = { hasError: false };
+    state: ErrorBoundaryState = { hasError: false, error: null };
 
-    static getDerivedStateFromError(): ErrorBoundaryState {
-        return { hasError: true };
+    static getDerivedStateFromError(error: unknown): ErrorBoundaryState {
+        return { hasError: true, error };
     }
 
     componentDidCatch(error: unknown) {
@@ -30,6 +34,9 @@ export class RenderErrorBoundary extends React.Component<ErrorBoundaryProps, Err
     }
 
     render() {
-        return this.state.hasError ? this.props.fallback : this.props.children;
+        if (!this.state.hasError) {
+            return this.props.children;
+        }
+        return typeof this.props.fallback === "function" ? this.props.fallback(this.state.error) : this.props.fallback;
     }
 }

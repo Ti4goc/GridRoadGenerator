@@ -11,7 +11,7 @@
     // left:100% (bord droit du panneau parent, quelle que soit sa vraie largeur)
     // + margin plutôt qu'un décalage en rem codé en dur (l'ancienne valeur
     // 312rem supposait une largeur de panneau de 300rem, périmée — .panelWrapper
-    // fait en réalité 400rem, voir gridPanel.module.scss).
+    // fait en réalité 460rem, voir gridPanel.module.scss).
     left: 100%;
     margin-left: 12rem;
     width: 320rem;
@@ -20,7 +20,9 @@
     // .panel du panneau principal — z-index explicite pour garantir qu'il
     // s'affiche toujours au-dessus, indépendamment de l'ordre d'insertion DOM.
     z-index: 1;
-    background-color: #181825bf;
+    // Même fond que les panneaux du jeu (voir .panel dans gridPanel.module.scss).
+    background-color: var(--panelColorNormal);
+    background-image: linear-gradient(var(--panelGradientStart), var(--panelGradientEnd));
     backdrop-filter: var(--panelBlur);
     border-radius: 12rem;
     color: white;
@@ -112,7 +114,7 @@
 
 .tabActive {
     color: white;
-    border-bottom-color: #9645ff;
+    border-bottom-color: var(--selectedColor);
 }
 
 .list {
@@ -143,10 +145,10 @@
 }
 
 .listItemActive {
-    background-color: #9645ff59;
+    background-color: #1e83aa59;
 
     &:hover {
-        background-color: #9645ff80;
+        background-color: #1e83aa80;
     }
 }
 

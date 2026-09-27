@@ -10,16 +10,6 @@
 $input-bg-color: #00000026;
 $input-border-color: #ffffff33;
 $input-border-hover-color: #ffffff59;
-// Accent violet du thème vanilla (état sélectionné/actif des ToolButtons, cf.
-// prefabPicker.module.scss) : aucune variable CSS exposée par le jeu pour
-// cette teinte n'a été trouvée dans les sources accessibles (types cs2/ui,
-// SCSS de NetworkTools) — valeur reprise telle quelle du reste du mod.
-$accent-violet: #9645ff;
-// Dégradé de sélection des ToolButtons, valeurs reprises telles quelles de
-// CS2-NetworkTools (variables.module.scss : $color-nt-1/$color-nt-2/$color-nt-3 —
-// rgb(193, 44, 234) / rgb(150, 69, 255), converties en hex pour éviter tout passage
-// par une fonction couleur Sass — voir la note hex8/hsla() de gridPanel.module.scss).
-$accent-violet-gradient-start: #c12cea;
 
 // Wrapper positionné en absolu (drag manuel) ; le Panel natif à l'intérieur
 // n'a aucun style de position/fond propre à lui — tout vient de son thème.
@@ -29,39 +19,27 @@ $accent-violet-gradient-start: #c12cea;
     pointer-events: auto;
 }
 
+// Aucun style custom sur .panel lui-même (ni bordure violette, ni dégradé de sélection) :
+// retour utilisateur en jeu, comparaison directe avec le panneau natif "Fire & Rescue" —
+// "vê a diferença... quero igual". Le contour violet et le dégradé de sélection étaient des
+// accents du mod ajoutés PAR-DESSUS le thème Panel natif ; les retirer fait hériter
+// exactement le même fond/coins/état sélectionné que tout autre panneau InfoView du jeu,
+// par construction (même composant Panel de cs2/ui).
 .panel {
     width: 100%;
-    // Léger contour violet (même accent que le reste du panneau) tout autour, en plus
-    // du thème natif du Panel (fond/coins arrondis viennent de lui, pas d'ici).
-    border: 2rem solid #9645ff8c;
-    border-radius: 12rem;
-
-    // Dégradé violet du mod sur l'état "sélectionné" de TOUT ToolButton natif dans le
-    // panneau (Mode, Vista, Anarchy...), à la place de sa teinte vanilla par défaut —
-    // même pattern que CS2-NetworkTools (toolActionPanel.module.scss). Un seul sélecteur
-    // au niveau du panneau plutôt que dupliqué par rangée : un bouton "selected" est un
-    // descendant DOM de .panel quel que soit le module SCSS qui définit ses propres
-    // classes (viewSelection.module.scss, etc.), donc ce sélecteur les couvre tous.
-    button[class^="selected"],
-    button[class*="selected"] {
-        background-image: linear-gradient(to bottom, $accent-violet-gradient-start 0%, $accent-violet 100%) !important;
-        background-color: $accent-violet-gradient-start !important;
-    }
 }
 
-// En-tête composé : icône de grille + titre majuscules + chevron replier.
-// Poignée de déplacement (drag) sur toute la zone, sauf le bouton chevron
-// (stopPropagation) et le bouton de fermeture natif du Panel (en dehors de
-// ce slot `header`, rendu par Panel lui-même via son propre thème). Fin
-// soulignement violet : seule touche d'accent du panneau, pas de fond plein.
+// En-tête composé : icône de grille + titre majuscules + chevron replier — pas
+// d'équivalent Panel tout fait pour cette combinaison (voir en-tête de fichier), mais
+// AUCUNE couleur/bordure custom ici non plus : le fond de l'en-tête vient du thème Panel
+// natif lui-même (même bande que "AVERAGE FIRE HAZARD" dans Fire & Rescue), seule la mise
+// en page (icône + titre + chevron) est composée à la main.
 .header {
     display: flex;
     flex-direction: row;
     align-items: center;
     cursor: move;
     width: 100%;
-    padding-bottom: 6rem;
-    border-bottom: 1rem solid $accent-violet;
 }
 
 .headerIcon {
@@ -109,6 +87,38 @@ $accent-violet-gradient-start: #c12cea;
     transform: rotate(-90deg);
 }
 
+// Espacement vertical entre TOUS les blocs directs du panneau (Padrão, Vista, Estrada,
+// Seleção, chaque SectionFoldout...) — retour utilisateur en jeu : "esta tudo muito colado
+// sem margem nenhum", TOUJOURS présent après un premier essai sans !important — VC.InfoSection
+// (natif) impose très probablement sa propre marge par défaut (margin: 0 ou similaire) avec la
+// MÊME spécificité qu'un simple sélecteur de classe qu'ici, l'ordre d'injection des feuilles de
+// style natives vs. celles du mod dans cohtml n'étant pas garanti en notre faveur — !important
+// pour ne plus en dépendre (même nécessité déjà rencontrée ailleurs dans ce fichier, voir
+// [class^="label"] plus bas). Marge plutôt que gap (cohtml ignore silencieusement gap/row-gap
+// sur les conteneurs flex — déjà vu ailleurs dans ce fichier).
+.panelContent {
+    & > * + * {
+        margin-top: 10rem !important;
+    }
+}
+
+// Boîte réelle autour de CHAQUE NativeSectionFoldout (voir le composant) — nécessaire pour
+// que la règle .panelContent ci-dessus ait quelque chose de sûr à marger ; aucun style propre
+// autrement, tout le rendu visuel vient de VC.InfoSection à l'intérieur.
+.foldoutWrapper {
+}
+
+// Contenu d'une section dépliée (voir NativeSectionFoldout) : un peu d'air entre le titre
+// (InfoRow uppercase) et sa première rangée, plutôt que collés l'un à l'autre. Même raison
+// !important que .panelContent ci-dessus (VC.InfoSection est aussi l'élément parent ici).
+.foldoutBody {
+    padding-top: 6rem !important;
+
+    & > * + * {
+        margin-top: 4rem !important;
+    }
+}
+
 // Repli par section (NativeSectionFoldout, voir le composant) : chevron composé
 // à la main dans le slot `left` d'un InfoRow uppercase, même langage visuel que
 // le chevron du panneau lui-même (.collapseIcon/.collapseIconCollapsed).
@@ -124,6 +134,75 @@ $accent-violet-gradient-start: #c12cea;
 .foldoutTitleRowLocked {
     cursor: default;
     opacity: 0.6;
+}
+
+// Sous-groupe à l'intérieur d'une section (voir Redes : "Avenue"/"Main" au-dessus de leurs
+// rangées Geral/Left/Right respectives).
+.networkGroupLabel {
+    display: block;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: var(--fontSizeXS);
+    font-weight: 600;
+    color: #ffffff80;
+    margin-top: 10rem;
+
+    &:first-child {
+        margin-top: 0;
+    }
+}
+
+// Grands carrés Padrão (PatternTile) : bouton custom (voir PatternTile pour le pourquoi),
+// accent violet UNIQUEMENT sur l'état sélectionné — reprend fidèlement la même teinte que
+// l'état "sélectionné" du vrai ToolButton natif (voir vanilla.ts, "état sélectionné violet
+// vanilla"), donc pas une couleur de marque custom malgré le DOM custom.
+$accent-violet-tile: #1e83aa;
+$accent-violet-tile-gradient-start: #1e83aa;
+
+.patternTiles {
+    display: flex;
+    flex-direction: row;
+    gap: 8rem;
+}
+
+.patternTile {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6rem;
+    padding: 12rem 4rem;
+    background-color: $input-bg-color;
+    border: 1rem solid $input-border-color;
+    border-radius: 8rem;
+    cursor: pointer;
+
+    &:hover {
+        border-color: $input-border-hover-color;
+    }
+}
+
+.patternTileSelected {
+    background-image: linear-gradient(to bottom, $accent-violet-tile-gradient-start 0%, $accent-violet-tile 100%);
+    border-color: transparent;
+
+    &:hover {
+        border-color: transparent;
+    }
+}
+
+.patternTileIcon {
+    width: 24rem;
+    height: 24rem;
+}
+
+.patternTileLabel {
+    font-size: var(--fontSizeXS);
+    font-weight: 600;
+    color: #ffffffd9;
+    text-align: center;
 }
 
 .foldoutChevron {
@@ -150,9 +229,144 @@ $accent-violet-gradient-start: #c12cea;
 // panneau.
 // ------------------------------------------------------------------
 
-.vanillaRow {
-    margin: 4rem 0;
+// Rangée icône + champ natif (voir iconRow) : remplace le libellé texte interne
+// du champ natif (VC.FloatSliderField/IntSliderField, [class^="label"] ci-dessous)
+// par une pastille icône + tooltip CSS pur (voir [data-tip]) — le champ natif
+// garde label="" (chaîne vide, pas de prop optionnelle côté API cs2/ui connue),
+// donc on écrase sa largeur à 0 ici plutôt que de compter sur le composant pour
+// gérer une chaîne vide proprement.
+.iconRow {
+    display: flex;
+    align-items: center;
+    width: 100%;
 
+    // margin-right plutôt que gap sur .iconRow (essayé puis retiré — même limite déjà
+    // documentée ailleurs dans ce fichier : cohtml ignore silencieusement gap sur les
+    // conteneurs flex, l'icône et le champ se retrouvaient collés malgré gap: 8rem déclaré).
+    .rowIcon {
+        width: 26rem;
+        height: 26rem;
+        border-radius: 6rem;
+        background: #ffffff0f;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        color: #ffffff8c;
+        margin-right: 8rem;
+
+        img {
+            width: 15rem;
+            height: 15rem;
+        }
+    }
+
+    .vanillaField {
+        flex: 1;
+
+        [class^="label"] {
+            width: 0 !important;
+            margin-right: 0 !important;
+        }
+    }
+}
+
+.iconRowDisabled {
+    opacity: 0.5;
+
+    .nativeSliderTrack {
+        cursor: default;
+    }
+}
+
+// Slider custom (voir NativeSlider) : mêmes proportions/couleurs que .sliderControlTrack/
+// Fill/Handle du panneau custom (gridPanel.module.scss), léger (div + CSS, pas de widget
+// d'éditeur) — voir NativeSlider pour le pourquoi.
+.nativeSliderField {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.nativeSliderTrack {
+    position: relative;
+    flex: 1;
+    height: 5rem;
+    background-color: #ffffff26;
+    border-radius: 3rem;
+    cursor: pointer;
+}
+
+.nativeSliderFill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background-image: linear-gradient(to right, #1e83aa, #1e83aa);
+    border-radius: 3rem;
+    pointer-events: none;
+}
+
+.nativeSliderHandle {
+    position: absolute;
+    top: 50%;
+    width: 13rem;
+    height: 13rem;
+    background-color: white;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    box-shadow: 0 1rem 3rem #00000080;
+}
+
+.nativeSliderValue {
+    flex-shrink: 0;
+    width: 46rem;
+    margin-left: 8rem;
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: white;
+    text-align: right;
+}
+
+// Tooltip CSS pur (pas de dépendance au système de tooltip natif, jamais vérifié
+// disponible pour un élément arbitraire hors VC.ToolButton) : même mécanique que
+// le mockup validé — apparaît au survol/focus de tout élément avec [data-tip].
+[data-tip] {
+    position: relative;
+}
+
+[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 6rem);
+    transform: translateX(-50%) translateY(3rem);
+    background: #0c0c14;
+    color: #fff;
+    font-size: var(--fontSizeXS);
+    font-weight: 600;
+    padding: 4rem 8rem;
+    border-radius: 5rem;
+    border: 1rem solid #ffffff26;
+    white-space: pre;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s ease, transform 0.12s ease;
+    z-index: 5;
+}
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.vanillaRow {
+    // Plus de margin ici : l'espacement entre rangées vient désormais uniformément du
+    // parent (.panelContent/.foldoutBody, voir plus haut — "& > * + *"), qui couvre aussi
+    // les rangées voisines qui ne sont PAS des .vanillaRow (networkGroupLabel, InfoRow...).
     .vanillaField {
         width: 100%;
         display: flex;
@@ -250,6 +464,52 @@ $accent-violet-gradient-start: #c12cea;
     padding: 5rem 8rem;
     font-size: var(--fontSizeS);
     font-weight: 600;
+}
+
+// Chip de choix de prefab dans une rangée Redes (Arterial/Avenue/Principal, voir
+// NativeNetworkPrefabRow) — mêmes classes/valeurs que .networkPrefabButton/Icon/Name et
+// .prefabChevron de gridPanel.module.scss, adaptées au fond/bordure natifs de ce panneau
+// (input-bg-color/input-border-color, cohérent avec .vanillaField ci-dessus) plutôt que
+// transparent + hover : parité fonctionnelle (chip absent auparavant dans ce panneau).
+.networkPrefabButton {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+    max-width: 220rem;
+    padding: 3rem 6rem;
+    border-radius: 4rem;
+    background-color: $input-bg-color;
+    border: 1rem solid $input-border-color;
+    color: white;
+    cursor: pointer;
+
+    &:hover {
+        border-color: $input-border-hover-color;
+    }
+}
+
+.networkPrefabIcon {
+    width: 16rem;
+    height: 16rem;
+    margin-right: 4rem;
+    flex-shrink: 0;
+}
+
+.networkPrefabName {
+    font-size: var(--fontSizeS);
+    line-height: 1.25em;
+    coh-font-fit-mode: shrink;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    white-space: nowrap;
+}
+
+.prefabChevron {
+    margin-left: 4rem;
+    color: #ffffff80;
+    font-size: var(--fontSizeM);
+    flex-shrink: 0;
 }
 
 // Le bouton "Annuler" n'a pas de classe custom : style vanilla pur du variant flat.

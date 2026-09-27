@@ -5,9 +5,9 @@
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    padding: 0 12rem 8rem;
-    border-bottom: 1rem solid #9645ff59; // accent violet, atténué (même teinte que les autres barres fixes)
-    margin-bottom: 8rem;
+    padding: 0 12rem 10rem;
+    border-bottom: 1rem solid #1e83aa59; // accent (même teinte que le jeu, --selectedColor), atténué
+    margin-bottom: 12rem;
 }
 
 .selectionLabel {

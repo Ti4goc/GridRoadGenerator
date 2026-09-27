@@ -16,6 +16,11 @@
   <ItemGroup>
     <Compile Include="..\Core\GridGenerator.cs" Link="Core\GridGenerator.cs" />
     <Compile Include="..\Core\NetworkGraph.cs" Link="Core\NetworkGraph.cs" />
+    <Compile Include="..\Core\ConcentricGenerator.cs" Link="Core\ConcentricGenerator.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures\**\*.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

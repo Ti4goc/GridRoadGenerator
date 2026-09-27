@@ -2,6 +2,8 @@
 // CS2-NetworkTools (c) Luca Rager, licence MIT — https://github.com/lucarager/CS2-NetworkTools
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using Colossal.Collections;
 using Colossal.Entities;
 using Colossal.Mathematics;
 using Game.Common;
@@ -13,6 +15,7 @@ using Game.Simulation;
 using Game.Tools;
 using GridRoadGenerator.Core;
 using GridRoadGenerator.Settings;
+using Unity.Collections;
 using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -34,10 +37,61 @@ namespace GridRoadGenerator.Systems
     {
         /// <summary>Distance max (m) entre le point survolé sur une arête et un nœud pour le sélectionner.</summary>
         private const float MaxSelectDistance = 16f;
-        /// <summary>Distance (m) sous laquelle une extrémité de segment est raccordée à un nœud sélectionné.</summary>
-        private const float NodeSnapDistance = 4f;
-        /// <summary>Distance (m) sous laquelle une extrémité de segment est raccordée à une route du périmètre.</summary>
-        private const float EdgeSnapDistance = 4f;
+        /// <summary>
+        /// Distance (m) sous laquelle une extrémité de segment est raccordée à un nœud
+        /// sélectionné. Alignée sur GridGenerator.MinNodeDistance (la même distance sert déjà
+        /// à fusionner les points calculés côté géométrie pure) : sans ça, un point que le
+        /// générateur a déjà fusionné avec un sommet voisin peut rester à quelques mètres d'un
+        /// nœud réel existant sans jamais s'y raccorder — le jeu refuse alors de construire deux
+        /// nœuds aussi proches sans Anarchy activé ("Objetos sobrepostos").
+        /// </summary>
+        private const float NodeSnapDistance = GridGenerator.MinNodeDistance;
+        /// <summary>Distance (m) sous laquelle une extrémité de segment est raccordée à une route du périmètre — même raison que NodeSnapDistance.</summary>
+        private const float EdgeSnapDistance = GridGenerator.MinNodeDistance;
+        /// <summary>
+        /// Nombre PLANCHER/PLAFOND de morceaux de polyligne pour approximer une courbe existante
+        /// (PerimeterEdge.m_Curve, Bezier4x3) — voir ComputeInteriorEdgeSampleCount. Ne sert plus
+        /// qu'au test "cette arête passe-t-elle par l'intérieur du polygone ?" de
+        /// FindInteriorExistingEdges (un booléen approximatif reste acceptable là : un échec
+        /// coûte au pire un croisement raté, pas une jonction cassée). Le calcul du point de
+        /// croisement RÉEL, lui, ne passe plus par une polyligne du tout — voir
+        /// InteriorEdgeIntersectIterations et son commentaire dans
+        /// SplitSegmentsCrossingInteriorEdges pour l'historique du bug que ceci corrigeait
+        /// avant d'être remplacé par une intersection exacte courbe-droite.
+        /// </summary>
+        private const int MinInteriorEdgeSamples = 16;
+        private const int MaxInteriorEdgeSamples = 128;
+        /// <summary>Longueur (m) cible par morceau de polyligne — voir ComputeInteriorEdgeSampleCount.</summary>
+        private const float InteriorEdgeSampleSpacing = 5f;
+        /// <summary>
+        /// Profondeur de récursion (subdivision De Casteljau) pour
+        /// MathUtils.Intersect(Bezier4x2, Line2.Segment, out float2, int) dans
+        /// SplitSegmentsCrossingInteriorEdges — reprend la valeur utilisée par le jeu lui-même
+        /// pour ce même appel (Game.Net.SecondaryLaneSystem, Game.Zones.BlockSystem, confirmé en
+        /// décompilant Game.dll), pas une valeur inventée.
+        /// </summary>
+        private const int InteriorEdgeIntersectIterations = 4;
+        /// <summary>
+        /// Seuil "croisement déjà couvert par MakeCoursePos, ne pas le couper ici" dans
+        /// SplitSegmentsCrossingInteriorEdges — voir le commentaire de méthode pour l'historique
+        /// du bug (zone morte) que la valeur EdgeSnapDistance * 0.5 corrige, au lieu de
+        /// GridGenerator.MinSegmentLength (qui, à valeur ÉGALE à EdgeSnapDistance, ouvrait cette
+        /// zone morte).
+        /// </summary>
+        private const float InteriorCrossingEndpointSkipDistance = EdgeSnapDistance * 0.5f;
+
+        /// <summary>
+        /// Nombre de subdivisions à utiliser pour approximer CETTE courbe existante en polyligne,
+        /// proportionnel à sa longueur réelle (MathUtils.Length, même API que NetCourse.m_Length
+        /// plus haut) plutôt qu'un compte fixe — pour qu'un morceau de polyligne reste toujours
+        /// autour de InteriorEdgeSampleSpacing mètres, même quand l'arête entière fait plusieurs
+        /// centaines de mètres et que seule une petite portion croise la zone sélectionnée.
+        /// </summary>
+        private static int ComputeInteriorEdgeSampleCount(Bezier4x3 curve)
+        {
+            float length = MathUtils.Length(curve);
+            return math.clamp((int)math.ceil(length / InteriorEdgeSampleSpacing), MinInteriorEdgeSamples, MaxInteriorEdgeSamples);
+        }
         /// <summary>Fenêtre (s) entre deux clics sur le même nœud pour détecter un double-clic.</summary>
         private const float DoubleClickWindow = 0.35f;
         /// <summary>Garde-fou : nombre max de nœuds visités par la recherche de chemin entre deux clics.</summary>
@@ -58,11 +112,14 @@ namespace GridRoadGenerator.Systems
         /// <summary>Mode Auto : largeur (m) sous laquelle la taille "Large" est choisie (sinon "XL").</summary>
         private const float CulDeSacCapLargeMaxWidth = 22f;
 
-        // Îlot central de rotonde (avenue, voir EmitAvenueRoundabout) : StaticObjectPrefab
+        // Asset de rotonde complet (avenue, voir ComputeAvenueRoundabout) : StaticObjectPrefab
         // natif du jeu, "<Taille>Roundabout01" (ex. "MediumRoundabout01" — trouvé par
-        // recherche dans les assets du jeu, aucune valeur officielle exposée). Taille déduite
-        // du rayon RÉEL de la rotonde générée (pas une largeur de route) selon les seuils
-        // ci-dessous ; approximatifs, à affiner selon retour visuel en jeu.
+        // recherche dans les assets du jeu, aucune valeur officielle exposée) : déjà une
+        // rotonde entière (anneau pavé + marquages), pas un simple îlot central décoratif —
+        // posé par-dessus le croisement en + normal des deux avenues, jamais construit à
+        // partir de segments de route. Taille déduite du rayon voulu (voir
+        // ComputeAvenueRoundabout, dérivé de SpacingMeters) selon les seuils ci-dessous ;
+        // approximatifs, à affiner selon retour visuel en jeu.
         private const float RoundaboutIslandSmallMaxRadius = 10f;
         private const float RoundaboutIslandMediumMaxRadius = 15f;
         private const float RoundaboutIslandLargeMaxRadius = 20f;
@@ -76,6 +133,133 @@ namespace GridRoadGenerator.Systems
         private bool _invalidLogged;
         /// <summary>Empêche le spam du log d'omission de nœuds trop proches (MinNodeDistance) : un avis par sélection.</summary>
         private bool _omittedNodesLogged;
+        /// <summary>Même principe que _omittedNodesLogged, pour le diagnostic détaillé de FindInteriorExistingEdges.</summary>
+        private int _lastLoggedCandidateCount = -1;
+        /// <summary>Même principe, pour le diagnostic détaillé de SplitSegmentsCrossingInteriorEdges.</summary>
+        private int _lastLoggedPreSplitSegmentCount = -1;
+
+        // ------------------------------------------------------------------
+        // Détection de geste "sélection/paramètre changé" (retour utilisateur en jeu, "adiciona
+        // um log de performance que deteta cada gesto que faço") : le log de performance ne
+        // s'écrit QUE sur un événement discret réel, jamais deux fois pour la même frame
+        // identique, même si CreateGridDefinitions() continue de tourner à chaque frame en
+        // dessous (voir sa doc — ESSAI ABANDONNÉ de ne recréer QUE sur un vrai changement,
+        // impossible : le pipeline natif exige une recréation chaque frame pour rester visible.
+        // La vraie protection contre le coût d'un gros laço en continu est ShowSketchOnly, pas
+        // ce flag). GridParameters a une égalité de struct triviale (aucun champ référence) ;
+        // les positions sont comparées élément par élément (float3 n'a pas d'Equals utile par
+        // défaut) — le nombre de nœuds seul ne suffit pas : un nœud retiré puis un autre ajouté
+        // au même endroit dans le clic suivant laisserait le compte inchangé.
+        // ------------------------------------------------------------------
+        private readonly List<float3> _lastGesturePositions = new List<float3>();
+        /// <summary>
+        /// Mis à vrai par MarkPreviewDirty() — appelé par GridRoadUISystem.MarkSettingsDirty()
+        /// (donc sur TOUT changement de réglage déclenché depuis le panneau, quel que soit le
+        /// champ) et directement par SetRoadPrefab/SetSecondaryRoadPrefab/SetAvenueRoadPrefab
+        /// ci-dessous (le sélecteur de réseau du panneau modifie _settings SANS passer par
+        /// MarkSettingsDirty). Volontairement PAS une comparaison champ par champ de
+        /// GridParameters : cette dernière ratait déjà les réglages hors GridParameters
+        /// (prefabs, FollowTerrain, CulDeSacCapSize/CapStyle, melhoramentos Avenue/Principal...)
+        /// — un aperçu figé qui ignore un changement réel de réglage serait un bug bien pire
+        /// (silencieux, contre-intuitif) que la lenteur que ce correctif corrige.
+        /// </summary>
+        private bool _previewDirty;
+
+        /// <summary>
+        /// Signale qu'un réglage affectant l'aperçu vient de changer — appelé par
+        /// GridRoadUISystem.MarkSettingsDirty() (tout SET_* du panneau) et directement par
+        /// SetRoadPrefab/SetSecondaryRoadPrefab/SetAvenueRoadPrefab ci-dessous.
+        /// </summary>
+        public void MarkPreviewDirty() => _previewDirty = true;
+
+        // ------------------------------------------------------------------
+        // Aperçu léger par défaut en mode Loop (retour utilisateur en jeu, suite au correctif
+        // abandonné ci-dessus) : recréer CHAQUE FRAME les centaines d'entités ECS d'un gros laço
+        // — même strictement identiques — est une exigence dure du pipeline natif (voir la doc
+        // de CreateGridDefinitions), donc pas contournable par une simple détection de
+        // changement. La VRAIE économie consiste à ne matérialiser le vrai aperçu ECS QUE
+        // pendant la confirmation (Générer) : le reste du temps, ShowSketchOnly est vrai et
+        // GridRoadOverlaySystem.DrawLiveSketch dessine un simple croquis (déjà utilisé pendant
+        // un drag de slider, voir LivePreviewOverride) à partir des réglages COURANTS (pas d'un
+        // LivePreviewOverride). Appliqué aux DEUX modes (Grille classique ET Loop) — un premier
+        // essai limitait ça au mode Loop (la Grille classique restant en aperçu réel continu,
+        // jugée assez bon marché) mais retour utilisateur en jeu : "no modo grelha ainda tem a
+        // pré visualização com as estradas reais" — l'utilisateur veut la même cohérence dans
+        // les deux modes, indépendamment du coût réel.
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Nombre de frames de matérialisation réelle avant d'autoriser Générer à conclure —
+        /// voir _confirming. Volontairement généreux (pas juste 1-2) : CreateGridDefinitions
+        /// écrit via un EntityCommandBuffer (m_ToolOutputBarrier), dont le "playback" réel
+        /// (création effective des entités interrogeables via m_DefinitionQuery) n'est pas
+        /// synchrone — il a lieu à un point ultérieur du pipeline ECS, potentiellement une frame
+        /// plus tard. La validation native des collisions (GetAllowApply) tourne elle-même sur
+        /// des entités déjà matérialisées, donc encore une frame de plus. Avant ce correctif
+        /// (retour utilisateur : rejet systématique même Anarchy activé), 2 frames se sont
+        /// avérées insuffisantes — impossible de savoir a priori combien il en faut exactement
+        /// sans télémétrie native, donc marge large plutôt que deviner au plus juste.
+        /// </summary>
+        private const int ConfirmMaterializeFrames = 6;
+
+        /// <summary>
+        /// Vrai entre la 1ʳᵉ pression de "Générer" (en mode Loop, aperçu jusque-là en croquis
+        /// seul) et l'application effective ou le rejet — le temps que CreateGridDefinitions()
+        /// tourne réellement pendant ConfirmMaterializeFrames frames consécutives, pour que le
+        /// pipeline natif ait eu le temps de valider les collisions (voir GetAllowApply) avant
+        /// de conclure. Pendant cette fenêtre, ShowSketchOnly repasse à faux : le vrai aperçu
+        /// ECS remplace le croquis, exactement comme si le mod tournait déjà en continu.
+        /// </summary>
+        private bool _confirming;
+        private int _confirmFramesElapsed;
+
+        /// <summary>
+        /// Résolution automatique des collisions (option "AutoResolveCollisions" du menu Options,
+        /// désactivée par défaut — retour utilisateur : d'abord demandée, puis retirée car elle
+        /// trouait le Superblock, puis redemandée comme option à activer/désactiver) : quand la
+        /// confirmation échoue, les tronçons générés qui portent un Game.Tools.Error (voir
+        /// TryExcludeErrorSegments) sont ajoutés ici et filtrés par CreateGridDefinitions, puis
+        /// la matérialisation recommence — jusqu'à MaxAutoResolveAttempts fois avant de retomber
+        /// sur le rejet classique. Clés = extrémités arrondies (voir SegmentKey), stables d'une
+        /// frame à l'autre puisque la génération est déterministe pour une même sélection/
+        /// configuration. Vidé dès que la sélection ou un réglage change.
+        /// </summary>
+        private readonly HashSet<(int, int, int, int)> _excludedSegments = new HashSet<(int, int, int, int)>();
+        private int _autoResolveAttempts;
+        private const int MaxAutoResolveAttempts = 5;
+
+        /// <summary>Courbe réellement posée (après snapping) de chaque tronçon créé à la dernière frame, pour relier un Error natif au tronçon généré qui l'a produit.</summary>
+        private readonly List<((int, int, int, int) key, Bezier4x3 curve)> _lastCreatedCurves = new List<((int, int, int, int), Bezier4x3)>();
+
+        /// <summary>Tolérance (m) entre un point d'une entité en erreur et la courbe d'un tronçon généré pour les considérer comme le même.</summary>
+        private const float ErrorMatchDistance = 2f;
+
+        /// <summary>
+        /// Vrai après un rejet de "Générer" pour cause de collision (voir la fin de la
+        /// matérialisation ci-dessous) — retour utilisateur en jeu : en croquis, aucune manière
+        /// de VOIR où est la collision avant de presser Générer, qui ne fait alors "rien" de
+        /// visible (juste un avertissement dans le log, jamais montré en jeu). Tant que ce
+        /// drapeau est vrai, ShowSketchOnly reste faux : le vrai aperçu ECS continue de se
+        /// matérialiser à chaque frame (donc la surbrillance rouge native des collisions reste
+        /// visible) au lieu de retomber sur le croquis. Effacé dès que la sélection ou un
+        /// réglage change à nouveau (voir gestureChanged plus bas) — l'utilisateur vient
+        /// d'ajuster quelque chose pour corriger, pas la peine de garder l'ancien rejet affiché.
+        /// </summary>
+        private bool _showCollisionPreview;
+
+        /// <summary>Vrai depuis le dernier rejet de "Générer" pour collision — voir _showCollisionPreview. Lu par le panneau pour afficher un message clair (PERIMETER_COLLISION).</summary>
+        public bool PerimeterCollision { get; private set; }
+
+        /// <summary>
+        /// Vrai si l'aperçu affiché est actuellement le croquis léger, pas de vraies entités ECS
+        /// — voir la doc ci-dessus. S'applique aux DEUX modes (Grille classique ET Loop).
+        /// </summary>
+        public bool ShowSketchOnly => !_confirming && !_showCollisionPreview;
+        private LivePreviewField? _dragField;
+        private int _dragFrameCount;
+        private double _dragTotalMs;
+        private double _dragMaxMs;
+
         private Entity _lastClickedNode = Entity.Null;
         private float _lastClickTime = -1f;
         private readonly List<Entity> _pathScratch = new List<Entity>();
@@ -95,6 +279,42 @@ namespace GridRoadGenerator.Systems
 
         /// <summary>Nombre de nœuds actuellement sélectionnés (lu par l'UI et les tooltips).</summary>
         public int NodeCount => _selectedNodes.Count;
+
+        private readonly List<float3> _maxLayersPositions = new List<float3>();
+        private int _concentricMaxLayers = ConcentricGenerator.MaxLayersLimit;
+
+        /// <summary>
+        /// Nombre maximal d'anneaux Concêntrico pour la sélection actuelle (voir
+        /// ConcentricGenerator.MaxLayers) — le panneau borne le slider Camadas à cette valeur.
+        /// Recalculé seulement quand la sélection change ; sans périmètre fermé, la limite
+        /// absolue (le slider reste libre tant qu'il n'y a rien à mesurer).
+        /// </summary>
+        public int ConcentricMaxLayers
+        {
+            get
+            {
+                if (_selectedPositions.Count < 3)
+                {
+                    _maxLayersPositions.Clear();
+                    return ConcentricGenerator.MaxLayersLimit;
+                }
+                if (!PositionsEqual(_selectedPositions, _maxLayersPositions))
+                {
+                    try
+                    {
+                        _concentricMaxLayers = ConcentricGenerator.MaxLayers(BuildCurveAwarePerimeterPositions());
+                    }
+                    catch (Exception e)
+                    {
+                        Mod.Log.Warn($"Limite de camadas impossible à calculer : {e.Message}");
+                        _concentricMaxLayers = ConcentricGenerator.MaxLayersLimit;
+                    }
+                    _maxLayersPositions.Clear();
+                    _maxLayersPositions.AddRange(_selectedPositions);
+                }
+                return _concentricMaxLayers;
+            }
+        }
         /// <summary>Nœuds sélectionnés, dans l'ordre de clic (lus par le rendu overlay).</summary>
         public IReadOnlyList<Entity> SelectedNodes => _selectedNodes;
         /// <summary>Positions des nœuds sélectionnés, dans l'ordre de clic (lues par le rendu overlay).</summary>
@@ -109,6 +329,100 @@ namespace GridRoadGenerator.Systems
         public bool CanApply { get; private set; }
 
         /// <summary>
+        /// Un champ de GridParameters à la fois (voir LivePreviewField) — retour utilisateur en
+        /// jeu, "coloca as linhas em todas as opções" : généralise LiveSpacingPreview (limité au
+        /// seul slider Espaçamento) à TOUS les sliders du panneau. Réglé par SliderControl côté
+        /// React (prop onDragPreview) pendant un drag — retour utilisateur en jeu : régénérer la
+        /// vraie grille (entités ECS complètes) à chaque pixel parcouru est trop coûteux avec une
+        /// grille dense (voir l'enquête de performance complète). NE touche JAMAIS _settings ni
+        /// ne déclenche CreateGridDefinitions — seul GridRoadOverlaySystem le lit, pour dessiner
+        /// un simple esquisse de lignes (buffer.DrawDashedLine, aucune entité créée) qui suit le
+        /// doigt en direct. Effacé (null) dès que le drag se termine (le SET_* correspondant,
+        /// la vraie valeur, prend le relais et régénère la grille réelle une seule fois).
+        /// </summary>
+        public (LivePreviewField Field, float Value)? LivePreviewOverride { get; set; }
+
+        /// <summary>
+        /// Un slider par valeur — voir LivePreviewOverride. L'ORDRE/les valeurs DOIVENT rester
+        /// synchronisés avec LiveField côté bindings.ts (un entier brut transite sur le binding,
+        /// pas de partage de type possible entre C# et TS).
+        /// </summary>
+        public enum LivePreviewField
+        {
+            Spacing = 0,
+            Columns = 1,
+            Rows = 2,
+            Angle = 3,
+            // 4 = ArterialSpacing, supprimé avec le niveau Arterial (voir GridGenerator.
+            // GenerateLoopGrid) — valeur volontairement non réutilisée pour rester synchronisée
+            // avec LiveField côté bindings.ts.
+            CollectorSpacing = 5,
+            LoopCulDeSacRatio = 6,
+            CulDeSacDepth = 7,
+            CulDeSacRatio = 8,
+            AvenueColumnIndex = 9,
+            AvenueRowIndex = 10,
+            SuperblockZone = 11,
+            ConcentricLayers = 12,
+            ConcentricConnections = 13,
+        }
+
+        /// <summary>
+        /// Geste "drag de slider" démarré/poursuivi — voir GridRoadUISystem, SET_LIVE_PREVIEW.
+        /// Logge le DÉBUT une seule fois (nouveau champ ou aucun drag en cours) ; les frames
+        /// individuelles pendant le drag sont accumulées (RecordDragFrame), JAMAIS logguées une
+        /// par une (voir l'enquête de performance précédente sur le danger du log par-frame).
+        /// </summary>
+        public void BeginOrContinueDrag(LivePreviewField field)
+        {
+            if (_dragField == field)
+            {
+                return;
+            }
+            if (_dragField.HasValue)
+            {
+                LogDragEnd(); // changement de champ en plein drag (rare) : clôture proprement l'ancien.
+            }
+            _dragField = field;
+            _dragFrameCount = 0;
+            _dragTotalMs = 0;
+            _dragMaxMs = 0;
+            Mod.Log.Info($"[Perf] gesto=arrasto início campo={field}");
+        }
+
+        /// <summary>Une frame de croquis dessinée pendant le drag en cours — voir GridRoadOverlaySystem.DrawLiveSketch. Accumulé, pas loggué individuellement.</summary>
+        public void RecordDragFrame(double durationMs)
+        {
+            if (!_dragField.HasValue)
+            {
+                return;
+            }
+            _dragFrameCount++;
+            _dragTotalMs += durationMs;
+            if (durationMs > _dragMaxMs)
+            {
+                _dragMaxMs = durationMs;
+            }
+        }
+
+        /// <summary>Fin du drag (relâchement) — voir GridRoadUISystem, CLEAR_LIVE_PREVIEW. Logge le résumé (frames/moyenne/max) UNE fois.</summary>
+        public void EndDrag()
+        {
+            if (!_dragField.HasValue)
+            {
+                return;
+            }
+            LogDragEnd();
+            _dragField = null;
+        }
+
+        private void LogDragEnd()
+        {
+            double avgMs = _dragFrameCount > 0 ? _dragTotalMs / _dragFrameCount : 0;
+            Mod.Log.Info($"[Perf] gesto=arrasto fim campo={_dragField} frames={_dragFrameCount} médiaMs={avgMs:F2} máxMs={_dragMaxMs:F2}");
+        }
+
+        /// <summary>
         /// Vue active (Underground/ZoneGrid/InvisibleNetworks) tant que l'outil tourne — voir
         /// RefreshViews. Restaurée depuis les settings à l'activation (OnStartRunning).
         /// </summary>
@@ -121,6 +435,12 @@ namespace GridRoadGenerator.Systems
         private TerrainSystem m_TerrainSystem;
         private ToolOutputBarrier m_ToolOutputBarrier;
         private RenderingSystem m_RenderingSystem;
+        /// <summary>
+        /// Arbre spatial des arêtes/nœuds de route existants (voir FindInteriorExistingEdges) —
+        /// utilisé UNIQUEMENT en lecture directe hors job (JobHandle complété avant accès, voir
+        /// cette méthode), jamais planifié comme job Burst depuis ce système.
+        /// </summary>
+        private Game.Net.SearchSystem m_NetSearchSystem;
         private EntityQuery m_DefinitionQuery;
         /// <summary>
         /// Tous les nœuds routiers sélectionnables (jamais les nœuds Temp d'aperçu), lus par
@@ -136,6 +456,9 @@ namespace GridRoadGenerator.Systems
 
         private PrefabBase _fallbackPrefab;
         private bool _fallbackSearched;
+        /// <summary>Repli par défaut du réseau "secundária" en mode SuperblockMode (voir GetSecondaryRoadPrefab) — un vrai chemin piéton plutôt que le même prefab que la coletora.</summary>
+        private PrefabBase _pedestrianFallbackPrefab;
+        private bool _pedestrianFallbackSearched;
         private PrefabBase _overridePrefab;
         private bool _overrideResolved;
         private PrefabBase _secondaryOverridePrefab;
@@ -158,6 +481,7 @@ namespace GridRoadGenerator.Systems
             m_TerrainSystem = World.GetOrCreateSystemManaged<TerrainSystem>();
             m_ToolOutputBarrier = World.GetOrCreateSystemManaged<ToolOutputBarrier>();
             m_RenderingSystem = World.GetOrCreateSystemManaged<RenderingSystem>();
+            m_NetSearchSystem = World.GetOrCreateSystemManaged<Game.Net.SearchSystem>();
             m_DefinitionQuery = GetDefinitionQuery();
             m_EligibleRoadNodesQuery = GetEntityQuery(
                 ComponentType.ReadOnly<Node>(),
@@ -212,7 +536,23 @@ namespace GridRoadGenerator.Systems
                 _confirmAction.shouldBeEnabled = false;
             }
             // Purge les définitions restantes pour ne pas laisser d'aperçu fantôme derrière soi.
-            Dependency = DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, Dependency);
+            // PAS via DestroyDefinitions : il crée un EntityCommandBuffer sur m_ToolOutputBarrier,
+            // que le jeu interdit hors de la phase de mise à jour de l'outil — fermer le panneau
+            // pendant l'aperçu réel (seul cas où il reste des définitions) levait "Trying to create
+            // EntityCommandBuffer when it's not allowed!" en erreur critique (retour utilisateur,
+            // Player.log). Suppression directe sur le thread principal, jobs en cours terminés.
+            try
+            {
+                if (!m_DefinitionQuery.IsEmptyIgnoreFilter)
+                {
+                    Dependency.Complete();
+                    EntityManager.DestroyEntity(m_DefinitionQuery);
+                }
+            }
+            catch (Exception e)
+            {
+                Mod.Log.Error(e, "Impossible de purger l'aperçu à la fermeture de l'outil.");
+            }
             // Nettoie l'état de rendu (requireUnderground/requireZones sont des champs
             // ToolBaseSystem propres à cette instance, jamais relus une fois l'outil inactif ;
             // markersVisible vit sur le RenderingSystem partagé du monde, donc explicitement
@@ -265,18 +605,48 @@ namespace GridRoadGenerator.Systems
                     return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                 }
 
-                // Entrée ou bouton "Générer" : concrétise l'aperçu de la frame précédente.
+                // Entrée ou bouton "Générer".
                 bool confirm = _applyRequested || (_confirmAction != null && _confirmAction.WasPressedThisFrame());
                 _applyRequested = false;
-                if (confirm && HasPreview)
+                if (confirm && HasPreview && !_confirming)
                 {
-                    if (GetAllowApply() && !m_DefinitionQuery.IsEmptyIgnoreFilter)
+                    if (!ShowSketchOnly)
                     {
-                        applyMode = ApplyMode.Apply;
-                        ResetState();
-                        return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
+                        // N'arrive ici QUE si _showCollisionPreview est vrai (un rejet précédent
+                        // a laissé le vrai aperçu matérialisé pour que le joueur voie la
+                        // collision, voir sa doc) : l'aperçu réel tourne déjà en continu depuis
+                        // des frames, donc déjà validé — concrétise directement l'aperçu de la
+                        // frame précédente sans repasser par la matérialisation de 6 frames.
+                        if (GetAllowApply() && !m_DefinitionQuery.IsEmptyIgnoreFilter)
+                        {
+                            // Pas de durée mesurée ici : la pose réelle (CourseSplitSystem et le
+                            // reste du pipeline ECS natif) est asynchrone sur les frames
+                            // suivantes, pas synchrone dans cet appel — seul le geste lui-même
+                            // est loggué.
+                            Mod.Log.Info($"[Perf] gesto=generate nós={_selectedPositions.Count}");
+                            applyMode = ApplyMode.Apply;
+                            ResetState();
+                            return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
+                        }
+                        Mod.Log.Warn("Grille refusée : l'aperçu contient des erreurs de placement (collisions, pente...). Ajuste le périmètre ou l'espacement.");
+                        // Voir _showCollisionPreview/PerimeterCollision : garde le vrai aperçu
+                        // visible (surbrillance native des collisions) au lieu de retomber sur
+                        // le croquis, et affiche un message clair dans le panneau — sans ça,
+                        // "Générer" ne fait rien de visible pour le joueur.
+                        _showCollisionPreview = true;
+                        PerimeterCollision = true;
                     }
-                    Mod.Log.Warn("Grille refusée : l'aperçu contient des erreurs de placement (collisions, pente...). Ajuste le périmètre ou l'espacement.");
+                    else
+                    {
+                        // Aperçu jusqu'ici en croquis seul (ShowSketchOnly) : démarre la
+                        // matérialisation réelle (voir _confirming/ConfirmMaterializeFrames) au
+                        // lieu de conclure tout de suite — le bloc de reconstruction plus bas
+                        // matérialise un vrai aperçu ECS dès CETTE frame (ShowSketchOnly devient
+                        // faux), mais le pipeline natif a besoin de quelques frames pour valider
+                        // les collisions avant qu'on puisse se fier à GetAllowApply().
+                        _confirming = true;
+                        _confirmFramesElapsed = 0;
+                    }
                 }
 
                 // Survol : surbrillance du nœud sous le curseur.
@@ -323,13 +693,58 @@ namespace GridRoadGenerator.Systems
                     }
                 }
 
-                // Reconstruction de l'aperçu (chaque frame, comme le NetTool — pas d'empilement).
+                // Reconstruction de l'aperçu (chaque frame, comme le NetTool — pas d'empilement,
+                // voir la doc de CreateGridDefinitions pour pourquoi une recréation à chaque
+                // frame n'est PAS optionnelle dès qu'un vrai aperçu ECS doit rester visible/
+                // validé). PENDANT un drag de slider (LivePreviewOverride non-null, voir
+                // GridRoadUISystem/GridRoadOverlaySystem.DrawLiveSketch) OU hors confirmation
+                // (ShowSketchOnly, voir sa doc — s'applique aux DEUX modes) : détruit l'aperçu
+                // réel SANS le recréer — le croquis léger le remplace (drag) ou en tient lieu par
+                // défaut. Le vrai aperçu revient dès le relâchement du drag ou dès "Générer"
+                // (voir _confirming ci-dessus).
+                bool suppressRealPreview = LivePreviewOverride.HasValue || ShowSketchOnly;
                 inputDeps = DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                 HasPreview = false;
                 PerimeterInvalid = false;
-                if (_selectedPositions.Count >= 2)
+                if (_selectedPositions.Count >= 2 && suppressRealPreview)
                 {
+                    // Croquis (drag ou ShowSketchOnly) : aucune entité ECS créée, juste un calcul
+                    // pur (GridGenerator, déjà vérifié rapide même sur de grandes zones — voir
+                    // GridGeneratorPerformanceTests) pour savoir si le périmètre produit une
+                    // grille valide, et activer/désactiver Générer en conséquence.
+                    HasPreview = ComputePreviewValidityCheap();
+                    PerimeterInvalid = !HasPreview;
+                }
+                else if (_selectedPositions.Count >= 2)
+                {
+                    // Geste "sélection/paramètre changé" (voir _lastGesture*) : ne logge le temps
+                    // de CreateGridDefinitions QUE si la configuration a réellement changé depuis
+                    // le dernier log — jamais à chaque frame identique (même discipline que le
+                    // drag, voir BeginOrContinueDrag/RecordDragFrame). La création elle-même,
+                    // contrairement au log, tourne bien à CHAQUE frame (voir ci-dessus).
+                    bool gestureChanged = _previewDirty || !PositionsEqual(_selectedPositions, _lastGesturePositions);
+                    Stopwatch gestureStopwatch = gestureChanged ? Stopwatch.StartNew() : null;
+                    if (gestureChanged)
+                    {
+                        // Nouvelle sélection/configuration : les tronçons retirés pour
+                        // l'ancienne (voir _excludedSegments) n'ont plus de sens.
+                        _excludedSegments.Clear();
+                        _autoResolveAttempts = 0;
+                    }
                     int created = CreateGridDefinitions();
+                    if (gestureChanged)
+                    {
+                        gestureStopwatch.Stop();
+                        Mod.Log.Info($"[Perf] gesto=seleção/parâmetro nós={_selectedPositions.Count} loop={_settings.LoopMode} criados={created} duraçãoMs={gestureStopwatch.Elapsed.TotalMilliseconds:F2}");
+                        _previewDirty = false;
+                        _lastGesturePositions.Clear();
+                        _lastGesturePositions.AddRange(_selectedPositions);
+                        // Un vrai changement efface un rejet précédent (voir _showCollisionPreview/
+                        // PerimeterCollision) : l'utilisateur vient d'ajuster quelque chose, plus la
+                        // peine de garder affiché "Générer" a été refusé pour l'ancienne config.
+                        _showCollisionPreview = false;
+                        PerimeterCollision = false;
+                    }
                     HasPreview = created > 0;
                     PerimeterInvalid = created == 0;
                 }
@@ -341,6 +756,57 @@ namespace GridRoadGenerator.Systems
                 else if (!PerimeterInvalid)
                 {
                     _invalidLogged = false;
+                }
+
+                // Conclusion de la confirmation démarrée plus haut (_confirming) : après
+                // ConfirmMaterializeFrames frames de vrai aperçu ECS (matérialisé ci-dessus
+                // puisque ShowSketchOnly est faux tant que _confirming est vrai), le pipeline
+                // natif a eu le temps de valider les collisions — applique ou rejette.
+                if (_confirming)
+                {
+                    _confirmFramesElapsed++;
+                    if (_confirmFramesElapsed >= ConfirmMaterializeFrames)
+                    {
+                        bool hasPreviewNow = HasPreview;
+                        bool allowApplyNow = GetAllowApply();
+                        bool queryEmptyNow = m_DefinitionQuery.IsEmptyIgnoreFilter;
+                        if (hasPreviewNow && allowApplyNow && !queryEmptyNow)
+                        {
+                            Mod.Log.Info($"[Perf] gesto=generate nós={_selectedPositions.Count}");
+                            applyMode = ApplyMode.Apply;
+                            ResetState();
+                            return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
+                        }
+                        // Résolution automatique (option du menu Options, voir _excludedSegments) :
+                        // retire les tronçons générés en erreur et relance la matérialisation, au
+                        // lieu de rejeter toute la grille pour quelques tronçons en conflit.
+                        if (_settings.AutoResolveCollisions && hasPreviewNow && !allowApplyNow
+                            && _autoResolveAttempts < MaxAutoResolveAttempts)
+                        {
+                            int removed = TryExcludeErrorSegments();
+                            if (removed > 0)
+                            {
+                                _autoResolveAttempts++;
+                                _confirmFramesElapsed = 0;
+                                Mod.Log.Info($"Collision détectée : {removed} tronçon(s) en conflit retiré(s) automatiquement (tentative {_autoResolveAttempts}/{MaxAutoResolveAttempts}, {_excludedSegments.Count} au total).");
+                                CanApply = false;
+                                return inputDeps;
+                            }
+                        }
+                        // Diagnostic temporaire (retour utilisateur : rejet systématique même
+                        // Anarchy activé, donc probablement pas une vraie collision) : montre
+                        // LAQUELLE des 3 conditions a échoué, au lieu de deviner à l'aveugle si
+                        // c'est un timing ECS (m_DefinitionQuery vide = le playback du
+                        // m_ToolOutputBarrier n'a peut-être pas eu lieu à temps) ou autre chose.
+                        Mod.Log.Warn($"Grille refusée : hasPreview={hasPreviewNow} allowApply={allowApplyNow} queryVide={queryEmptyNow} frames={_confirmFramesElapsed}");
+                        LogCollisionDetails();
+                        // Voir _showCollisionPreview/PerimeterCollision : garde le vrai aperçu
+                        // visible (surbrillance native des collisions) au lieu de retomber sur
+                        // le croquis, et affiche un message clair dans le panneau.
+                        _confirming = false;
+                        _showCollisionPreview = true;
+                        PerimeterCollision = true;
+                    }
                 }
                 CanApply = HasPreview && GetAllowApply();
             }
@@ -564,7 +1030,143 @@ namespace GridRoadGenerator.Systems
             _invalidLogged = false;
             _omittedNodesLogged = false;
             PerimeterDetectionFailed = false;
+            // Force une régénération complète à la prochaine sélection valide, même si elle
+            // reproduit EXACTEMENT les mêmes positions que la précédente (voir PositionsEqual).
+            _lastGesturePositions.Clear();
+            _previewDirty = true;
+            _confirming = false;
+            _confirmFramesElapsed = 0;
+            _showCollisionPreview = false;
+            PerimeterCollision = false;
+            _excludedSegments.Clear();
+            _autoResolveAttempts = 0;
+            _lastCreatedCurves.Clear();
         }
+
+        /// <summary>
+        /// Diagnostic d'un refus de "Générer" (retour utilisateur : "continua a ter colisões",
+        /// sans que le log dise où) : réglages du motif, puis chaque entité que le jeu marque en
+        /// erreur — position, genre (arête/nœud/objet) et si c'est un tronçon généré (Temp) ou une
+        /// route déjà construite. Permet de rejouer le cas en test avec le même périmètre.
+        /// </summary>
+        private void LogCollisionDetails()
+        {
+            try
+            {
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                Mod.Log.Warn($"[Diag colisão] motif loop={_settings.LoopMode} superblock={_settings.SuperblockMode} concentric={_settings.ConcentricMode} camadas={_settings.ConcentricLayers} ligações={_settings.ConcentricConnections} nós={_selectedPositions.Count}");
+                using (NativeArray<Entity> errorEntities = m_ErrorQuery.ToEntityArray(Allocator.Temp))
+                {
+                    int shown = 0;
+                    foreach (Entity e in errorEntities)
+                    {
+                        if (shown++ >= 40)
+                        {
+                            Mod.Log.Warn($"[Diag colisão] ... {errorEntities.Length - 40} erro(s) a mais");
+                            break;
+                        }
+                        string origin = EntityManager.HasComponent<Temp>(e) ? "gerado" : "existente";
+                        if (EntityManager.TryGetComponent(e, out Curve curve))
+                        {
+                            float3 a = curve.m_Bezier.a;
+                            float3 d = curve.m_Bezier.d;
+                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] aresta {0} de ({1:F1} {2:F1}) a ({3:F1} {4:F1}) comprimento={5:F1}",
+                                origin, a.x, a.z, d.x, d.z, MathUtils.Length(curve.m_Bezier)));
+                        }
+                        else if (EntityManager.TryGetComponent(e, out Game.Net.Node node))
+                        {
+                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] nó {0} em ({1:F1} {2:F1})", origin, node.m_Position.x, node.m_Position.z));
+                        }
+                        else if (EntityManager.TryGetComponent(e, out Game.Objects.Transform transform))
+                        {
+                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] objeto {0} em ({1:F1} {2:F1})", origin, transform.m_Position.x, transform.m_Position.z));
+                        }
+                        else
+                        {
+                            Mod.Log.Warn($"[Diag colisão] entidade {origin} sem posição conhecida ({e})");
+                        }
+                    }
+                    if (errorEntities.Length == 0)
+                    {
+                        Mod.Log.Warn("[Diag colisão] nenhuma entidade marcada com erro nesta frame");
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Mod.Log.Error(e, "Diagnóstico de colisão falhou.");
+            }
+        }
+
+        private static (int, int, int, int) SegmentKey(RoadSegmentDef segment)
+        {
+            // Indépendante du sens : un tronçon peut être émis dans un sens ou dans l'autre.
+            (int, int) a = ((int)math.round(segment.Start.x * 10f), (int)math.round(segment.Start.z * 10f));
+            (int, int) b = ((int)math.round(segment.End.x * 10f), (int)math.round(segment.End.z * 10f));
+            if (a.Item1 > b.Item1 || (a.Item1 == b.Item1 && a.Item2 > b.Item2))
+            {
+                (a, b) = (b, a);
+            }
+            return (a.Item1, a.Item2, b.Item1, b.Item2);
+        }
+
+        /// <summary>
+        /// Relie chaque entité portant Game.Tools.Error (surbrillance rouge native) au(x)
+        /// tronçon(s) généré(s) de la dernière frame qu'elle recouvre, et les ajoute à
+        /// _excludedSegments. Arête en erreur : un de ses points doit tomber sur la courbe du
+        /// tronçon (une arête peut n'être qu'un morceau du tronçon, découpé sur un croisement).
+        /// Nœud ou objet en erreur : tout tronçon qui passe par sa position. Retourne le nombre de
+        /// NOUVEAUX tronçons exclus — 0 = aucune erreur attribuable à la grille générée (ex.
+        /// erreur sur une route existante), inutile de réessayer.
+        /// </summary>
+        private int TryExcludeErrorSegments()
+        {
+            if (_lastCreatedCurves.Count == 0)
+            {
+                return 0;
+            }
+            var probes = new List<float3>();
+            using (NativeArray<Entity> errorEntities = m_ErrorQuery.ToEntityArray(Allocator.Temp))
+            {
+                foreach (Entity e in errorEntities)
+                {
+                    if (EntityManager.TryGetComponent(e, out Curve curve))
+                    {
+                        probes.Add(MathUtils.Position(curve.m_Bezier, 0.5f));
+                        probes.Add(MathUtils.Position(curve.m_Bezier, 0.25f));
+                        probes.Add(MathUtils.Position(curve.m_Bezier, 0.75f));
+                    }
+                    else if (EntityManager.TryGetComponent(e, out Game.Net.Node node))
+                    {
+                        probes.Add(node.m_Position);
+                    }
+                    else if (EntityManager.TryGetComponent(e, out Game.Objects.Transform transform))
+                    {
+                        probes.Add(transform.m_Position);
+                    }
+                }
+            }
+
+            int added = 0;
+            foreach (((int, int, int, int) key, Bezier4x3 curve) in _lastCreatedCurves)
+            {
+                if (_excludedSegments.Contains(key))
+                {
+                    continue;
+                }
+                foreach (float3 probe in probes)
+                {
+                    if (MathUtils.Distance(curve.xz, probe.xz, out float _) < ErrorMatchDistance)
+                    {
+                        _excludedSegments.Add(key);
+                        added++;
+                        break;
+                    }
+                }
+            }
+            return added;
+        }
+
 
         private void SetHighlight(Entity entity, bool highlighted)
         {
@@ -606,6 +1208,7 @@ namespace GridRoadGenerator.Systems
             _overrideResolved = true;
             _settings.RoadPrefabName = prefab != null ? $"{prefab.GetType().Name}:{prefab.name}" : string.Empty;
             _settings.ApplyAndSave();
+            MarkPreviewDirty();
         }
 
         /// <summary>
@@ -671,13 +1274,14 @@ namespace GridRoadGenerator.Systems
         /// <summary>Vrai si aucun réseau secondaire n'a été choisi explicitement (suit alors GetRoadPrefab).</summary>
         public bool SecondaryRoadPrefabIsAuto => string.IsNullOrEmpty(_settings.SecondaryRoadPrefabName);
 
-        /// <summary>Fixe le réseau "local" (impasses/rayons — voir RoadSegmentDef.IsCulDeSacEnd/IsRadial). null = mode auto.</summary>
+        /// <summary>Fixe le réseau "local" (impasses — voir RoadSegmentDef.IsCulDeSacEnd). null = mode auto.</summary>
         public void SetSecondaryRoadPrefab(PrefabBase prefab)
         {
             _secondaryOverridePrefab = prefab;
             _secondaryOverrideResolved = true;
             _settings.SecondaryRoadPrefabName = prefab != null ? $"{prefab.GetType().Name}:{prefab.name}" : string.Empty;
             _settings.ApplyAndSave();
+            MarkPreviewDirty();
         }
 
         /// <summary>
@@ -686,6 +1290,15 @@ namespace GridRoadGenerator.Systems
         /// (NetTool/"Small Road") : tant que rien n'est choisi explicitement pour le secondaire,
         /// les deux réseaux restent synchronisés, comportement identique à avant l'existence du
         /// second réseau.
+        ///
+        /// EXCEPTION en mode SuperblockMode : ce même emplacement sert de réseau PIÉTON (voir
+        /// RoadSegmentDef.IsPedestrian) — retour utilisateur en jeu, capture d'écran : sans
+        /// prefab choisi explicitement, "auto" retombe sur GetRoadPrefab() (le MÊME prefab que
+        /// la coletora), rendant la grille intérieure visuellement indissociable d'une simple
+        /// grille classique uniforme — pas du tout le rendu attendu (rues piétonnes distinctes
+        /// autour d'îlots à bâtir). Tant que rien n'est choisi explicitement, on cherche d'abord
+        /// un vrai chemin piéton ("Pedestrian Path", même mécanisme de repli que "Small Road"
+        /// pour GetRoadPrefab) avant de retomber sur GetRoadPrefab() si introuvable.
         /// </summary>
         private PrefabBase GetSecondaryRoadPrefab()
         {
@@ -694,7 +1307,26 @@ namespace GridRoadGenerator.Systems
                 _secondaryOverrideResolved = true;
                 _secondaryOverridePrefab = ResolveSavedPrefab(_settings.SecondaryRoadPrefabName);
             }
-            return _secondaryOverridePrefab != null ? _secondaryOverridePrefab : GetRoadPrefab();
+            if (_secondaryOverridePrefab != null)
+            {
+                return _secondaryOverridePrefab;
+            }
+            if (_settings.LoopMode && _settings.SuperblockMode)
+            {
+                if (!_pedestrianFallbackSearched)
+                {
+                    _pedestrianFallbackSearched = true;
+                    if (!m_PrefabSystem.TryGetPrefab(new PrefabID(nameof(RoadPrefab), "Pedestrian Path"), out _pedestrianFallbackPrefab))
+                    {
+                        Mod.Log.Warn("Prefab par défaut \"Pedestrian Path\" introuvable ; choisis un réseau piéton dans l'onglet Redes > Pedestrian.");
+                    }
+                }
+                if (_pedestrianFallbackPrefab != null)
+                {
+                    return _pedestrianFallbackPrefab;
+                }
+            }
+            return GetRoadPrefab();
         }
 
         /// <summary>Vrai si aucun réseau avenue n'a été choisi explicitement (suit alors GetRoadPrefab).</summary>
@@ -707,6 +1339,7 @@ namespace GridRoadGenerator.Systems
             _avenueOverrideResolved = true;
             _settings.AvenueRoadPrefabName = prefab != null ? $"{prefab.GetType().Name}:{prefab.name}" : string.Empty;
             _settings.ApplyAndSave();
+            MarkPreviewDirty();
         }
 
         /// <summary>
@@ -725,9 +1358,58 @@ namespace GridRoadGenerator.Systems
             return _avenueOverridePrefab != null ? _avenueOverridePrefab : GetRoadPrefab();
         }
 
+        /// <summary>
+        /// Calcule SEULEMENT si le périmètre actuel produit une grille non vide — aucune entité
+        /// ECS créée, juste GridGenerator (pure C#, voir GridGeneratorPerformanceTests pour la
+        /// garantie de rapidité même sur une grande zone). Utilisé par ShowSketchOnly (mode Loop
+        /// hors confirmation) pour activer/désactiver Générer sans payer le coût de
+        /// CreateGridDefinitions — voir sa doc pour pourquoi ce dernier ne peut pas tourner en
+        /// continu dans ce cas.
+        /// </summary>
+        private bool ComputePreviewValidityCheap()
+        {
+            try
+            {
+                List<float3> perimeterPositions = BuildCurveAwarePerimeterPositions();
+                GridParameters parameters = _settings.ToGridParameters();
+                List<RoadSegmentDef> segments = _settings.LoopMode
+                    ? GridGenerator.GenerateLoopGrid(perimeterPositions, parameters)
+                    : GridGenerator.GenerateGrid(perimeterPositions, parameters, out _, out _);
+                return segments.Count > 0;
+            }
+            catch (Exception e)
+            {
+                Mod.Log.Warn($"Aperçu (croquis) impossible : {e.Message}");
+                return false;
+            }
+        }
+
         // ------------------------------------------------------------------
         // Création des définitions réseau (aperçu fantôme + pose réelle)
         // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Compare deux listes de positions élément par élément — float3 n'a pas d'Equals utile
+        /// par défaut (comparaison de référence héritée d'object). Utilisé par OnUpdate pour
+        /// détecter un VRAI changement de sélection (voir _lastGesturePositions/sa doc) : le
+        /// nombre de nœuds seul ne suffit pas (un nœud retiré puis un autre ajouté ailleurs au
+        /// clic suivant laisse le compte inchangé, mais change bien la grille attendue).
+        /// </summary>
+        private static bool PositionsEqual(List<float3> a, List<float3> b)
+        {
+            if (a.Count != b.Count)
+            {
+                return false;
+            }
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (!math.all(a[i] == b[i]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
 
         /// <summary>
         /// Génère la grille (logique pure de Core) et crée pour chaque segment une entité de
@@ -749,7 +1431,7 @@ namespace GridRoadGenerator.Systems
                 ? geometryData.m_DefaultWidth
                 : 0f;
 
-            // Réseau "local" (impasses/rayons) : voir GetSecondaryRoadPrefab — identique au
+            // Réseau "local" (impasses) : voir GetSecondaryRoadPrefab — identique au
             // principal tant qu'aucun n'est choisi explicitement, donc aucun changement visible
             // par défaut. Le cercle de retournement (roadWidth ci-dessous) se dimensionne sur CE
             // réseau, puisque c'est lui qui pose effectivement les impasses.
@@ -768,23 +1450,21 @@ namespace GridRoadGenerator.Systems
             TerrainHeightData heightData = m_TerrainSystem.GetHeightData();
 
             List<RoadSegmentDef> segments;
+            RoundaboutInfo roundabout = default;
             try
             {
                 List<float3> perimeterPositions = BuildCurveAwarePerimeterPositions();
                 GridParameters parameters = _settings.ToGridParameters();
-                if (_settings.AdaptiveMode)
+                if (_settings.LoopMode)
                 {
-                    // Anneaux concentriques (offset de polygone) : voir GenerateAdaptiveGrid.
-                    // perimeterPositions vient déjà densifié le long des arêtes courbes
-                    // existantes (rond-point...), donc les anneaux suivent naturellement la
-                    // courbe plutôt que de couper au travers de sa corde. Réutilise
-                    // CulDeSacMode/Ratio/Depth (impasses sur les rayons) — voir
-                    // EmitRadialConnections ; CulDeSacAxis/Staggered n'ont pas d'équivalent ici.
-                    segments = GridGenerator.GenerateAdaptiveGrid(perimeterPositions, parameters);
+                    // Collectrices éparses + laço interne par super-îlot — voir
+                    // GridGenerator.GenerateLoopGrid. Pas de rotonde/comptage d'omission ici
+                    // (uniquement pertinents pour la grille classique).
+                    segments = GridGenerator.GenerateLoopGrid(perimeterPositions, parameters);
                 }
                 else
                 {
-                    segments = GridGenerator.GenerateGrid(perimeterPositions, parameters, out int omittedNodeCount);
+                    segments = GridGenerator.GenerateGrid(perimeterPositions, parameters, out int omittedNodeCount, out roundabout);
                     if (omittedNodeCount > 0 && !_omittedNodesLogged)
                     {
                         _omittedNodesLogged = true;
@@ -803,41 +1483,64 @@ namespace GridRoadGenerator.Systems
                 return 0;
             }
 
-            // Centre/rayon de la rotonde éventuelle (EmitAvenueRoundabout), pour y poser
-            // l'îlot central décoratif natif (voir TryResolveRoundaboutIslandPrefab) une fois
-            // tous les segments de route créés. Dérivé des facettes IsArc elles-mêmes (moyenne
-            // des points, tous équidistants du centre par construction) plutôt que recalculé
-            // indépendamment côté Core : reste valable même si EmitAvenueRoundabout change de
-            // formule de rayon.
-            float3 roundaboutCenterSum = float3.zero;
-            int roundaboutPointCount = 0;
-            foreach (RoadSegmentDef arcSegment in segments)
-            {
-                if (!arcSegment.IsArc) continue;
-                roundaboutCenterSum += arcSegment.Start;
-                roundaboutPointCount++;
-            }
-            bool hasRoundabout = roundaboutPointCount > 0;
-            float3 roundaboutCenter = hasRoundabout ? roundaboutCenterSum / roundaboutPointCount : default;
-            float roundaboutRadius = 0f;
-            if (hasRoundabout)
-            {
-                float radiusSum = 0f;
-                foreach (RoadSegmentDef arcSegment in segments)
-                {
-                    if (!arcSegment.IsArc) continue;
-                    radiusSum += math.distance(arcSegment.Start.xz, roundaboutCenter.xz);
-                }
-                roundaboutRadius = radiusSum / roundaboutPointCount;
-            }
-
             List<PerimeterEdge> perimeter = BuildPerimeterEdges();
+            // BuildPerimeterEdges() ne connaît QUE le contour cliqué (nœuds sélectionnés
+            // consécutifs) : si une route existante traverse l'INTÉRIEUR du bloc choisi (pas
+            // seulement son bord), elle n'apparaît jamais dans "perimeter" et MakeCoursePos
+            // n'a alors aucun moyen de l'utiliser pour raccorder/splitter — les extrémités de
+            // segment qui devraient s'y accrocher retombent en règle 3 (point libre) et la
+            // grille générée entre en collision physique avec cette route bien réelle
+            // ("Objetos sobrepostos"). Confirmé par captures d'écran : les croisements tombant
+            // près d'un nœud déjà existant de la route intérieure s'en sortaient par chance
+            // (snapping propre du jeu), ceux tombant en milieu de segment échouaient toujours.
+            // FindInteriorExistingEdges comble ce trou en cherchant, via l'arbre spatial du
+            // réseau, les arêtes réelles qui passent par l'intérieur du polygone sélectionné.
+            List<PerimeterEdge> interiorEdges = FindInteriorExistingEdges(perimeter);
+            perimeter.AddRange(interiorEdges);
+
+            // Suite directe du correctif ci-dessus : FindInteriorExistingEdges ne résout QUE le
+            // cas où une extrémité de segment généré tombe assez près d'une route intérieure
+            // pour s'y raccorder (règle 2 de MakeCoursePos). Mais une collectrice/laço qui n'a
+            // jamais eu de sommet prévu à cet endroit passe souvent tout DROIT par-dessus la
+            // route existante, en PLEIN MILIEU du segment — rien à "snapper" puisqu'aucune
+            // extrémité n'est concernée. Le résultat est le même bug "Objetos sobrepostos",
+            // mais au milieu d'une ligne au lieu d'un bout. SplitSegmentsCrossingInteriorEdges
+            // scinde ces segments droits au(x) point(s) de croisement AVANT toute création ECS,
+            // pour que chaque moitié se termine pile sur la route réelle (et se raccorde
+            // proprement via MakeCoursePos, comme n'importe quelle autre extrémité).
+            //
+            // Passe "perimeter" (BOUNDARY + interior, déjà fusionnés ci-dessus), PAS seulement
+            // interiorEdges : diagnostic en jeu (voir le "[Diag croisements] rejeté (déjà
+            // périmètre)" dans FindInteriorExistingEdges) a confirmé qu'une route réelle traversant
+            // le milieu de la sélection peut très bien apparaître comme arête de PÉRIMÈTRE (deux
+            // nœuds cliqués consécutifs directement reliés par cette route, ex. détection
+            // automatique au double-clic qui longe cette route en traçant le contour) sans jamais
+            // être classée "intérieure" — auquel cas elle n'était testée que pour le RACCORD
+            // d'extrémité (MakeCoursePos, règle 2), jamais pour un croisement en PLEIN MILIEU d'un
+            // segment généré, laissant exactement le même bug "Objetos sobrepostos" pour cette
+            // arête-là. Tester TOUTE arête connue (périmètre ou intérieure) couvre les deux cas.
+            var trueInteriorEntities = new HashSet<Entity>();
+            foreach (PerimeterEdge ie in interiorEdges)
+            {
+                trueInteriorEntities.Add(ie.m_Entity);
+            }
+            segments = SplitSegmentsCrossingInteriorEdges(segments, perimeter, trueInteriorEntities);
+
             EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
             Unity.Mathematics.Random random = RandomSeed.Next().GetRandom(0);
             int created = 0;
+            _lastCreatedCurves.Clear();
 
             foreach (RoadSegmentDef segment in segments)
             {
+                // Tronçon retiré par la résolution automatique des collisions (voir
+                // _excludedSegments/TryExcludeErrorSegments).
+                (int, int, int, int) segmentKey = SegmentKey(segment);
+                if (_excludedSegments.Count > 0 && _excludedSegments.Contains(segmentKey))
+                {
+                    continue;
+                }
+
                 CoursePos start = MakeCoursePos(segment.Start, ref heightData, perimeter);
                 CoursePos end = MakeCoursePos(segment.End, ref heightData, perimeter);
 
@@ -848,12 +1551,10 @@ namespace GridRoadGenerator.Systems
                 }
 
                 NetCourse course = default;
-                // Facette de rotonde (voir RoadSegmentDef.IsArc/EmitAvenueRoundabout) : vraie
-                // courbe ajustée sur les tangentes au cercle, pas une corde droite — un rond
-                // construit à partir de segments droits reste visiblement anguleux en jeu même
-                // avec beaucoup de facettes (contrainte MinSegmentLength limite leur nombre sur
-                // un petit rayon). Tout le reste (bras d'avenue, grille classique, culs-de-sac,
-                // rayons de l'Adaptativo) garde la ligne droite habituelle.
+                // Facette courbe (mode Loop, voir RoadSegmentDef.IsArc/GridGenerator.
+                // EmitLoopBlock) : vraie courbe ajustée sur les tangentes calculées côté Core,
+                // pas une corde droite. Tout le reste (grille classique, culs-de-sac, avenue)
+                // garde la ligne droite habituelle.
                 course.m_Curve = segment.IsArc
                     ? NetUtils.FitCurve(start.m_Position, segment.StartTangent, segment.EndTangent, end.m_Position)
                     : NetUtils.StraightCurve(start.m_Position, end.m_Position);
@@ -869,21 +1570,66 @@ namespace GridRoadGenerator.Systems
                 course.m_StartPosition = start;
                 course.m_EndPosition = end;
 
-                // Tronçon "local" (impasse en mode CulDeSacMode, rayon en mode Adaptativo) :
-                // réseau secondaire — voir GetSecondaryRoadPrefab. Tronçon avenue (voir
-                // GetAvenueRoadPrefab) : troisième réseau indépendant, jamais local (EmitLine
-                // exclut le cul-de-sac sur une ligne avenue, et l'Adaptativo n'a pas d'avenue).
-                // Identique au principal tant qu'aucun n'est choisi explicitement.
-                bool isLocalSegment = segment.IsCulDeSacEnd || segment.IsRadial;
+                // Tronçon "local" (impasse en mode CulDeSacMode) : réseau secondaire — voir
+                // GetSecondaryRoadPrefab. Tronçon avenue (voir GetAvenueRoadPrefab) : troisième
+                // réseau indépendant, jamais local (EmitLine exclut le cul-de-sac sur une ligne
+                // avenue). Identique au principal tant qu'aucun n'est choisi explicitement.
+                //
+                // En mode Loop (GridGenerator.GenerateLoopGrid) : la collectrice (IsAvenue)
+                // garde l'avenue, comme avant. Laço ET beco sem saída partagent le MÊME prefab
+                // (celui du principal), jamais deux réseaux séparés — sans cette exception,
+                // l'impasse utilisait le réseau secondaire, resté un réseau à part entière mais
+                // uniquement en Grille classique où cette distinction garde un sens. En mode
+                // super-quarteirão (SuperblockMode, voir RoadSegmentDef.IsPedestrian), le laço
+                // devient piéton et réutilise CE MÊME emplacement secondaire — inutilisé par
+                // ailleurs en Loop (l'Arterial qui l'occupait a été retiré) — plutôt qu'un
+                // quatrième emplacement dédié.
+                bool isLocalSegment = segment.IsCulDeSacEnd && !_settings.LoopMode;
+                Entity segmentPrefabEntity;
+                if (segment.IsAvenue)
+                {
+                    segmentPrefabEntity = avenuePrefabEntity;
+                }
+                else if (isLocalSegment || segment.IsPedestrian)
+                {
+                    segmentPrefabEntity = secondaryPrefabEntity;
+                }
+                else
+                {
+                    segmentPrefabEntity = prefabEntity;
+                }
                 Entity definition = commandBuffer.CreateEntity();
                 commandBuffer.AddComponent(definition, new CreationDefinition
                 {
-                    m_Prefab = segment.IsAvenue ? avenuePrefabEntity : isLocalSegment ? secondaryPrefabEntity : prefabEntity,
+                    m_Prefab = segmentPrefabEntity,
                     m_RandomSeed = random.NextInt()
                 });
                 commandBuffer.AddComponent(definition, default(Updated));
                 commandBuffer.AddComponent(definition, course);
+
+                // Melhoramentos automáticos (mode Loop, voir BuildUpgradeFlags) :
+                // Game.Net.Upgraded est lu par CourseSplitSystem sur CETTE MÊME entité
+                // (CreationDefinition/NetCourse), puis reporté tel quel sur l'Edge réelle créée —
+                // CompositionSelectSystem s'occupe ensuite de résoudre la composition visuelle
+                // (arbres/relva/ciclovia/passeio), y compris de l'ignorer silencieusement si le
+                // prefab choisi n'a pas la pièce correspondante (jamais d'erreur). Le beco sem
+                // saída reçoit maintenant lui aussi les melhoramentos du principal (même
+                // réseau désormais, voir plus haut) : plus d'exclusion IsCulDeSacEnd ici.
+                if (_settings.LoopMode)
+                {
+                    // Réseau piéton (SuperblockMode) : aucun melhoramento (trees/passeio/ciclovia
+                    // du réseau principal n'ont pas de sens sur un chemin piéton dédié).
+                    CompositionFlags upgradeFlags = segment.IsAvenue ? BuildAvenueUpgradeFlags()
+                        : segment.IsPedestrian ? default
+                        : BuildPrincipalUpgradeFlags();
+                    if (upgradeFlags != default)
+                    {
+                        commandBuffer.AddComponent(definition, new Upgraded { m_Flags = upgradeFlags });
+                    }
+                }
+
                 created++;
+                _lastCreatedCurves.Add((segmentKey, course.m_Curve));
 
                 // Cercle de retournement : posé comme un objet libre à la position/rotation
                 // déjà calculées pour ce même bout de segment, dans le même lot de
@@ -915,12 +1661,26 @@ namespace GridRoadGenerator.Systems
                 }
             }
 
-            // Îlot central de la rotonde (voir TryResolveRoundaboutIslandPrefab) : posé une
-            // seule fois, une fois tous les segments de route (dont la boucle elle-même)
-            // créés, comme le cercle de retournement — objet indépendant, pas de composant
-            // réseau posé après coup (même raison que le commentaire ci-dessus).
-            if (hasRoundabout && TryResolveRoundaboutIslandPrefab(roundaboutRadius, out Entity islandPrefab))
+            // Asset décoratif complet de la rotonde (voir TryResolveRoundaboutIslandPrefab) :
+            // posé une seule fois, une fois tous les segments de route créés, par-dessus le
+            // croisement en + normal des deux avenues — même principe que le cercle de
+            // retournement d'un cul-de-sac (objet indépendant, pas de composant réseau posé
+            // après coup).
+            if (roundabout.HasRoundabout && TryResolveRoundaboutIslandPrefab(roundabout.Radius, out Entity islandPrefab))
             {
+                // roundabout.Center vient de GridGenerator avec la hauteur MOYENNE plate du
+                // périmètre (jamais reprojetée côté Core, voir son commentaire) — alors que les
+                // routes de la rotonde, elles, SONT reprojetées sur le vrai terrain via
+                // MakeCoursePos ci-dessus quand FollowTerrain est actif. Sans ce même
+                // rajustement ici, l'îlot décoratif flotte au-dessus ou s'enfonce sous la route
+                // réelle dès que le terrain n'est pas plat à cet endroit — le jeu refuse alors
+                // Générer ("Ligação rodoviária necessária"), même avec Anarchy (pas un simple
+                // avertissement de chevauchement qu'Anarchy supprimerait).
+                float3 roundaboutCenter = roundabout.Center;
+                if (_settings.FollowTerrain)
+                {
+                    roundaboutCenter.y = TerrainUtils.SampleHeight(ref heightData, roundaboutCenter);
+                }
                 Entity islandDefinition = commandBuffer.CreateEntity();
                 commandBuffer.AddComponent(islandDefinition, new CreationDefinition
                 {
@@ -943,6 +1703,47 @@ namespace GridRoadGenerator.Systems
             }
 
             return created;
+        }
+
+        /// <summary>
+        /// Melhoramentos du réseau Coletor/Avenida (voir GridRoadGeneratorSettings) : séparateur
+        /// central (General, sans notion de côté) + bermas indépendantes par côté (Side). "Direita"
+        /// = Right (bit "par défaut" côté jeu), "Esquerda" = Left (bit "Opposite") — voir
+        /// CompositionFlags.Side, relatif au sens de tracé du tronçon.
+        /// </summary>
+        private CompositionFlags BuildAvenueUpgradeFlags()
+        {
+            var general = default(CompositionFlags.General);
+            if (_settings.AvenueMiddleGrass) general |= CompositionFlags.General.PrimaryMiddleBeautification;
+            if (_settings.AvenueMiddleTrees) general |= CompositionFlags.General.SecondaryMiddleBeautification;
+
+            var left = default(CompositionFlags.Side);
+            var right = default(CompositionFlags.Side);
+            if (_settings.AvenueSideTreesLeft) left |= CompositionFlags.Side.SecondaryBeautification;
+            if (_settings.AvenueSideTreesRight) right |= CompositionFlags.Side.SecondaryBeautification;
+            if (_settings.AvenueBikeLaneLeft) left |= CompositionFlags.Side.SecondaryLane;
+            if (_settings.AvenueBikeLaneRight) right |= CompositionFlags.Side.SecondaryLane;
+
+            return new CompositionFlags(general, left, right);
+        }
+
+        /// <summary>
+        /// Melhoramentos du réseau Principal/Laço : sans séparateur central, seulement Esquerda/
+        /// Direita (arbres, passeio largo, ciclovia) — voir BuildAvenueUpgradeFlags pour la
+        /// convention Left/Right.
+        /// </summary>
+        private CompositionFlags BuildPrincipalUpgradeFlags()
+        {
+            var left = default(CompositionFlags.Side);
+            var right = default(CompositionFlags.Side);
+            if (_settings.PrincipalSideTreesLeft) left |= CompositionFlags.Side.SecondaryBeautification;
+            if (_settings.PrincipalSideTreesRight) right |= CompositionFlags.Side.SecondaryBeautification;
+            if (_settings.PrincipalWideSidewalkLeft) left |= CompositionFlags.Side.WideSidewalk;
+            if (_settings.PrincipalWideSidewalkRight) right |= CompositionFlags.Side.WideSidewalk;
+            if (_settings.PrincipalBikeLaneLeft) left |= CompositionFlags.Side.SecondaryLane;
+            if (_settings.PrincipalBikeLaneRight) right |= CompositionFlags.Side.SecondaryLane;
+
+            return new CompositionFlags(default(CompositionFlags.General), left, right);
         }
 
         /// <summary>
@@ -1096,6 +1897,11 @@ namespace GridRoadGenerator.Systems
         /// <summary>
         /// Retrouve les routes existantes reliant les nœuds sélectionnés consécutifs
         /// (dans l'ordre de clic, en refermant le polygone), pour y raccorder la grille.
+        /// TryFindConnectingPath (au lieu d'une seule arête directe) : une arête PAR nœud
+        /// intermédiaire réel est ajoutée, chacune étant un point de raccord valide pour
+        /// MakeCoursePos — sans ça, tout nœud intermédiaire entre deux clics (courbe/rond-point
+        /// découpé en plusieurs arêtes) n'offrait AUCUN point de raccord sur cette portion de la
+        /// route réelle.
         /// </summary>
         private List<PerimeterEdge> BuildPerimeterEdges()
         {
@@ -1111,60 +1917,511 @@ namespace GridRoadGenerator.Systems
             {
                 Entity nodeA = _selectedNodes[i];
                 Entity nodeB = _selectedNodes[(i + 1) % count];
-                if (TryFindConnectingEdge(nodeA, nodeB, out Entity edgeEntity, out Curve curve))
+                if (!TryFindConnectingPath(nodeA, nodeB, out List<(Entity edge, bool reversed)> path))
                 {
-                    result.Add(new PerimeterEdge { m_Entity = edgeEntity, m_Curve = curve.m_Bezier });
+                    continue;
+                }
+                foreach ((Entity edgeEntity, bool _) in path)
+                {
+                    if (EntityManager.TryGetComponent(edgeEntity, out Curve curve))
+                    {
+                        result.Add(new PerimeterEdge { m_Entity = edgeEntity, m_Curve = curve.m_Bezier });
+                    }
                 }
             }
             return result;
         }
 
         /// <summary>
-        /// Cherche l'arête existante reliant directement deux nœuds (dans un sens ou
-        /// l'autre). Utilisé pour retrouver le tracé réel entre deux nœuds consécutifs
-        /// du périmètre — raccord de la grille (BuildPerimeterEdges), échantillonnage
-        /// du polygone (BuildCurveAwarePerimeterPositions) et rendu de l'aperçu
-        /// (TryGetPerimeterSegmentCurve, lu par GridRoadOverlaySystem).
+        /// Itérateur quadtree (arbre du réseau, voir Game.Net.SearchSystem.GetNetSearchTree)
+        /// pour FindInteriorExistingEdges : ne fait qu'accumuler tout candidat dont la boîte
+        /// englobante croise la zone de recherche — le filtrage précis (type d'entité,
+        /// doublon avec le périmètre, intérieur réel du polygone) se fait ensuite en dehors
+        /// de l'itérateur, sur la liste obtenue, car il a besoin de l'EntityManager et de la
+        /// liste des nœuds sélectionnés, non disponibles ici sans complexifier l'itérateur
+        /// pour un gain nul (la recherche spatiale reste un simple filtre large phase).
         /// </summary>
-        private bool TryFindConnectingEdge(Entity nodeA, Entity nodeB, out Entity edgeEntity, out Curve curve)
+        private struct InteriorEdgeSearchIterator : INativeQuadTreeIterator<Entity, QuadTreeBoundsXZ>, IUnsafeQuadTreeIterator<Entity, QuadTreeBoundsXZ>
         {
-            edgeEntity = Entity.Null;
-            curve = default;
-            if (!EntityManager.TryGetBuffer(nodeA, true, out DynamicBuffer<ConnectedEdge> connectedEdges))
+            public Bounds3 m_QueryBounds;
+            public List<Entity> m_Candidates;
+
+            public bool Intersect(QuadTreeBoundsXZ bounds) => MathUtils.Intersect(bounds.m_Bounds.xz, m_QueryBounds.xz);
+
+            public void Iterate(QuadTreeBoundsXZ bounds, Entity item)
+            {
+                if (MathUtils.Intersect(bounds.m_Bounds.xz, m_QueryBounds.xz))
+                {
+                    m_Candidates.Add(item);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Trouve les arêtes de route EXISTANTES qui traversent l'INTÉRIEUR du polygone
+        /// sélectionné (pas seulement son contour, déjà couvert par BuildPerimeterEdges) —
+        /// voir le commentaire sur son site d'appel (CreateGridDefinitions) pour le bug
+        /// "Objetos sobrepostos" que ceci corrige. Boîte englobante des nœuds sélectionnés
+        /// (élargie d'une marge) comme filtre large phase via l'arbre spatial du réseau, puis
+        /// pour chaque candidat : vérifie que c'est bien une arête de route utilisable (Edge +
+        /// Curve, ni Deleted ni Temp), qu'elle n'est pas déjà une arête du périmètre (dédoublonnage
+        /// par Entity), et enfin que son point milieu tombe réellement à l'intérieur du polygone
+        /// (la boîte englobante seule ne suffit pas : une arête peut croiser la boîte sans jamais
+        /// entrer dans le polygone, ex. le long d'un bord concave).
+        /// </summary>
+        private List<PerimeterEdge> FindInteriorExistingEdges(List<PerimeterEdge> boundaryPerimeter)
+        {
+            var result = new List<PerimeterEdge>();
+
+            // Mode "2 nœuds = rectangle" (voir BuildCurveAwarePerimeterPositions) : aucun vrai
+            // polygone tracé, donc aucune notion d'"intérieur" à interroger.
+            if (_selectedPositions.Count < 3)
+            {
+                return result;
+            }
+
+            float3 min = _selectedPositions[0];
+            float3 max = _selectedPositions[0];
+            for (int i = 1; i < _selectedPositions.Count; i++)
+            {
+                min = math.min(min, _selectedPositions[i]);
+                max = math.max(max, _selectedPositions[i]);
+            }
+            // Marge de sécurité : une arête dont la géométrie déborde légèrement de la boîte
+            // stricte des nœuds cliqués (courbe, largeur de chaussée) ne doit pas être ratée
+            // par le filtre large phase — le vrai test d'intérieur (PointInsideSelectedPolygon)
+            // vient de toute façon éliminer les faux positifs ensuite.
+            const float margin = 16f;
+            var queryBounds = new Bounds3(min - margin, max + margin);
+
+            // Lecture directe hors job : cette méthode tourne entièrement sur le thread
+            // principal (boucle C# classique, pas de job Burst planifié). readOnly: true donne
+            // les dépendances des jobs qui ÉCRIVENT dans l'arbre (UpdateNetSearchTreeJob) ; il
+            // faut les compléter avant de toucher le NativeQuadTree directement, sans quoi le
+            // système de sécurité des NativeContainer lève une exception en jeu (invisible à
+            // dotnet build/test, uniquement au runtime) — même exigence que
+            // SearchSystem.PreDeserialize, qui complète ses propres dépendances avant de
+            // manipuler l'arbre. Comme l'accès se termine ici même (aucun job asynchrone laissé
+            // en suspens), il n'y a rien à enregistrer via AddNetSearchTreeReader.
+            NativeQuadTree<Entity, QuadTreeBoundsXZ> netSearchTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle deps);
+            deps.Complete();
+
+            var iterator = new InteriorEdgeSearchIterator { m_QueryBounds = queryBounds, m_Candidates = new List<Entity>() };
+            netSearchTree.Iterate(ref iterator);
+
+            // Diagnostic temporaire (voir _lastLoggedInteriorEdgeCount dans CreateGridDefinitions) :
+            // compte où chaque candidat est éliminé, pour localiser l'étage exact qui rate une
+            // arête réelle plutôt que de le déduire d'une capture d'écran.
+            int rejectedNotEdge = 0;
+            int rejectedBoundary = 0;
+            int rejectedOutside = 0;
+
+            foreach (Entity candidate in iterator.m_Candidates)
+            {
+                if (!EntityManager.TryGetComponent(candidate, out Edge _)
+                    || !EntityManager.TryGetComponent(candidate, out Curve curve)
+                    || EntityManager.HasComponent<Deleted>(candidate)
+                    || EntityManager.HasComponent<Temp>(candidate))
+                {
+                    rejectedNotEdge++;
+                    continue; // pas une arête de route utilisable (nœud, entité supprimée/temporaire...)
+                }
+
+                bool alreadyBoundary = false;
+                for (int i = 0; i < boundaryPerimeter.Count; i++)
+                {
+                    if (boundaryPerimeter[i].m_Entity == candidate)
+                    {
+                        alreadyBoundary = true;
+                        break;
+                    }
+                }
+                if (alreadyBoundary)
+                {
+                    rejectedBoundary++;
+                    if (rejectedBoundary <= 5 && iterator.m_Candidates.Count != _lastLoggedCandidateCount)
+                    {
+                        Mod.Log.Info($"[Diag croisements]   rejeté (déjà périmètre) entité={candidate} a={curve.m_Bezier.a} d={curve.m_Bezier.d}");
+                    }
+                    continue; // déjà couverte par BuildPerimeterEdges — pas de doublon
+                }
+
+                // Un seul point milieu (t=0.5) RATE les arêtes réelles qui ne font QUE clipper un
+                // coin/bord de la zone choisie sans passer par son centre : les nœuds d'une route
+                // du jeu sont souvent très espacés (centaines de mètres entre deux intersections),
+                // donc si la zone sélectionnée est plus petite que cette arête, son milieu tombe
+                // fréquemment HORS du polygone même quand une bonne partie de la courbe le
+                // traverse bel et bien — confirmé par les captures d'écran où la collision
+                // "Objetos sobrepostos" persistait toujours au MÊME endroit (route réelle) malgré
+                // FindInteriorExistingEdges : cette arête n'était simplement jamais détectée.
+                // On échantillonne donc plusieurs points le long de la courbe (même densité que
+                // SplitSegmentsCrossingInteriorEdges) et on garde l'arête dès qu'UN SEUL tombe
+                // à l'intérieur.
+                int sampleCount = ComputeInteriorEdgeSampleCount(curve.m_Bezier);
+                bool anyPointInside = false;
+                for (int i = 0; i <= sampleCount; i++)
+                {
+                    float3 sample = MathUtils.Position(curve.m_Bezier, (float)i / sampleCount);
+                    if (PointInsideSelectedPolygon(sample.xz))
+                    {
+                        anyPointInside = true;
+                        break;
+                    }
+                }
+                if (!anyPointInside)
+                {
+                    rejectedOutside++;
+                    continue; // dans la boîte englobante mais hors du vrai polygone (filtre large phase seulement)
+                }
+
+                result.Add(new PerimeterEdge { m_Entity = candidate, m_Curve = curve.m_Bezier });
+            }
+
+            if (iterator.m_Candidates.Count != _lastLoggedCandidateCount)
+            {
+                _lastLoggedCandidateCount = iterator.m_Candidates.Count;
+                Mod.Log.Info($"[Diag croisements] recherche intérieure : boîte=[{queryBounds.min} .. {queryBounds.max}], périmètre={boundaryPerimeter.Count} arête(s), {iterator.m_Candidates.Count} candidat(s) brut(s) (arbre spatial), {rejectedNotEdge} rejeté(s) (pas Edge/Curve ou Deleted/Temp), {rejectedBoundary} rejeté(s) (déjà périmètre), {rejectedOutside} rejeté(s) (hors polygone), {result.Count} retenu(s).");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Prétraitement de la liste de segments générés, APPELÉ UNE SEULE FOIS avant la boucle
+        /// de création ECS (voir le commentaire sur son site d'appel, CreateGridDefinitions, pour
+        /// le rappel du bug "Objetos sobrepostos" en PLEIN MILIEU d'un segment que ceci corrige —
+        /// suite directe du correctif FindInteriorExistingEdges, qui ne couvrait que les
+        /// extrémités).
+        ///
+        /// Ne traite QUE les segments DROITS (IsArc == false) : une facette courbe de coin (mode
+        /// Loop) a une géométrie ajustée sur des tangentes précises (StartTangent/EndTangent) —
+        /// la scinder correctement demanderait de recalculer ces tangentes pour les deux
+        /// morceaux, un risque de géométrie cassée pour un cas de coin dont la probabilité de
+        /// croiser proprement une route réelle est de toute façon faible. Ces segments ressortent
+        /// inchangés.
+        ///
+        /// Pour chaque segment droit, chaque arête intérieure (interiorEdges, déjà calculée une
+        /// seule fois par FindInteriorExistingEdges — AUCUNE nouvelle requête spatiale ici) est
+        /// testée directement contre la ligne du segment avec
+        /// MathUtils.Intersect(Bezier4x2 curve, Line2.Segment line, out float2 t, int iterations)
+        /// — PAS une approximation en polyligne. Trouvé en décompilant le tool natif "Grid" du
+        /// jeu (NetToolSystem.CreateGrid) : lui non plus n'approxime jamais une courbe existante
+        /// en polyligne fixe pour détecter un croisement — que ce soit pour un point (Distance)
+        /// ou pour une ligne entière (Intersect), il découpe récursivement la courbe en deux par
+        /// De Casteljau (Divide), élague les moitiés dont la boîte englobante ne croise pas la
+        /// ligne, et ne redescend que dans celles qui la croisent VRAIMENT — la précision ne
+        /// dépend donc jamais de la longueur réelle de la courbe (contrairement à l'ancien
+        /// correctif ComputeInteriorEdgeSampleCount ci-dessus, qui ne faisait que réduire l'erreur
+        /// sans l'éliminer). SecondaryLaneSystem et BlockSystem, en jeu, appellent tous deux cette
+        /// même surcharge avec iterations=4 (16 sous-divisions de profondeur) — repris tel quel
+        /// (InteriorEdgeIntersectIterations) plutôt qu'une valeur inventée. t.x = position sur la
+        /// courbe (curve), t.y = position sur la ligne (segmentLine) — ordre confirmé par Divide
+        /// dans l'assembly décompilée (t.x remis à l'échelle de la moitié testée, jamais t.y).
+        ///
+        /// Un croisement à moins de InteriorCrossingEndpointSkipDistance d'une extrémité VRAIE
+        /// (Start/End d'origine) est ignoré : c'est déjà un cas de raccord d'extrémité couvert
+        /// par MakeCoursePos, pas un vrai croisement de milieu.
+        ///
+        /// Ce seuil est DÉLIBÉRÉMENT plus petit que EdgeSnapDistance (celui que MakeCoursePos
+        /// utilise pour décider s'il raccroche), pas égal — bug confirmé en jeu (retour
+        /// utilisateur : en ajustant Espaçamento arterial/coletoras, certains nœuds se
+        /// connectent et d'autres pas, de façon instable) quand les deux valaient
+        /// GridGenerator.MinSegmentLength (8 m) : ce filtre-ci mesure la distance du point de
+        /// croisement JUSQU'À segment.Start/End (deux points), alors que MakeCoursePos mesure la
+        /// distance de segment.Start/End JUSQU'À LA COURBE (point-courbe, perpendiculaire) — deux
+        /// mesures différentes qui, à seuil égal, peuvent diverger de quelques centimètres près
+        /// de la limite et laisser un croisement qui n'est NI coupé ici NI raccroché par
+        /// MakeCoursePos (zone morte). Avec un seuil ici deux fois plus petit
+        /// (EdgeSnapDistance * 0.5), tout croisement qu'on choisit d'ignorer est GARANTI d'être
+        /// bien en-deçà du rayon de raccord de MakeCoursePos, donc raccroché à coup sûr ; tout le
+        /// reste est explicitement coupé ici, sans zone morte possible entre les deux.
+        ///
+        /// Entre deux croisements retenus trop rapprochés l'un de l'autre (la pièce du milieu
+        /// serait dégénérée), on garde GridGenerator.MinSegmentLength comme seuil (préoccupation
+        /// différente : éviter un tronçon quasi nul, pas un raccord d'extrémité) — on garde le
+        /// premier rencontré en parcourant du Start vers l'End et on ignore les suivants trop
+        /// proches.
+        /// </summary>
+        private List<RoadSegmentDef> SplitSegmentsCrossingInteriorEdges(List<RoadSegmentDef> segments, List<PerimeterEdge> interiorEdges, HashSet<Entity> trueInteriorEntities)
+        {
+            if (interiorEdges.Count == 0)
+            {
+                return segments;
+            }
+
+            var result = new List<RoadSegmentDef>(segments.Count);
+            var crossings = new List<(float t, float3 point)>();
+
+            // Diagnostic temporaire (voir _lastLoggedInteriorEdgeCount) : distingue les
+            // croisements trouvés contre une arête VRAIMENT intérieure (trueInteriorEntities,
+            // sortie de FindInteriorExistingEdges) de ceux trouvés contre une arête de
+            // PÉRIMÈTRE (l'anneau du contour cliqué/laço) — pour vérifier si le fait de tester
+            // aussi contre le périmètre (nécessaire pour le cas confirmé en jeu où une route
+            // intérieure était classée périmètre) ne produit pas, en plus, des coupures parasites
+            // près de l'anneau lui-même (pièces dégénérées → "Forma inválida").
+            int arcsSkipped = 0;
+            int arcsSkippedButChordCrosses = 0;
+            int crossingsAgainstInterior = 0;
+            int crossingsAgainstBoundary = 0;
+            int piecesCreated = 0;
+
+            foreach (RoadSegmentDef segment in segments)
+            {
+                if (segment.IsArc)
+                {
+                    arcsSkipped++;
+                    // Diagnostic seul (voir arcsSkippedButChordCrosses ci-dessous) : teste la
+                    // CORDE (Start-End) de l'arc contre les mêmes arêtes, juste pour savoir si un
+                    // arc de coin (jamais scindé, voir le commentaire de méthode) est une source
+                    // plausible de la collision encore observée en jeu malgré le reste du
+                    // correctif — n'affecte PAS le résultat, l'arc ressort inchangé dans tous les
+                    // cas (le scinder correctement demanderait de recalculer ses tangentes).
+                    var arcChord = new Line2.Segment(segment.Start.xz, segment.End.xz);
+                    for (int edgeIndex = 0; edgeIndex < interiorEdges.Count; edgeIndex++)
+                    {
+                        if (MathUtils.Intersect(interiorEdges[edgeIndex].m_Curve.xz, arcChord, out float2 _, InteriorEdgeIntersectIterations))
+                        {
+                            arcsSkippedButChordCrosses++;
+                            break;
+                        }
+                    }
+                    result.Add(segment);
+                    continue;
+                }
+
+                var segmentLine = new Line2.Segment(segment.Start.xz, segment.End.xz);
+
+                crossings.Clear();
+                for (int edgeIndex = 0; edgeIndex < interiorEdges.Count; edgeIndex++)
+                {
+                    Bezier4x2 curveXz = interiorEdges[edgeIndex].m_Curve.xz;
+                    if (MathUtils.Intersect(curveXz, segmentLine, out float2 hitT, InteriorEdgeIntersectIterations))
+                    {
+                        crossings.Add((hitT.y, math.lerp(segment.Start, segment.End, hitT.y)));
+                        if (trueInteriorEntities.Contains(interiorEdges[edgeIndex].m_Entity))
+                        {
+                            crossingsAgainstInterior++;
+                        }
+                        else
+                        {
+                            crossingsAgainstBoundary++;
+                        }
+                    }
+                }
+
+                if (crossings.Count == 0)
+                {
+                    result.Add(segment);
+                    continue;
+                }
+
+                crossings.Sort((a, b) => a.t.CompareTo(b.t));
+
+                var acceptedPoints = new List<float3>();
+                float3 lastAccepted = segment.Start;
+                foreach ((float _, float3 point) in crossings)
+                {
+                    if (math.distance(point.xz, segment.Start.xz) < InteriorCrossingEndpointSkipDistance
+                        || math.distance(point.xz, segment.End.xz) < InteriorCrossingEndpointSkipDistance
+                        || math.distance(point.xz, lastAccepted.xz) < GridGenerator.MinSegmentLength)
+                    {
+                        continue; // trop près d'une extrémité vraie (déjà géré par MakeCoursePos) ou d'un croisement déjà retenu (pièce dégénérée)
+                    }
+                    acceptedPoints.Add(point);
+                    lastAccepted = point;
+                }
+
+                if (acceptedPoints.Count == 0)
+                {
+                    result.Add(segment);
+                    continue;
+                }
+
+                float3 pieceStart = segment.Start;
+                for (int i = 0; i < acceptedPoints.Count; i++)
+                {
+                    RoadSegmentDef piece = segment; // struct : copie IsHorizontal/IsAvenue/IsArc(faux)/tangentes(défaut)
+                    piece.Start = pieceStart;
+                    piece.End = acceptedPoints[i];
+                    // Un croisement de milieu n'est jamais un vrai cul-de-sac : seule la
+                    // DERNIÈRE pièce (dont l'End reste l'End d'origine) garde IsCulDeSacEnd.
+                    // Sans ça, un cercle de retournement se retrouverait posé en PLEIN MILIEU
+                    // de la ligne, sur la route existante elle-même (voir la pose du cap dans
+                    // CreateGridDefinitions, qui se fie justement à ce flag).
+                    piece.IsCulDeSacEnd = false;
+                    result.Add(piece);
+                    pieceStart = acceptedPoints[i];
+                    piecesCreated++;
+                }
+
+                RoadSegmentDef lastPiece = segment;
+                lastPiece.Start = pieceStart;
+                lastPiece.End = segment.End;
+                result.Add(lastPiece);
+            }
+
+            if (segments.Count != _lastLoggedPreSplitSegmentCount)
+            {
+                _lastLoggedPreSplitSegmentCount = segments.Count;
+                Mod.Log.Info($"[Diag croisements] scission : {arcsSkipped} arc(s) ignoré(s) (jamais testés, dont {arcsSkippedButChordCrosses} dont la corde croise une arête connue), {crossingsAgainstInterior} croisement(s) contre arête intérieure, {crossingsAgainstBoundary} croisement(s) contre arête de périmètre, {piecesCreated} pièce(s) créée(s) par scission.");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Test point-dans-polygone (règle pair-impair, ray casting horizontal) sur le polygone
+        /// WORLD XZ formé par les nœuds sélectionnés, dans l'ordre de clic — même algorithme que
+        /// GridGenerator.PointInPolygon (repère local u/v, privé à Core et donc inutilisable
+        /// ici : voir la consigne de ne pas toucher à Core), appliqué directement aux positions
+        /// monde puisqu'on teste une arête RÉELLE du réseau, pas un point de la grille générée.
+        /// </summary>
+        private bool PointInsideSelectedPolygon(float2 point)
+        {
+            bool inside = false;
+            int n = _selectedPositions.Count;
+            for (int i = 0, j = n - 1; i < n; j = i++)
+            {
+                float2 a = _selectedPositions[i].xz;
+                float2 b = _selectedPositions[j].xz;
+                bool crosses = (a.y > point.y) != (b.y > point.y);
+                if (crosses)
+                {
+                    float t = (point.y - a.y) / (b.y - a.y);
+                    float xCross = a.x + t * (b.x - a.x);
+                    if (point.x < xCross)
+                    {
+                        inside = !inside;
+                    }
+                }
+            }
+            return inside;
+        }
+
+        /// <summary>
+        /// Cherche le chemin d'arêtes existantes reliant deux nœuds consécutifs du périmètre —
+        /// raccord de la grille (BuildPerimeterEdges), échantillonnage du polygone
+        /// (BuildCurveAwarePerimeterPositions) et rendu de l'aperçu (TryGetPerimeterSegmentCurve,
+        /// lu par GridRoadOverlaySystem). Capable de suivre PLUSIEURS arêtes consécutives entre
+        /// nodeA et nodeB au lieu d'exiger une seule arête DIRECTE — une route réelle longue/courbe
+        /// (ex. "Rua da Ponte") est presque toujours composée de plusieurs arêtes séparées par des
+        /// nœuds intermédiaires (simples points de forme, pas de vraies intersections), que
+        /// TryFindConnectingEdge ignorait totalement : tout ce qui tombait entre deux nœuds
+        /// cliqués non reliés par UNE SEULE arête retombait sur une CORDE DROITE
+        /// (BuildCurveAwarePerimeterPositions) et sur AUCUN point de raccord pour MakeCoursePos
+        /// (BuildPerimeterEdges) — la grille générée ignorait alors la vraie forme de la courbe à
+        /// cet endroit ET n'avait rien à quoi se raccrocher, produisant de petits segments de laço
+        /// posés en plein sur la chaussée réelle (retour utilisateur en jeu avec capture d'écran :
+        /// "os pontos que vês são pequenos segmentos do laço que são gerados por cima da rua da
+        /// ponte"). S'arrête (renvoie faux) dès qu'un nœud intermédiaire a plus d'une arête
+        /// utilisable sans que l'une d'elles ne mène directement à nodeB (vraie intersection,
+        /// branche ambiguë) : mieux vaut retomber sur l'ancien comportement (corde droite) à cet
+        /// endroit précis que deviner la mauvaise branche.
+        /// </summary>
+        private bool TryFindConnectingPath(Entity nodeA, Entity nodeB, out List<(Entity edge, bool reversed)> path)
+        {
+            path = new List<(Entity, bool)>();
+            if (nodeA == nodeB)
             {
                 return false;
             }
-            for (int j = 0; j < connectedEdges.Length; j++)
+
+            Entity current = nodeA;
+            Entity cameFromEdge = Entity.Null;
+            // Plafond généreux (une route réelle découpée finement peut avoir beaucoup de nœuds
+            // intermédiaires) tout en bornant le pire cas (données réseau incohérentes/boucle).
+            const int maxHops = 256;
+
+            for (int hop = 0; hop < maxHops; hop++)
             {
-                Entity candidate = connectedEdges[j].m_Edge;
-                if (!EntityManager.TryGetComponent(candidate, out Edge edge))
+                if (!EntityManager.TryGetBuffer(current, true, out DynamicBuffer<ConnectedEdge> connectedEdges))
                 {
-                    continue;
+                    return false;
                 }
-                bool connects = (edge.m_Start == nodeA && edge.m_End == nodeB)
-                             || (edge.m_Start == nodeB && edge.m_End == nodeA);
-                if (connects && EntityManager.TryGetComponent(candidate, out Curve curveComponent))
+
+                Entity fallbackEdge = Entity.Null;
+                Entity fallbackNext = Entity.Null;
+                Entity directEdge = Entity.Null;
+                int usableCount = 0;
+
+                for (int j = 0; j < connectedEdges.Length; j++)
                 {
-                    edgeEntity = candidate;
-                    curve = curveComponent;
+                    Entity candidate = connectedEdges[j].m_Edge;
+                    if (candidate == cameFromEdge || !EntityManager.TryGetComponent(candidate, out Edge edge))
+                    {
+                        continue;
+                    }
+                    Entity other = edge.m_Start == current ? edge.m_End : edge.m_End == current ? edge.m_Start : Entity.Null;
+                    if (other == Entity.Null)
+                    {
+                        continue;
+                    }
+                    usableCount++;
+                    fallbackEdge = candidate;
+                    fallbackNext = other;
+                    if (other == nodeB)
+                    {
+                        directEdge = candidate;
+                        break;
+                    }
+                }
+
+                Entity chosenEdge;
+                Entity chosenNext;
+                if (directEdge != Entity.Null)
+                {
+                    chosenEdge = directEdge;
+                    chosenNext = nodeB;
+                }
+                else if (usableCount == 1)
+                {
+                    chosenEdge = fallbackEdge;
+                    chosenNext = fallbackNext;
+                }
+                else
+                {
+                    // Impasse (usableCount==0), ou vraie intersection (plusieurs branches) sans
+                    // qu'aucune ne mène directement à nodeB : abandonne plutôt que deviner.
+                    return false;
+                }
+
+                EntityManager.TryGetComponent(chosenEdge, out Edge chosenEdgeData);
+                path.Add((chosenEdge, chosenEdgeData.m_Start != current));
+                if (chosenNext == nodeB)
+                {
                     return true;
                 }
+                cameFromEdge = chosenEdge;
+                current = chosenNext;
             }
             return false;
         }
 
         /// <summary>
-        /// Résout la courbe existante (si elle existe) reliant deux nœuds consécutifs du
-        /// périmètre en cours de sélection, pour le rendu de l'aperçu overlay — retourne
-        /// faux (bezier par défaut) si aucune arête ne les relie directement, auquel cas
-        /// l'appelant retombe sur une ligne droite (cohérent avec la génération, qui ferait
-        /// de même dans ce cas : voir BuildCurveAwarePerimeterPositions).
+        /// Résout la/les courbe(s) existante(s) reliant deux nœuds consécutifs du périmètre en
+        /// cours de sélection, pour le rendu de l'aperçu overlay — une liste (pas une seule
+        /// Bezier4x3) depuis que TryFindConnectingPath peut traverser plusieurs arêtes/nœuds
+        /// intermédiaires réels entre les deux, au lieu d'exiger une arête directe. Liste vide si
+        /// aucun chemin trouvé, auquel cas l'appelant retombe sur une ligne droite (cohérent avec
+        /// la génération, qui ferait de même dans ce cas : voir BuildCurveAwarePerimeterPositions).
         /// </summary>
-        public bool TryGetPerimeterSegmentCurve(Entity nodeA, Entity nodeB, out Bezier4x3 bezier)
+        public bool TryGetPerimeterSegmentCurve(Entity nodeA, Entity nodeB, out List<Bezier4x3> beziers)
         {
-            bool found = TryFindConnectingEdge(nodeA, nodeB, out _, out Curve curve);
-            bezier = found ? curve.m_Bezier : default;
-            return found;
+            beziers = new List<Bezier4x3>();
+            if (!TryFindConnectingPath(nodeA, nodeB, out List<(Entity edge, bool reversed)> path))
+            {
+                return false;
+            }
+            foreach ((Entity edgeEntity, bool reversed) in path)
+            {
+                if (!EntityManager.TryGetComponent(edgeEntity, out Curve curve))
+                {
+                    continue;
+                }
+                Bezier4x3 bez = curve.m_Bezier;
+                beziers.Add(reversed ? new Bezier4x3 { a = bez.d, b = bez.c, c = bez.b, d = bez.a } : bez);
+            }
+            return beziers.Count > 0;
         }
 
         /// <summary>
@@ -1178,6 +2435,9 @@ namespace GridRoadGenerator.Systems
         /// reste intentionnellement inchangé : l'échantillonnage ne s'applique qu'à partir
         /// de 3 nœuds (un vrai périmètre tracé), jamais au raccourci 2 points.
         /// </summary>
+        /// <summary>Accès interne pour GridRoadOverlaySystem.DrawLiveSketch — le croquis pendant un drag DOIT utiliser exactement le même périmètre que la vraie génération (voir le retour utilisateur "as linhas não correspondem com a pré-visualização"), pas les positions cliquées brutes.</summary>
+        internal List<float3> GetCurveAwarePerimeterPositions() => BuildCurveAwarePerimeterPositions();
+
         private List<float3> BuildCurveAwarePerimeterPositions()
         {
             int count = _selectedNodes.Count;
@@ -1197,18 +2457,37 @@ namespace GridRoadGenerator.Systems
                 }
                 Entity nodeA = _selectedNodes[i];
                 Entity nodeB = _selectedNodes[(i + 1) % count];
-                if (!TryFindConnectingEdge(nodeA, nodeB, out Entity edgeEntity, out Curve curve)
-                    || !EntityManager.TryGetComponent(edgeEntity, out Edge edge))
+                // TryFindConnectingPath (au lieu d'une seule arête directe) : une route réelle
+                // longue/courbe entre deux nœuds cliqués est presque toujours composée de
+                // PLUSIEURS arêtes séparées par des nœuds intermédiaires (simples points de forme)
+                // — les ignorer coupait tout droit (corde) à travers la courbe réelle sur toute
+                // cette portion, d'où la grille générée qui débordait en plein sur la chaussée
+                // réelle (retour utilisateur en jeu : petits segments de laço posés sur la Rua da
+                // Ponte). Chaque arête du chemin est échantillonnée dans l'ordre nodeA -> nodeB
+                // (voir `reversed`, sens a->d ou d->a selon que l'arête parte de "current" ou non
+                // à cette étape du parcours, voir TryFindConnectingPath) et concaténée.
+                if (!TryFindConnectingPath(nodeA, nodeB, out List<(Entity edge, bool reversed)> path))
                 {
                     continue;
                 }
-                // Sens de la Bezier (a→d) : si l'arête part de nodeB plutôt que nodeA,
-                // les points de contrôle sont échantillonnés dans l'ordre inverse (d→a)
-                // pour que la liste résultante avance bien de nodeA vers nodeB.
-                Bezier4x3 bezier = curve.m_Bezier;
-                result.AddRange(edge.m_Start == nodeA
-                    ? GridGenerator.SampleCurve(bezier.a, bezier.b, bezier.c, bezier.d)
-                    : GridGenerator.SampleCurve(bezier.d, bezier.c, bezier.b, bezier.a));
+                foreach ((Entity edgeEntity, bool reversed) in path)
+                {
+                    if (!EntityManager.TryGetComponent(edgeEntity, out Curve curve))
+                    {
+                        continue;
+                    }
+                    Bezier4x3 bezier = curve.m_Bezier;
+                    result.AddRange(reversed
+                        ? GridGenerator.SampleCurve(bezier.d, bezier.c, bezier.b, bezier.a)
+                        : GridGenerator.SampleCurve(bezier.a, bezier.b, bezier.c, bezier.d));
+                }
+            }
+            // Les échantillons d'une courbe peuvent dépasser de quelques mètres le nœud suivant
+            // (aller-retour du contour), voir GridGenerator.RemoveBacktracks. Seulement pour un
+            // vrai périmètre tracé (le mode 2 nœuds = rectangle reste intact).
+            if (pairCount > 0)
+            {
+                GridGenerator.RemoveBacktracks(result);
             }
             return result;
         }

@@ -1,28 +1,38 @@
-// Style du panneau calqué sur les panneaux de CS2-NetworkTools
-// (c) Luca Rager, licence MIT — https://github.com/lucarager/CS2-NetworkTools
-// Seul reste ici le SCSS minimal d'habillage : le contenu des rangées est rendu
-// par les composants vanilla du jeu (Section, ToolButton, sliders de l'éditeur),
-// avec les mêmes compensations d'intégration que NetworkTools (.vanillaField).
+// Style du panneau, mise en page inspirée à l'origine des panneaux de CS2-NetworkTools
+// (c) Luca Rager, licence MIT — https://github.com/lucarager/CS2-NetworkTools, puis
+// largement custom (sliders/interrupteurs/boutons Padrão maison, voir SliderControl/
+// ToggleControl/PatternButton dans gridPanel.tsx — calqués sur le mockup "Seletor
+// segmentado (ícones)" approuvé). Seuls les chips Redes (VC.ToolButton) et les
+// VC.DropdownField (Cul-de-sac) restent des widgets vanilla de l'éditeur.
 //
 // Couleurs en hex 8 chiffres (jamais rgba()) : Dart Sass compresse rgba() en
 // hsla() à la compilation, que le moteur CSS de cohtml ne sait pas parser
 // (confirmé par "Unable to parse declaration" dans UI.log) — ces règles sont
 // alors silencieusement ignorées par le jeu.
 
-$panel-padding-x: 12rem;
-$panel-padding-y: 12rem;
-$input-bg-color: #00000026; // rgba(0, 0, 0, 0.15)
-$input-border-color: #ffffff33; // rgba(255, 255, 255, 0.2)
-$input-border-hover-color: #ffffff59; // rgba(255, 255, 255, 0.35)
-// Accent violet du thème vanilla (état sélectionné/actif des ToolButtons, déjà
-// utilisé tel quel dans prefabPicker.module.scss) : aucune variable CSS exposée
-// par le jeu pour cette teinte n'a été trouvée dans les sources accessibles.
-$accent-violet: #9645ff;
-// Dégradé de sélection des ToolButtons, valeurs reprises telles quelles de
-// CS2-NetworkTools (variables.module.scss : $color-nt-1/$color-nt-2/$color-nt-3 —
-// rgb(193, 44, 234) / rgb(150, 69, 255), converties en hex pour éviter tout passage
-// par une fonction couleur Sass — voir la note hex8/hsla() en tête de fichier).
-$accent-violet-gradient-start: #c12cea;
+$panel-padding-x: 16rem;
+// Tentatives précédentes de "clearance" asymétrique pour la barre de défilement
+// (padding-right agrandi sur .content, puis margin-right sur .scrollWrapper + padding
+// assorti sur .actions) abandonnées : chacune créait un vide permanent à droite MÊME
+// quand aucune barre n'est nécessaire (contenu qui tient sans défiler), rendant tout le
+// panneau visiblement décentré vers la gauche, et rognait même certains éléments (badge
+// "em breve", voir .patternButtonSoon) — pire que le problème d'origine. Retour à un
+// padding gauche/droite symétrique simple ; la barre de défilement native peut légèrement
+// chevaucher le bord droit du contenu, un compromis plus sûr qu'un vide permanent.
+$panel-padding-x-right: $panel-padding-x;
+$panel-padding-y: 14rem;
+// Couleur d'accent = celle des panneaux du jeu (retour utilisateur : boutons et curseurs
+// dans la couleur du jeu plutôt que le violet du mod, mais toujours colorés) : dégradé de
+// surbrillance du jeu (--gradientHighlightStart -> --gradientHighlightEnd).
+// ATTENTION : cohtml (moteur CSS du jeu) ne gère PAS la valeur de repli de var() —
+// "var(--x, #fff)" invalide toute la déclaration. Uniquement des variables définies sur
+// :root par le jeu, sans repli.
+$accent: var(--gradientHighlightEnd);
+$accent-gradient-start: var(--gradientHighlightStart);
+// Versions translucides (séparateurs, survol) : --selectedColor est une couleur pleine,
+// sans canal alpha réglable en CSS — valeurs hex8 de la même teinte (#1e83aa).
+$accent-soft: #1e83aa59;
+$accent-medium: #1e83aa80;
 
 // top/left sont posés en style inline (position draggable persistée) sur le
 // wrapper, pas sur .panel : .panel a overflow:hidden (coins arrondis), et le
@@ -31,51 +41,117 @@ $accent-violet-gradient-start: #c12cea;
 // qui lui n'a pas de overflow:hidden.
 .panelWrapper {
     position: absolute;
-    width: 400rem;
+    // Élargi (400 -> 460rem) : le panneau accumule beaucoup de rangées (Padrão/Vista/
+    // Estrada/Geometria/Cul-de-sac/Avenida/Redes) — à 400rem tout se touchait ("muito
+    // colado", retour en jeu). Élargir plutôt que réduire la taille du texte : un texte
+    // plus petit nuit à la lisibilité d'un panneau d'outil déjà dense en contrôles.
+    width: 460rem;
     pointer-events: auto;
 }
 
 .panel {
     width: 100%;
-    background-color: #181825bf; // rgba(24, 24, 37, 0.75)
+    // Même corps que les panneaux du jeu (Panel/infoview, règle .content du jeu) :
+    // --panelColorNormal recouvert du dégradé --panelGradientStart -> --panelGradientEnd.
+    // Leurs opacités (--panelOpacityNormal, --uiOpacity) sont posées par le jeu sur la
+    // racine du document à chaque changement de Options > Interface > Transparence, et
+    // --panelBlur y est désactivé à 100 % : le panneau suit ces réglages en direct. Pas de
+    // contour, comme les panneaux du jeu.
+    background-color: var(--panelColorNormal);
+    background-image: linear-gradient(var(--panelGradientStart), var(--panelGradientEnd));
     backdrop-filter: var(--panelBlur);
     border-radius: 12rem;
-    // Léger contour violet (même accent que le soulignement du titre et les bordures
-    // de foldout ci-dessous) tout autour du panneau, pas seulement sur le titre.
-    border: 2rem solid #9645ff8c;
     color: white;
     display: flex;
     flex-direction: column;
     overflow: hidden;
 
-    // Dégradé violet du mod sur l'état "sélectionné" de TOUT ToolButton natif dans le
-    // panneau (Mode, Vista, Anarchy...), à la place de sa teinte vanilla par défaut —
+    // Couleur d'accent ($accent, celle du jeu) sur l'état "sélectionné" de TOUT ToolButton
+    // natif dans le panneau (Mode, Vista, Anarchy...), à la place de sa teinte par défaut —
     // même pattern que CS2-NetworkTools (toolActionPanel.module.scss). Un seul sélecteur
     // au niveau du panneau plutôt que dupliqué par rangée : un bouton "selected" est un
     // descendant DOM de .panel quel que soit le module SCSS qui définit ses propres
     // classes (viewSelection.module.scss, etc.), donc ce sélecteur les couvre tous.
     button[class^="selected"],
     button[class*="selected"] {
-        background-image: linear-gradient(to bottom, $accent-violet-gradient-start 0%, $accent-violet 100%) !important;
-        background-color: $accent-violet-gradient-start !important;
+        background-image: linear-gradient(to bottom, $accent-gradient-start 0%, $accent 100%) !important;
+        background-color: $accent-gradient-start !important;
     }
 }
 
-// Barre de titre : poignée de déplacement du panneau. Fin soulignement violet
-// (accent du thème vanilla) : seule touche de couleur du panneau, pas de fond plein.
+// Barre de titre (poignée de déplacement du panneau), calquée sur celle des panneaux du
+// jeu (infoview) : fond sombre --panelColorDark, icône à gauche, titre centré en
+// majuscules couleur --accentColorNormal, fermeture à droite.
 .header {
     display: flex;
     flex-direction: row;
     align-items: center;
-    padding: $panel-padding-y $panel-padding-x 8rem;
-    font-weight: 600;
-    color: white;
+    padding: 6rem 10rem;
+    min-height: 36rem;
+    // Toujours opaque, comme la barre de titre des panneaux du jeu (--commonBlack est la
+    // valeur de --panelColorDark dans le style d'interface actuel du jeu) : la
+    // transparence de l'interface ne s'applique qu'au corps.
+    background-color: var(--commonBlack);
+    color: var(--accentColorNormal);
     cursor: move;
-    border-bottom: 1rem solid $accent-violet;
+    position: relative;
 }
 
+.headerIcon {
+    width: 32rem;
+    height: 32rem;
+    margin-right: 10rem;
+    flex-shrink: 0;
+}
+
+// Centré sur toute la largeur de l'en-tête (et non dans l'espace restant entre l'icône et
+// les boutons, de largeurs différentes à gauche et à droite) : positionné en absolu,
+// avec la même marge des deux côtés pour ne pas passer sous l'icône ni sous X/Anarchy.
 .headerTitle {
-    flex: 1;
+    position: absolute;
+    left: 96rem;
+    right: 96rem;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    pointer-events: none;
+    text-align: center;
+    text-transform: uppercase;
+    font-size: var(--fontSizeL);
+    line-height: 1.2;
+}
+
+// Bouton de fermeture (même glyphe et taille que la croix des panneaux du jeu) :
+// désactive l'outil, comme le bouton de la barre d'outils.
+.headerClose {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24rem;
+    height: 24rem;
+    margin-left: 10rem;
+    flex-shrink: 0;
+    cursor: pointer;
+    opacity: 0.9;
+
+    &:hover {
+        opacity: 1;
+    }
+}
+
+.headerCloseIcon {
+    width: 20rem;
+    height: 20rem;
+    // Glyphe en masque (mask-image posé en style inline dans gridPanel.tsx : une url()
+    // relative dans le SCSS serait résolue par le bundler, pas par le jeu), teinté en
+    // blanc — même technique que les icônes teintées du jeu.
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    background-color: white;
 }
 
 // Bouton Anarchy (mod tiers optionnel) dans l'en-tête, à côté du titre : toujours
@@ -84,6 +160,7 @@ $accent-violet-gradient-start: #c12cea;
     display: flex;
     align-items: center;
     flex-shrink: 0;
+    margin-left: 10rem;
 }
 
 // Zone défilante des sections : bornée à une fraction de la hauteur d'écran
@@ -92,22 +169,46 @@ $accent-violet-gradient-start: #c12cea;
 .content {
     display: flex;
     flex-direction: column;
-    padding: $panel-padding-y $panel-padding-x 0;
+    // Pas de padding horizontal ici : il est porté par la zone défilante elle-même (voir
+    // .scrollable), pour que la barre de défilement se loge dans la marge droite.
+    padding: $panel-padding-y 0 0 0;
     max-height: 70vh;
 }
 
 // Zone défilante native (VC.Scrollable, même composant que prefabPicker.tsx) : le
 // scroll/la barre viennent du thème vanilla du jeu, pas d'un overflow CSS custom.
 // flex:1 + min-height:0 (même recette que .list dans prefabPicker.module.scss) donne
-// à Scrollable une hauteur bornée à l'intérieur de .content (max-height: 70vh).
+// à Scrollable une hauteur bornée à l'intérieur de .content (max-height: 70vh). Pas de
+// margin/padding asymétrique supplémentaire ici (essayé puis abandonné, voir le
+// commentaire sur $panel-padding-x-right) : un léger chevauchement de la barre native
+// sur le bord droit du contenu est un compromis plus sûr qu'un vide permanent visible
+// même sans défilement.
 .scrollWrapper {
     flex: 1;
     min-height: 0;
 }
 
+// Même recette que les panneaux du jeu (--contentPadding/--scrollbarPadding égaux) : le
+// contenu a toujours la même marge droite, et quand la barre apparaît, Scrollable
+// remplace cette marge par --scrollbarPadding (même valeur) et y dessine la barre. Le
+// contenu ne se rétrécit donc plus, et la barre reste collée au bord droit du panneau
+// (centrée dans la marge, à ~6rem du bord) au lieu de chevaucher les contrôles.
+.scrollable {
+    flex: 1;
+    --contentPaddingHorizontal: #{$panel-padding-x};
+    --contentPaddingVertical: 0rem;
+    --scrollbarPadding: #{$panel-padding-x};
+}
+
 // Repli par section (mode/grille, culs-de-sac, sélection) : même langage visuel
 // que le chevron du panneau natif (icône vanilla, rotation CSS).
+// Chaque section repliable sur un second fond, comme les blocs de légende des panneaux
+// infoview du jeu (--sectionBackgroundColor, par-dessus le dégradé du panneau).
 .foldout {
+    background-color: #708f9b33; // --commonTransparentGray du jeu (fond des blocs de légende)
+    border-radius: 8rem;
+    padding: 8rem 10rem;
+
     & + .foldout {
         margin-top: 10rem;
     }
@@ -118,8 +219,8 @@ $accent-violet-gradient-start: #c12cea;
     flex-direction: row;
     align-items: center;
     cursor: pointer;
-    padding-bottom: 4rem;
-    border-bottom: 1rem solid #9645ff59; // accent violet, atténué (3 sections par panneau)
+    padding-bottom: 6rem;
+    border-bottom: 1rem solid #{$accent-soft}; // accent atténué (plusieurs sections par panneau)
 }
 
 // Section verrouillée fermée (Cul-de-sac quand le mode est désactivé) : signale
@@ -132,7 +233,7 @@ $accent-violet-gradient-start: #c12cea;
 .foldoutChevron {
     width: 10rem;
     height: 10rem;
-    margin-right: 6rem;
+    margin-left: 6rem;
     flex-shrink: 0;
     transition: transform 0.15s;
 }
@@ -140,7 +241,7 @@ $accent-violet-gradient-start: #c12cea;
 .foldoutChevronCollapsed {
     width: 10rem;
     height: 10rem;
-    margin-right: 6rem;
+    margin-left: 6rem;
     flex-shrink: 0;
     transform: rotate(-90deg);
 }
@@ -157,88 +258,471 @@ $accent-violet-gradient-start: #c12cea;
 .foldoutHeaderExtra {
     display: flex;
     align-items: center;
+    margin-right: 8rem;
+}
+
+// Séparateurs Avenida/Principal/Secundária (fusion Estrada+Redes, option D — voir
+// NetworkTabs dans gridPanel.tsx) : remplace les anciens .networkGroupLabel empilés
+// ("Avenue"/"Main" au-dessus de leurs rangées) par un vrai changement d'onglet, un
+// seul réseau visible à la fois.
+.networkTabs {
+    display: flex;
+    flex-direction: row;
+
+    & > * + * {
+        margin-left: 4rem;
+    }
+}
+
+.networkTab {
+    flex: 1;
+    padding: 5rem 4rem;
+    font-size: var(--fontSizeXS);
+    font-weight: 600;
+    color: #ffffff80;
+    background-color: #ffffff0f;
+    border: 1rem solid #ffffff1f;
+    border-radius: 6rem;
+    cursor: pointer;
+    coh-font-fit-mode: shrink;
+    white-space: nowrap;
+
+    &:hover {
+        border-color: #ffffff40;
+    }
+}
+
+.networkTabActive {
+    color: white;
+    background-image: linear-gradient(to bottom, $accent-gradient-start 0%, $accent 100%);
+    border-color: transparent;
+
+    &:hover {
+        border-color: transparent;
+    }
+}
+
+// Chip de choix de prefab par réseau (voir NetworkPrefabRow dans gridPanel.tsx) —
+// contenu de l'ancienne section "Estrada" (roadSelection.tsx), un seul slot par
+// onglet au lieu des 3 réseaux en rangée. Mêmes classes .prefabButton/.prefabIcon/
+// .prefabName/.prefabChevron que roadSelection.module.scss (repris tels quels,
+// modules SCSS distincts donc pas de partage de classe possible entre les deux).
+.networkPrefabButton {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 220rem;
+    overflow: hidden;
+    padding: 2rem 6rem;
+    border-radius: 4rem;
+    background: transparent;
+    border: none;
+    color: white;
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+    }
+}
+
+.networkPrefabIcon {
+    width: 16rem;
+    height: 16rem;
+    margin-right: 4rem;
+    flex-shrink: 0;
+}
+
+.networkPrefabName {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: var(--fontSizeS);
+    line-height: 1.25em;
+    overflow: hidden;
+    text-overflow: ellipsis; // nom trop long coupé avec "…" (même recette que roadSelection)
+    white-space: nowrap;
+}
+
+.prefabChevron {
+    margin-left: 4rem;
+    color: #ffffff80;
+    font-size: var(--fontSizeM);
+    flex-shrink: 0;
 }
 
 .foldoutBody {
-    padding-top: 8rem;
+    padding-top: 12rem;
 }
 
+// Reste utilisé pour les rangées Redes (chips VC.ToolButton, voir gridPanel.tsx) — les
+// sliders/toggles/dropdowns sont passés à .sliderControl/.toggleRow/.dropdownRow
+// ci-dessous (contrôles custom, plus de widgets vanilla de l'éditeur à intégrer ici).
 .vanillaRow {
     & + .vanillaRow {
-        margin-top: 8rem;
+        margin-top: 12rem;
     }
+}
 
-    // Intégration des widgets vanilla dans le panneau (mêmes compensations que
-    // NetworkTools) : label à largeur fixe à gauche, contrôle extensible à droite.
-    .vanillaField {
+// ------------------------------------------------------------------
+// Contrôles entièrement custom (Padrão/sliders/interrupteurs) : calqués sur le
+// mockup "Seletor segmentado (ícones)" approuvé, à la place des widgets
+// vanilla de l'éditeur (voir SliderControl/ToggleControl/PatternButton dans
+// gridPanel.tsx). Remplace .vanillaField pour ces rangées, gardé seulement
+// pour les rangées Redes (chips VC.ToolButton) et les VC.DropdownField
+// restés vanilla (.dropdownRow ci-dessous).
+// ------------------------------------------------------------------
+
+.patternRow {
+    & + .patternRow {
+        margin-top: 12rem;
+    }
+}
+
+// Titre "Padrão" + bouton "Repor valores" sur une même ligne.
+.patternRowHeader {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10rem;
+
+    .patternRowLabel {
+        margin-bottom: 0;
+    }
+}
+
+.resetButton {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 1;
+    min-width: 0;
+    margin-left: 8rem;
+    padding: 2rem 8rem;
+    border-radius: 4rem;
+    background: transparent;
+    border: 1rem solid #ffffff33;
+    color: #ffffffd9;
+    font-size: var(--fontSizeXS);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+        border-color: #ffffff66;
+    }
+}
+
+.resetButtonGlyph {
+    margin-right: 4rem;
+    flex-shrink: 0;
+}
+
+.patternRowLabel {
+    display: block;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: var(--fontSizeXS);
+    font-weight: 600;
+    color: #ffffff80;
+    margin-bottom: 10rem;
+}
+
+.patternButtons {
+    display: flex;
+    flex-direction: row;
+
+    & > * + * {
+        margin-left: 8rem;
+    }
+}
+
+.patternButton {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4rem;
+    padding: 10rem 4rem;
+    background-color: #ffffff0f;
+    border: 1rem solid #ffffff1f;
+    border-radius: 8rem;
+    cursor: pointer;
+
+    &:hover {
+        border-color: #ffffff40;
+    }
+}
+
+.patternButtonSelected {
+    background-image: linear-gradient(to bottom, $accent-gradient-start 0%, $accent 100%);
+    border-color: transparent;
+
+    &:hover {
+        border-color: transparent;
+    }
+}
+
+.patternButtonLocked {
+    cursor: default;
+    opacity: 0.55;
+
+    &:hover {
+        border-color: #ffffff1f;
+    }
+}
+
+.patternButtonIcon {
+    width: 20rem;
+    height: 20rem;
+}
+
+.patternButtonLabel {
+    font-size: var(--fontSizeXS);
+    color: #ffffffd9;
+    line-height: 1.2em;
+}
+
+// Ruban "em breve" en coin, même dégradé que l'état sélectionné — cohérent avec
+// .soonBadge (utilisé ailleurs), juste repositionné pour un bouton plus grand.
+.patternButtonSoon {
+    position: absolute;
+    top: -6rem;
+    right: -6rem;
+    padding: 1rem 4rem;
+    border-radius: 6rem;
+    font-size: 7rem;
+    line-height: 1.4em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: white;
+    background-image: linear-gradient(to bottom, $accent-gradient-start 0%, $accent 100%);
+    pointer-events: none;
+}
+
+// "Mode" (Grille classique uniquement) : mêmes VC.ToolButton natifs qu'avant,
+// juste réintégrés dans une rangée label-à-gauche/contrôle-à-droite comme le
+// reste, au lieu du wrapper VC.Section vanilla.
+.modeRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+
+    & + * {
+        margin-top: 16rem;
+    }
+}
+
+.modeRowLabel {
+    font-size: var(--fontSizeS);
+    color: #ffffffd9;
+}
+
+.modeButtons {
+    display: flex;
+    flex-direction: row;
+
+    & > * + * {
+        margin-left: 4rem;
+    }
+}
+
+// Slider custom : rangée libellé/valeur au-dessus d'une piste pleine largeur
+// avec curseur glissable (voir SliderControl, glisser-déposer manuel comme le
+// drag du panneau lui-même).
+//
+// Espacement entre rangées : margin-top INCONDITIONNEL sur chacun des 3 types
+// (sliderControl/toggleRow/dropdownRow), annulé seulement sur le premier
+// enfant d'une section — plutôt qu'un sélecteur adjacent "& + .x" par paire de
+// types (l'ancienne approche listait 9 combinaisons et RESTAIT collée en jeu :
+// plus simple, plus robuste, et même recette déjà éprouvée que
+// .networkGroupLabel:first-child plus bas dans ce fichier).
+.sliderControl,
+.toggleRow,
+.dropdownRow {
+    margin-top: 16rem;
+
+    &:first-child {
+        margin-top: 0;
+    }
+}
+
+.sliderControlDisabled {
+    opacity: 0.5;
+
+    .sliderControlTrack {
+        cursor: default;
+    }
+}
+
+.sliderControlHeader {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6rem;
+}
+
+.sliderControlLabel {
+    font-size: var(--fontSizeS);
+    color: #ffffffd9;
+}
+
+// Icône + libellé côte à côte, remplace un SliderControl/ToggleRow purement textuel
+// (label accepte React.ReactNode, voir RowIcon dans gridPanel.tsx). PAS icône seule +
+// tooltip CSS ([data-tip]/content: attr(), essayé puis abandonné — retour utilisateur en
+// jeu : rien n'apparaît au survol, cohtml ne supporte probablement pas content: attr(),
+// même limite déjà vue avec hsla()). Le texte reste donc toujours visible.
+.rowIconLabel {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    // margin-right sur l'icône plutôt que gap ci-dessus (essayé puis abandonné — retour
+    // utilisateur en jeu : icône et texte collés sans aucun espace visible malgré gap: 6rem
+    // déclaré ; cohtml ne semble pas supporter gap sur flexbox, ou l'ignore silencieusement,
+    // même limite générale que content: attr() plus haut). Repris le pattern déjà éprouvé
+    // ailleurs dans ce fichier (.headerIcon, .foldoutChevron) : margin-right explicite.
+    //
+    // margin-right ICI EN PLUS (retour utilisateur en jeu, .dropdownRow cette fois) :
+    // justify-content: space-between sur .dropdownRow/.toggleRow ne suffit pas toujours à
+    // écarter le libellé du contrôle (VC.DropdownField semble occuper toute la largeur
+    // restante sans laisser d'espace "en trop" à répartir) — marge fixe, filet de sécurité
+    // qui ne dépend pas du comportement de layout du composant natif voisin.
+    margin-right: 10rem;
+    font-size: var(--fontSizeS);
+    color: #ffffffd9;
+}
+
+.rowIconGlyph {
+    width: 14rem;
+    height: 14rem;
+    margin-right: 7rem;
+    flex-shrink: 0;
+    opacity: 0.85;
+}
+
+.sliderControlValue {
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: white;
+}
+
+.sliderControlTrack {
+    position: relative;
+    width: 100%;
+    height: 5rem;
+    background-color: #ffffff26;
+    border-radius: 3rem;
+    cursor: pointer;
+}
+
+.sliderControlFill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background-image: linear-gradient(to right, $accent-gradient-start, $accent);
+    border-radius: 3rem;
+    pointer-events: none;
+}
+
+.sliderControlHandle {
+    position: absolute;
+    top: 50%;
+    width: 13rem;
+    height: 13rem;
+    background-color: white;
+    border: 2rem solid $accent;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+// Interrupteur custom : piste + curseur, calqué sur le mockup.
+.toggleControl {
+    position: relative;
+    width: 32rem;
+    height: 18rem;
+    padding: 0;
+    background-color: #ffffff26;
+    border: none;
+    border-radius: 9rem;
+    cursor: pointer;
+    flex-shrink: 0;
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+}
+
+.toggleControlOn {
+    background-image: linear-gradient(to right, $accent-gradient-start, $accent);
+}
+
+.toggleControlKnob {
+    position: absolute;
+    top: 2rem;
+    left: 2rem;
+    width: 14rem;
+    height: 14rem;
+    background-color: white;
+    border-radius: 50%;
+    transition: left 0.15s;
+
+    .toggleControlOn & {
+        left: 16rem;
+    }
+}
+
+.toggleRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.toggleRowLabel {
+    font-size: var(--fontSizeS);
+    color: #ffffffd9;
+}
+
+// VC.DropdownField reste vanilla (pas de repli custom fiable pour un menu déroulant
+// dans le temps disponible) : seule la rangée autour est alignée sur le nouveau style
+// (libellé à gauche, contrôle à droite), au lieu du wrapper VC.Section.
+.dropdownRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+// Contentor du VC.DropdownField : le champ vanilla fait width: 100% de son parent et
+// débordait du panneau à côté du libellé (qui ne rétrécit pas) — retour utilisateur,
+// "as caixas de seleção do cul de sac vão até à borda". Ici il ne prend que la place
+// restante. Pas d'overflow: hidden, qui rognerait la liste déroulante une fois ouverte.
+.dropdownControl {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 220rem;
+
+    & > * {
         width: 100%;
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        position: relative;
-
-        & > * {
-            padding: 0;
-        }
-
-        [class^="label"] {
-            flex-shrink: 0;
-            flex-grow: 0;
-            flex-basis: auto;
-            overflow-x: hidden;
-            overflow-y: hidden;
-            width: 110rem;
-            margin-right: 8rem;
-            font-size: var(--fontSizeS);
-            coh-font-fit-mode: shrink;
-            font-weight: 500;
-            line-height: 1.25em;
-            white-space: pre-wrap;
-            color: #ffffffd9;
-        }
-
-        [class^="item"] > [class^="content"] > * {
-            margin-bottom: 0;
-        }
-
-        [class^="row"] {
-            justify-content: space-between;
-        }
-
-        [class^="slider-input"],
-        [class^="number-field"] {
-            font-size: var(--fontSizeS);
-            coh-font-fit-mode: shrink;
-            color: #ffffffd9;
-            line-height: 1.25em;
-            height: 26rem;
-            padding: 3rem 5rem;
-            background-color: $input-bg-color;
-            border: 1rem solid $input-border-color;
-
-            &:hover {
-                border-color: $input-border-hover-color;
-            }
-        }
-
-        [class^="slider-input"] {
-            width: 60rem;
-            border-radius: 3rem;
-        }
-
-        // Le div racine du widget de l'éditeur doit occuper l'espace restant.
-        & > div {
-            flex: 1;
-        }
-
-        .unitLabel {
-            font-size: var(--fontSizeS);
-            line-height: 1.25em;
-            color: #ffffff80;
-            position: absolute;
-            right: 5rem;
-        }
+        min-width: 0;
+        max-width: 100%;
     }
+}
+
+.dropdownRowLabel {
+    font-size: var(--fontSizeS);
+    color: #ffffffd9;
 }
 
 // Frère de .content (pas un enfant) : reste hors de sa zone défilante, donc
@@ -266,11 +750,66 @@ $accent-violet-gradient-start: #c12cea;
     margin-top: 12rem;
 }
 
+// Même rôle que .generateHint, affiché à sa place après un rejet de "Générer" pour
+// collision (voir GridRoadToolSystem.PerimeterCollision) — même rouge que .invalid
+// dans selectionRow.module.scss, pour rester cohérent avec l'unique autre indicateur
+// d'erreur du panneau.
+.collisionHint {
+    font-size: var(--fontSizeXS);
+    line-height: 1.3em;
+    color: #ff8080;
+    text-align: center;
+    margin-top: 12rem;
+}
+
+// Bouton primaire natif (cs2/ui) élargi/agrandi et forcé sur la couleur d'accent
+// ($accent) —
+// même recette !important que .panel button[class^="selected"] plus haut.
 .applyButton {
-    padding: 5rem 8rem;
-    font-size: var(--fontSizeS);
-    font-weight: 600;
+    width: 100%;
+    padding: 9rem 8rem;
+    font-size: var(--fontSizeM);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-radius: 8rem;
+
+    &:not(:disabled) {
+        background-image: linear-gradient(to bottom, $accent-gradient-start 0%, $accent 100%) !important;
+        background-color: $accent-gradient-start !important;
+    }
+}
+
+// Enveloppe d'un ToolButton "Padrão" désactivé (Curva/Orgânico, voir gridPanel.tsx) : juste un
+// point d'ancrage position:relative pour .soonBadge, ne change rien à la mise en page du bouton
+// lui-même (display:inline-block conserve la taille intrinsèque du ToolButton enfant).
+.soonWrapper {
+    position: relative;
+    display: inline-block;
+}
+
+// Étiquette "em breve"/"soon" en coin d'un bouton Padrão pas encore fonctionnel — même
+// couleur d'accent que l'état sélectionné d'un ToolButton, pour rester dans le même langage visuel.
+.soonBadge {
+    position: absolute;
+    top: -6rem;
+    right: -6rem;
+    padding: 1rem 4rem;
+    border-radius: 6rem;
+    font-size: 7rem;
+    line-height: 1.4em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: white;
+    background-image: linear-gradient(to bottom, $accent-gradient-start 0%, $accent 100%);
+    pointer-events: none;
 }
 
 // Le bouton "Annuler" (clearButton) n'a plus de classe custom : le variant
 // "flat" du Button vanilla rend avec son style natif pur, sans imitation.
+
+// Pousse Anarchy/X à droite de l'en-tête (le titre, en absolu, ne prend plus de place).
+.headerSpacer {
+    flex: 1;
+}

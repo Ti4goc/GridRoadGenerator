@@ -4,49 +4,61 @@
 	<!--Name of the mod to display to players-->
 	<DisplayName Value="Grid Road Generator" />
 	<!--Short description of the mod-->
-	<ShortDescription Value="Select road nodes to outline any perimeter, then generate a perfectly-fitted grid of internal streets — cul-de-sacs, organic variation and full curve control included. Available in 16 languages." />
+	<ShortDescription Value="Outline any perimeter with existing roads and fill it with streets in one click: grid, loops, Barcelona-style superblocks or concentric rings. 42 languages." />
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
 	<LongDescription>
 # Grid Road Generator
 
-Select several existing road nodes — the corners of any perimeter (rectangle, L-shape, rotated, irregular) — then confirm to generate a perfect grid of inner roads, oriented on the perimeter's longest edge and clipped to its boundaries.
+Click existing road nodes to outline any perimeter — rectangle, L-shape, rotated, curved or irregular (double-click a node to select the whole block automatically) — pick a pattern, then press **Generate** to fill it with connected streets. Generated streets join the perimeter roads and any road already crossing the area.
 
-## Geometry
-- **Fit to area** (rows/columns spread evenly) or **fixed spacing** (distance in meters, road count computed automatically)
-- Columns, rows, spacing, additional angle offset
-- Follow terrain, or keep the generated grid flat at the perimeter's average elevation
+## Four patterns
+**Grid** — the classic street grid, oriented on the perimeter's longest edge.
+- Fit to area (rows/columns spread evenly) or fixed spacing in meters
+- Columns, rows, spacing and extra angle
+- Cul-de-sac mode: turn columns, rows or both into dead ends, with depth, frequency, staggering and a turnaround circle (automatic or manual size, asphalt, grass or tree-lined)
+- Avenue: promote one column and/or one row to an avenue with its own road type; where both cross, a real roundabout island is placed
 
-## Cul-de-sac (suburban layout)
-- Turns the cross streets into dead ends instead of through streets
-- Depth, frequency and staggering (alternates between the near/far collector street)
-- Turnaround circle at the end of each cul-de-sac: automatic size (follows road width) or manual, in asphalt, grass or tree-lined style
+**Loop** — a sparse grid of collector roads (200–400 m apart) dividing the area into blocks, each served by an internal loop street, with optional cul-de-sac branches.
 
-## Organic variation
-- Jitter: deterministic pseudo-random offset of the internal lines, with a "new seed" button
-- Curve amount and style for the collector streets: a one-sided bulge, or an S-curve
-- Orientation: fixed angle, or an experimental "follow terrain" mode recomputed at generation time
+**Superblock** — inspired by Barcelona's superilles: the area is divided into buildable zones (100–400 m, adjusted to fill the area exactly) separated by pedestrian streets. Every third line is a collector road; on a small selection the perimeter road itself plays that role. Pedestrian streets connect to the collectors and to the perimeter road.
 
-## Road selection
-- Uses whichever road prefab is selected in the vanilla road tool by default, or pick one explicitly from the in-panel selector (search, categories, recently used)
+**Concentric** — rings that copy the shape of the perimeter, one inside the other.
+- 1 to 10 layers; the slider stops at the number of rings that fit the selected shape (at least 40 m between rings, even in the narrowest part)
+- Every ring goes around the whole shape: tighter in narrow parts, wider in wide ones — no splitting, no pointed tips
+- Straight sides stay straight, sharp corners stay sharp, curves stay smooth
+- 2 to 12 radial connections spread around the perimeter, linking every ring to the outside road
 
-## View
-- Toggle underground networks, the zone grid and normally-invisible networks while the tool is active — same as CS2-NetworkTools' View row
-- Every selectable road node shows a faint marker before you even hover over it
+## Networks and upgrades (Loop, Superblock, Concentric)
+- Choose a separate road for collectors, local streets and pedestrian paths
+- Automatic upgrades applied at build time: median trees or grass, roadside trees, bike lanes, wide sidewalks (left/right)
+
+## Preview
+- A lightweight line sketch shows the result and updates live while you drag any slider, colored by road type (collector, local street, pedestrian)
+- The real in-game preview is only built when you press Generate, where it is validated like any road placement
+- If placement is blocked (collision, slope…), the real preview stays visible with a clear message, so you can see and fix the conflict
+- Optional: **Options &gt; Mods &gt; Grid Road Generator &gt; General &gt; Automatically remove colliding roads** removes the generated pieces in conflict and retries (off by default, as it can leave gaps in the pattern)
+
+## Interface
+- **Reset values** button next to the pattern selector: restores the default values of every pattern
+- Panel styled like the game's own panels: dark title bar with icon and close button, body that follows **Options &gt; Interface &gt; Transparency** and your interface style
+- Draggable panel, collapsible sections, road picker with search and categories
+- View toggles: underground networks, zone grid and normally-invisible networks
+- Follow terrain, or keep the generated streets flat at the perimeter's average elevation
 
 ## Compatibility
-- **[Anarchy](https://mods.paradoxplaza.com/mods/74604/Windows)** by **yenyang** (optional): if installed, a toggle appears in the panel header, synced with Anarchy's own button and shortcut. No hard dependency — nothing changes if Anarchy isn't installed.
+- **[Anarchy](https://mods.paradoxplaza.com/mods/74604/Windows)** by **yenyang** (optional): if installed, a toggle appears in the panel header, synced with Anarchy's own button and shortcut. No hard dependency.
 
 ## Keybindings (Options &gt; Mods &gt; Grid Road Generator)
 - **Ctrl+G**: toggle the tool
-- **Enter**: confirm the perimeter and build the grid
-- **Left click**: add/remove a node · **Right click**: remove the last node · **Escape**: clear the selection
+- **Enter**: generate
+- **Left click**: add/remove a node · **Double-click** the first node: select the whole perimeter · **Right click**: remove the last node · **Escape**: clear the selection
 
-All other settings (geometry, cul-de-sac, organic variation, road choice) live in the in-game panel itself, not in Options &gt; Mods, and persist between sessions.
+All other settings live in the in-game panel and persist between sessions.
 
 ## Languages
-**16 languages** are included:
+**42 languages**:
 - **12 official game languages**: English, French, German, Spanish, Italian, Polish, Portuguese (Brazil), Russian, Japanese, Korean, Chinese (Simplified), Chinese (Traditional)
-- **4 community languages**: Portuguese (Portugal), Ukrainian, Thai, Vietnamese — these four only appear if a locale-adding mod (e.g. an I18n mod) is installed
+- **30 community languages**, shown when a language mod adds them to the game (e.g. I18N Everywhere or a language pack): Portuguese (Portugal), Ukrainian, Thai, Vietnamese, Dutch, Arabic, Czech, Danish, Persian, Finnish, Filipino, Greek, Hindi, Croatian, Hungarian, Indonesian, Norwegian, Romanian, Swedish, Turkish, Catalan, Galician, Basque, Occitan, Welsh, West Frisian, Breton, Scots, Sardinian, Abkhaz
 
 ## Credits
 Node-selection, tooltip and UI architecture patterns adapted from [CS2-NetworkTools](https://github.com/lucarager/CS2-NetworkTools) by Luca Rager, under the MIT license. Thank you!
@@ -54,16 +66,17 @@ Node-selection, tooltip and UI architecture patterns adapted from [CS2-NetworkTo
 	<!--Thumbnail-->
 	<Thumbnail Value="C:\Dev\GridRoadGenerator\Properties\Thumbnail.png" />
 	<!--Screenshot, can be set multiple times-->
-	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\1.png" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\1.jpg" />
 	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\2.png" />
-	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\3.png" />
-	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\4.png" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\3.jpg" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\4.jpg" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\5.jpg" />
 	<!--Tag, can be set multiple times-->
 	<Tag Value="Code Mod" />
 	<!--Link to the forum post where the mod can be discussed-->
-	<ForumLink Value="" />
+	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/grid-road-generator.1935368/" />
 	<!--Version of the mod-->
-	<ModVersion Value="0.2.0" />
+	<ModVersion Value="0.3.1" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times-->
@@ -72,13 +85,21 @@ Node-selection, tooltip and UI architecture patterns adapted from [CS2-NetworkTo
 	<ExternalLink Type="github" Url="https://github.com/Ti4goc/GridRoadGenerator" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-Initial release:
-- Grid generation on any perimeter (rectangle, L-shape, rotated, irregular), fit-to-area or fixed spacing
-- Cul-de-sac (suburban) mode with configurable depth, frequency, staggering and turnaround style/size
-- Organic variation: jitter, collector curve amount/style (bulge or S-curve), terrain-follow orientation
-- In-panel road prefab picker, draggable/collapsible panel with a native scrollbar
-- View toggles (underground, zone grid, invisible networks) and selectable-node markers
-- Optional Anarchy integration
-- Reassignable keybindings (Ctrl+G, Enter) and 16 languages
+**0.3.1 - Concentric fixes and new options**
+
+Concentric:
+- No more collisions where connections meet the rings: connections always join a ring at an open angle, never inside a fold, and no tiny road pieces are left next to junctions
+- Connections are continuous lines from the perimeter to the centre (no more staggered pieces), and they reach the centre even through narrow parts of the shape
+- Rings keep the shape of the perimeter again instead of becoming rounder towards the centre, with pointed tips smoothly rounded
+- Perimeters that follow curved roads are cleaned of tiny back-and-forth kinks where two roads join (all patterns)
+- Faster generation when changing layers and connections
+
+New options:
+- Options > Mods > Grid Road Generator > General: "Automatically remove colliding roads" (off by default). When Generate is refused because of a collision, the generated pieces in conflict are removed and generation is retried
+- "Reset values" button in the panel, next to the pattern selector: restores the default values of every pattern (keeps the chosen pattern, networks, upgrades and view)
+
+Fixes:
+- Closing the panel while the real preview was shown caused a critical error
+- When Generate is refused, the log now lists where the game found the collision
 	</ChangeLog>
 </Publish>

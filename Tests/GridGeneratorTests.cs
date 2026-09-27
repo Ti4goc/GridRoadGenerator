@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using GridRoadGenerator.Core;
 using Unity.Mathematics;
@@ -24,6 +25,22 @@ namespace GridRoadGenerator.Tests
         // Cas 1 : carré axis-aligned, mode "ajuster à l'aire" 3×3
         // → 9 croisements internes, chacun partagé par exactement 4 sous-segments.
         // ------------------------------------------------------------------
+
+        [Fact]
+        public void RemoveBacktracks_DropsShortReversals_KeepsRealCorners()
+        {
+            // Vécu sur un vrai périmètre : les échantillons d'une courbe dépassaient le nœud
+            // suivant de ~3 m, puis le contour revenait en arrière (virage de 179°).
+            var loop = new List<float3>
+            {
+                new float3(0f, 1f, 0f), new float3(300f, 2f, 0f), new float3(303f, 2f, 0f), new float3(300.5f, 2f, 0.2f),
+                new float3(300f, 3f, 300f), new float3(0f, 4f, 300f),
+            };
+            GridGenerator.RemoveBacktracks(loop);
+            Assert.Equal(5, loop.Count); // seul le point qui dépassait (303 m) part
+            Assert.DoesNotContain(loop, p => p.x > 301f);
+            Assert.Contains(loop, p => p.x == 300f && p.z == 300f && p.y == 3f); // coin à 90° gardé, hauteur conservée
+        }
 
         [Fact]
         public void Square_FitToArea_EveryInternalCrossingSharedByExactlyFourSubSegments()
@@ -584,17 +601,17 @@ namespace GridRoadGenerator.Tests
             {
                 new float3(0f, 0f, 0f),
                 new float3(300f, 0f, 0f),
-                new float3(300f, 0f, 210f), // 3 x 70 m
-                new float3(0f, 0f, 210f),
+                new float3(300f, 0f, 105f), // 3 x 35 m
+                new float3(0f, 0f, 105f),
             };
             var parameters = new GridParameters
             {
                 Mode = SpacingMode.FixedSpacing,
                 Columns = 1,
                 Rows = 1,
-                SpacingMeters = 70f, // collectrices à v=70 et v=140
+                SpacingMeters = 35f, // collectrices à v=35 et v=70
                 CulDeSacMode = true,
-                CulDeSacDepth = 0.9f, // profondeur max : écart de 10 % du bloc = 7 m
+                CulDeSacDepth = 0.9f, // plafonné à 0.8 (voir GridGenerator) : écart de 20 % du bloc = 7 m
                 Staggered = true,
                 CulDeSacRatio = 100f,
             };
@@ -602,14 +619,14 @@ namespace GridRoadGenerator.Tests
             var segments = GridGenerator.GenerateGrid(nodes, parameters, out int omittedNodeCount);
             var columns = segments.Where(s => !s.IsHorizontal).ToList();
 
-            // Bloc [0,70] (bord, départ non-collectrice) : supprimé comme avant.
-            // Bloc [70,140] : impair ⇒ part de la collectrice v=140 vers v=70,
-            // s'arrêterait à 140+(70-140)*0.9=77, à 7 m de la collectrice v=70
+            // Bloc [0,35] (bord, départ non-collectrice) : supprimé comme avant.
+            // Bloc [35,70] : impair ⇒ part de la collectrice v=70 vers v=35,
+            // s'arrêterait à 70+(35-70)*0.8=42, à 7 m de la collectrice v=35
             // (< MinNodeDistance=8) ⇒ omis pour quasi-coïncidence, PAS raccourci.
-            // Bloc [140,210] : pair ⇒ part de v=140 vers v=210 (bord, non-collecteur),
-            // s'arrête à 140+(210-140)*0.9=203, 7 m du bord — le bord n'étant pas un
+            // Bloc [70,105] : pair ⇒ part de v=70 vers v=105 (bord, non-collecteur),
+            // s'arrête à 70+(105-70)*0.8=98, 7 m du bord — le bord n'étant pas un
             // nœud "déjà établi", ce bloc-ci N'EST PAS concerné par MinNodeDistance.
-            Assert.True(omittedNodeCount >= 1, "Le bloc [70,140] aurait dû être omis pour quasi-coïncidence.");
+            Assert.True(omittedNodeCount >= 1, "Le bloc [35,70] aurait dû être omis pour quasi-coïncidence.");
 
             // Aucun segment de colonne ne doit s'arrêter à moins de MinNodeDistance
             // d'une collectrice sans être en réalité fusionné avec elle (même point
@@ -905,675 +922,6 @@ namespace GridRoadGenerator.Tests
         }
     }
 
-    /// <summary>
-    /// Mode "Adaptativo" (GenerateAdaptiveGrid) : anneaux concentriques par offset inward du
-    /// polygone du périmètre — voir la doc de OffsetPolygonInward pour l'algorithme (miter
-    /// join avec clamp, pas de vrai straight-skeleton). Les trois cas demandés : carré convexe
-    /// (coins nets, distance d'offset exacte), forme en L concave (pas de casse/NaN au coin
-    /// concave), périmètre courbe (les anneaux suivent la courbe plutôt que sa corde).
-    /// </summary>
-    public class GridGeneratorAdaptiveGridTests
-    {
-        private static readonly List<float3> SquareNodes = new List<float3>
-        {
-            new float3(0f, 0f, 0f),
-            new float3(300f, 0f, 0f),
-            new float3(300f, 0f, 300f),
-            new float3(0f, 0f, 300f),
-        };
-
-        private static GridParameters AdaptiveParams(float spacingMeters, int radialConnections) => new GridParameters
-        {
-            SpacingMeters = spacingMeters,
-            RadialConnections = radialConnections,
-        };
-
-        [Fact]
-        public void SmallFullRoundaboutPerimeter_SucceedsAtReasonableSpacing()
-        {
-            // Régression : un petit giratoire (rayon 25) composé QUE d'arcs (aucun coin net,
-            // périmètre "lisse") échouait totalement (0 anneau, quel que soit l'espacement) avant
-            // la correction de ResamplePolygon — un bug de boucle qui ne parcourait aucun point
-            // pour le tronçon "ancré arbitrairement" d'un polygone entièrement lisse, faisant
-            // silencieusement retomber sur le polygone brut (arêtes trop courtes pour l'offset).
-            float radius = 25f;
-            float k = 0.5522847f; // 4/3*(sqrt(2)-1), quart de cercle en Bézier
-            var center = new float2(0f, 0f);
-            float3 QuarterPoint(float deg) => new float3(
-                center.x + radius * math.cos(math.radians(deg)), 0f, center.y + radius * math.sin(math.radians(deg)));
-
-            var quarterNodes = new List<float3> { QuarterPoint(0), QuarterPoint(90), QuarterPoint(180), QuarterPoint(270) };
-            var roundabout = new List<float3>();
-            for (int i = 0; i < 4; i++)
-            {
-                float3 p0 = quarterNodes[i];
-                float3 p1 = quarterNodes[(i + 1) % 4];
-                roundabout.Add(p0);
-                float startDeg = i * 90f;
-                float endDeg = startDeg + 90f;
-                float3 controlB = new float3(
-                    center.x + radius * math.cos(math.radians(startDeg)) - radius * k * math.sin(math.radians(startDeg)), 0f,
-                    center.y + radius * math.sin(math.radians(startDeg)) + radius * k * math.cos(math.radians(startDeg)));
-                float3 controlC = new float3(
-                    center.x + radius * math.cos(math.radians(endDeg)) + radius * k * math.sin(math.radians(endDeg)), 0f,
-                    center.y + radius * math.sin(math.radians(endDeg)) - radius * k * math.cos(math.radians(endDeg)));
-                roundabout.AddRange(GridGenerator.SampleCurve(p0, controlB, controlC, p1));
-            }
-
-            // Au moins un espacement raisonnable (plus petit que le rayon) doit réussir à produire
-            // un premier anneau valide — avant la correction, AUCUN espacement n'y arrivait sur ce
-            // périmètre entièrement lisse (sans coin net) : un bug de boucle (AppendResampledRun)
-            // faisait retomber silencieusement ResamplePolygon sur le polygone brut (89 arêtes de
-            // quelques mètres chacune), bien trop fines pour tout espacement d'anneau raisonnable.
-            var poly = roundabout.Select(p => new float2(p.x, p.z)).ToList();
-            bool anySucceeded = false;
-            foreach (float spacing in new[] { 8f, 10f, 12f, 15f, 20f })
-            {
-                if (GridGenerator.OffsetPolygonInward(poly, spacing) != null)
-                {
-                    anySucceeded = true;
-                    break;
-                }
-            }
-            Assert.True(anySucceeded, "Aucun espacement raisonnable n'a produit de premier anneau valide sur ce petit giratoire entièrement lisse.");
-        }
-
-        [Fact]
-        public void Square_FirstRingCornersAreOffsetInwardByExactlySpacing()
-        {
-            // Carré axis-aligned, coin convexe à 90° : le miter join dégénère exactement en un
-            // décalage perpendiculaire simple sur chaque arête, donc le coin (0,0) doit se
-            // retrouver exactement à (40,40) après un anneau à 40 m d'espacement — vérifiable
-            // à la main, pas seulement "dans le bon sens".
-            var segments = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0));
-
-            Assert.NotEmpty(segments);
-
-            bool HasPointNear(float x, float z) => segments.Any(s =>
-                math.distance(s.Start.xz, new float2(x, z)) < 0.5f
-                || math.distance(s.End.xz, new float2(x, z)) < 0.5f);
-
-            Assert.True(HasPointNear(40f, 40f), "Coin du premier anneau attendu à (40, 40).");
-            Assert.True(HasPointNear(260f, 40f));
-            Assert.True(HasPointNear(260f, 260f));
-            Assert.True(HasPointNear(40f, 260f));
-        }
-
-        [Fact]
-        public void Square_RingsShrinkUntilDegenerateThenStop()
-        {
-            // Côté 300, espacement 40 : anneaux à côté 220, 140, 60 (tous valides), puis un
-            // 4e anneau à côté 60-80=-20 (dégénéré, aire trop petite/signe inversé) — ne doit
-            // jamais être émis. Voir OffsetPolygonInward pour les critères d'arrêt.
-            var segments = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0));
-
-            bool HasPointNear(float x, float z) => segments.Any(s =>
-                math.distance(s.Start.xz, new float2(x, z)) < 0.5f
-                || math.distance(s.End.xz, new float2(x, z)) < 0.5f);
-
-            Assert.True(HasPointNear(80f, 80f), "Coin du 2e anneau attendu à (80, 80).");
-            Assert.True(HasPointNear(120f, 120f), "Coin du 3e anneau (le plus intérieur valide) attendu à (120, 120).");
-            Assert.False(HasPointNear(160f, 160f), "Un 4e anneau (dégénéré) ne devrait jamais être émis.");
-        }
-
-        [Fact]
-        public void Square_NeverProducesPointsOutsideTheOriginalPerimeter()
-        {
-            // Un offset INWARD ne doit jamais faire sortir un point du polygone d'origine,
-            // même avec le clamp de miter limit sur des coins à 90° (non concerné ici, mais
-            // la propriété doit tenir pour tout spacing raisonnable).
-            var segments = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(25f, 4));
-
-            Assert.NotEmpty(segments);
-            Assert.All(segments, s =>
-            {
-                Assert.InRange(s.Start.x, -0.5f, 300.5f);
-                Assert.InRange(s.Start.z, -0.5f, 300.5f);
-                Assert.InRange(s.End.x, -0.5f, 300.5f);
-                Assert.InRange(s.End.z, -0.5f, 300.5f);
-            });
-        }
-
-        [Fact]
-        public void Square_RadialConnectionsLinkOuterPerimeterToInnerRings()
-        {
-            // radialConnections > 0 : au moins un segment doit partir d'un sommet du périmètre
-            // d'ORIGINE (les 4 coins du carré) vers l'intérieur — sinon les anneaux resteraient
-            // des boucles isolées sans connexion, ce que le paramètre existe pour éviter.
-            var withoutRadials = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0));
-            var withRadials = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 4));
-
-            Assert.True(withRadials.Count > withoutRadials.Count,
-                "Des connexions radiales devraient ajouter des segments par rapport à radialConnections=0.");
-
-            bool startsAtOriginalCorner = withRadials.Any(s =>
-                SquareNodes.Any(corner => math.distance(corner.xz, s.Start.xz) < 0.5f)
-                || SquareNodes.Any(corner => math.distance(corner.xz, s.End.xz) < 0.5f));
-            Assert.True(startsAtOriginalCorner, "Au moins une connexion radiale devrait partir d'un coin du périmètre d'origine.");
-        }
-
-        [Fact]
-        public void Square_OnlyRadialConnectorsAreMarkedIsRadial()
-        {
-            // IsRadial distingue les rayons (EmitRadialConnections) des anneaux (EmitRingSegments) —
-            // voir RoadSegmentDef.IsRadial, utilisé par GridRoadToolSystem pour poser le réseau
-            // secondaire uniquement sur les rayons (et les impasses, IsCulDeSacEnd, hors de ce test).
-            var withRadials = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 4));
-            var withoutRadials = GridGenerator.GenerateAdaptiveGrid(SquareNodes, AdaptiveParams(40f, 0));
-
-            Assert.Contains(withRadials, s => s.IsRadial);
-            Assert.DoesNotContain(withoutRadials, s => s.IsRadial);
-
-            // Les anneaux eux-mêmes (segments communs aux deux générations) ne sont jamais radiaux.
-            int ringSegmentCount = withRadials.Count(s => !s.IsRadial);
-            Assert.Equal(withoutRadials.Count, ringSegmentCount);
-        }
-
-        [Fact]
-        public void ConcaveLShape_RadialConnectionSegmentsAreCollinear()
-        {
-            // Bug "zigzag" corrigé : EmitRadialConnections choisissait le sommet le plus proche
-            // de l'anneau suivant à chaque étape (NearestPoint), ce qui pouvait faire dériver le
-            // rayon d'un anneau à l'autre au lieu de rester une ligne droite — surtout visible
-            // sur un périmètre irrégulier/concave (carré simple trop symétrique pour exposer le
-            // bug : NearestPoint y retombe presque toujours sur le bon coin par coïncidence).
-            // Chaque rayon a maintenant une direction fixe (ComputeRadialDirection) : tous ses
-            // segments consécutifs doivent rester parfaitement colinéaires (produit vectoriel des
-            // directions ≈ 0), du premier anneau jusqu'au dernier.
-            var lShape = new List<float3>
-            {
-                new float3(0f, 0f, 0f),
-                new float3(300f, 0f, 0f),
-                new float3(300f, 0f, 150f),
-                new float3(150f, 0f, 150f),
-                new float3(150f, 0f, 300f),
-                new float3(0f, 0f, 300f),
-            };
-            var segments = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(20f, 5));
-            var radials = segments.Where(s => s.IsRadial).ToList();
-            Assert.True(radials.Count >= 2, "Il faut plusieurs anneaux pour tester la colinéarité d'un rayon sur plus d'un segment.");
-
-            // Segments d'un même rayon = suite consécutive où la fin de l'un touche le début du
-            // suivant (émis dans cet ordre par EmitRadialConnections, un rayon après l'autre).
-            int chainStart = 0;
-            for (int i = 1; i <= radials.Count; i++)
-            {
-                bool chainBreaks = i == radials.Count || math.distance(radials[i - 1].End.xz, radials[i].Start.xz) > 0.5f;
-                if (!chainBreaks) continue;
-
-                for (int j = chainStart + 1; j < i; j++)
-                {
-                    float2 dirPrev = math.normalize(radials[j - 1].End.xz - radials[j - 1].Start.xz);
-                    float2 dirNext = math.normalize(radials[j].End.xz - radials[j].Start.xz);
-                    float cross = dirPrev.x * dirNext.y - dirPrev.y * dirNext.x;
-                    Assert.True(math.abs(cross) < 0.01f,
-                        $"Segments {j - 1} et {j} d'un même rayon devraient être colinéaires (cross={cross}).");
-                }
-                chainStart = i;
-            }
-        }
-
-        [Fact]
-        public void PinchedHourglassPerimeter_RadialsNeverJumpAcrossTheNarrowWaist()
-        {
-            // Bug rapporté en jeu : sur un périmètre pincé (forme en huit/cœur, un "col" étroit
-            // entre deux lobes larges — reproduit ici en plus simple par un sablier), un rayon à
-            // direction fixe pouvait croiser l'anneau suivant très loin, de l'AUTRE côté du col,
-            // au lieu d'un point local — connexions chaotiques en zigzag traversant toute la
-            // forme (RayPolygonIntersection/NearestPoint n'avaient aucune borne de distance).
-            var hourglass = new List<float3>
-            {
-                new float3(0f, 0f, 0f),
-                new float3(100f, 0f, 0f),
-                new float3(100f, 0f, 90f),
-                new float3(60f, 0f, 90f),
-                new float3(60f, 0f, 110f),
-                new float3(100f, 0f, 110f),
-                new float3(100f, 0f, 200f),
-                new float3(0f, 0f, 200f),
-                new float3(0f, 0f, 110f),
-                new float3(40f, 0f, 110f),
-                new float3(40f, 0f, 90f),
-                new float3(0f, 0f, 90f),
-            };
-            float spacing = 20f;
-            var segments = GridGenerator.GenerateAdaptiveGrid(hourglass, AdaptiveParams(spacing, 8));
-            var radials = segments.Where(s => s.IsRadial).ToList();
-            Assert.NotEmpty(radials);
-
-            float maxPlausibleStep = spacing * 2.5f + 0.5f; // même borne que EmitRadialConnections, marge d'arrondi
-            Assert.All(radials, s =>
-            {
-                float length = math.distance(s.Start.xz, s.End.xz);
-                Assert.True(length <= maxPlausibleStep,
-                    $"Segment radial de {length} m — bien plus long qu'un pas d'anneau plausible ({maxPlausibleStep} m), signe d'un saut à travers le col étroit.");
-            });
-        }
-
-        [Fact]
-        public void OffsetVertex_NearOneEightyDegreeSpike_ClampsToStableBisectorNotWildDirection()
-        {
-            // Bug rapporté en jeu (grande boucle en dents de scie hors du périmètre choisi,
-            // repérée via un diagnostic en jeu : des segments d'ANNEAU, IsRadial=false, à des
-            // distances de 550-850m — proches de MiterLimit(4) x espacement(115) = 460m, le
-            // plafond de recadrage). Root cause mathématique : à un sommet "presque demi-tour"
-            // (dirOut ≈ -dirIn, angle proche de 180°) mais dont le cross-product est juste AU-
-            // DESSUS du seuil "quasi-parallèle" (1e-4) — donc dans la branche intersection, pas
-            // la branche moyenne sûre — le paramètre t de l'intersection de droites explose en
-            // ~1/φ (φ = écart angulaire à 180° exact), une vraie singularité mathématique, pas
-            // juste "un peu trop loin". Avant la correction, le recadrage (clamp) préservait la
-            // direction de ce point de miter déjà explosé — une direction essentiellement
-            // arbitraire, dictée par le bruit numérique de φ. Après : le recadrage retombe
-            // toujours sur la moyenne des deux normales (stable, jamais issue d'une division par
-            // un cross quasi nul), peu importe pourquoi la limite a été dépassée.
-            float phi = 0.0002f; // écart angulaire à 180° exact (rad) — juste au-dessus du seuil 1e-4 en cross
-            float2 prev = new float2(0f, 0f);
-            float2 curr = new float2(100f, 0f);
-            float2 dirOut = new float2(-math.cos(phi), math.sin(phi)); // ~180° moins phi
-            float2 next = curr + 100f * dirOut;
-            float distance = 115f;
-
-            float2 result = GridGenerator.OffsetVertex(prev, curr, next, distance, windingSign: 1f, out bool clamped);
-
-            Assert.True(clamped, "Ce sommet quasi-demi-tour doit dépasser la limite de miter.");
-            Assert.True(math.all(math.isfinite(result)), "Le point recadré doit rester fini (pas de NaN/Infinity).");
-
-            float maxDist = 4f * distance; // MiterLimit x distance
-            Assert.Equal(maxDist, math.distance(result, curr), 1);
-
-            // normalIn pour dirIn=(1,0), windingSign=1 : rotation (-y,x) => (0,1). La bissectrice
-            // stable attendue est donc (curr + (0,1) * maxDist) — jamais un point dérivé de la
-            // direction (numériquement instable) du miter brut.
-            float2 expected = curr + new float2(0f, 1f) * maxDist;
-            Assert.True(math.distance(result, expected) < 1f,
-                $"Direction de recadrage instable : attendu ~{expected}, obtenu {result}.");
-        }
-
-        // ------------------------------------------------------------------
-        // Réduction adaptative de capacité des rayons (voir EmitRadialConnections/
-        // RingPerimeter/SelectEvenlySpacedIndices) : bug rapporté en jeu sur un périmètre réel
-        // complexe (zones étroites) — trop de rayons convergeant vers un petit anneau intérieur
-        // atterrissaient à des points quasi mais pas exactement confondus (jamais fusionnés par
-        // le jeu, "Objetos sobrepostos"). Reconstruit ici la MÊME chaîne d'anneaux que
-        // GenerateAdaptiveGrid (via OffsetPolygonInward, exposé en internal pour les tests) pour
-        // vérifier précisément le comportement à l'anneau le plus intérieur.
-        // ------------------------------------------------------------------
-
-        /// <summary>Distance d'un point à la ligne brisée FERMÉE `ring` (plus proche arête).</summary>
-        private static float DistanceToPolylineXZ(float2 point, List<float2> ring)
-        {
-            float best = float.MaxValue;
-            int n = ring.Count;
-            for (int i = 0; i < n; i++)
-            {
-                float2 a = ring[i];
-                float2 b = ring[(i + 1) % n];
-                float2 ab = b - a;
-                float t = math.clamp(math.dot(point - a, ab) / math.max(1e-6f, math.lengthsq(ab)), 0f, 1f);
-                float2 closest = a + t * ab;
-                best = math.min(best, math.distance(point, closest));
-            }
-            return best;
-        }
-
-        /// <summary>Reconstruit la chaîne d'anneaux d'un polygone (même processus que GenerateAdaptiveGrid) pour un espacement donné.</summary>
-        private static List<List<float2>> BuildRingChain(List<float3> nodes, float spacing)
-        {
-            var polygon = nodes.Select(p => new float2(p.x, p.z)).ToList();
-            var rings = new List<List<float2>> { polygon };
-            var current = polygon;
-            for (int i = 0; i < 50; i++)
-            {
-                var next = GridGenerator.OffsetPolygonInward(current, spacing);
-                if (next == null) break;
-                rings.Add(next);
-                current = next;
-            }
-            return rings;
-        }
-
-        /// <summary>
-        /// Cercle densifié à vertexCount sommets : un carré (SquareNodes) n'a que 4 sommets,
-        /// donc au plus 4 origines de rayons possibles quel que soit RadialConnections demandé —
-        /// jamais assez pour mettre la réduction de capacité sous pression réelle (vérifié : les
-        /// tests ci-dessous ne détectaient RIEN avec un carré, y compris capacité et fusion
-        /// locale désactivées à la main). Un périmètre réel courbe (rond-point...) est densifié
-        /// par échantillonnage de courbe (BuildCurveAwarePerimeterPositions, CurveSampleSpacing) —
-        /// reproduit ici plus simplement par un cercle à vertexCount sommets, pour permettre
-        /// jusqu'à vertexCount origines de rayons distinctes.
-        /// </summary>
-        private static List<float3> DensifiedCircle(float radius, int vertexCount)
-        {
-            var points = new List<float3>(vertexCount);
-            for (int i = 0; i < vertexCount; i++)
-            {
-                float angle = i * 2f * math.PI / vertexCount;
-                points.Add(new float3(radius * math.cos(angle), 0f, radius * math.sin(angle)));
-            }
-            return points;
-        }
-
-        [Fact]
-        public void PinchedPerimeter_NoTwoDistinctSegmentEndpointsWithinMinNodeDistanceUnlessBitIdentical()
-        {
-            // Cercle densifié (48 sommets, assez pour les 24 rayons max exposés par le panneau)
-            // qui rétrécit anneau après anneau jusqu'à un tout petit anneau intérieur — beaucoup
-            // plus de rayons demandés que ce petit anneau ne peut en accueillir à MinNodeDistance
-            // les uns des autres. Avant réduction de capacité + fusion locale : des points quasi
-            // mais pas exactement confondus près du centre (jamais fusionnés par le jeu,
-            // "Objetos sobrepostos"). Après : soit fusionnés (même float2, distance ~0), soit à
-            // MinNodeDistance ou plus l'un de l'autre — jamais entre les deux.
-            var circle = DensifiedCircle(50f, 48);
-            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(10f, 24));
-            Assert.Contains(segments, s => s.IsRadial);
-
-            var points = new List<float3>();
-            foreach (var s in segments) { points.Add(s.Start); points.Add(s.End); }
-
-            for (int i = 0; i < points.Count; i++)
-            {
-                for (int j = i + 1; j < points.Count; j++)
-                {
-                    float d = math.distance(points[i].xz, points[j].xz);
-                    Assert.True(d < 0.01f || d >= GridGenerator.MinNodeDistance,
-                        $"Points quasi mais pas exactement confondus (fusion impossible pour le jeu) : {points[i]} vs {points[j]} d={d:F3}");
-                }
-            }
-        }
-
-        [Fact]
-        public void ManyRadialsOnSmallInnerRing_CapacityCapsSurvivingRadialsPerRing()
-        {
-            var circle = DensifiedCircle(50f, 48);
-            float spacing = 10f;
-            int requested = 24; // maximum exposé par le panneau (SET_RADIAL_CONNECTIONS, 0-24)
-
-            var rings = BuildRingChain(circle, spacing);
-            Assert.True(rings.Count > 2, "Ce test suppose plusieurs anneaux pour être significatif.");
-            var innermost = rings[rings.Count - 1];
-            int expectedCapacity = (int)math.floor(GridGenerator.RingPerimeter(innermost) / GridGenerator.MinNodeDistance);
-            Assert.True(expectedCapacity < requested, "Ce test suppose une capacité inférieure à la demande pour être significatif.");
-
-            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(spacing, requested));
-            var landedOnInnermost = segments
-                .Where(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) < 1f)
-                .Select(s => s.End.xz)
-                .Distinct()
-                .ToList();
-
-            Assert.True(landedOnInnermost.Count <= expectedCapacity,
-                $"{landedOnInnermost.Count} rayons distincts atteignent l'anneau le plus intérieur, attendu <= {expectedCapacity} " +
-                $"(périmètre {GridGenerator.RingPerimeter(innermost):F1} m / MinNodeDistance {GridGenerator.MinNodeDistance} m).");
-            Assert.True(landedOnInnermost.Count < requested,
-                $"La réduction de capacité devrait limiter nettement moins que les {requested} rayons demandés.");
-        }
-
-        [Fact]
-        public void CapacityDroppedRadial_EndsOnARealRingVertexNeverADanglingStub()
-        {
-            var circle = DensifiedCircle(50f, 48);
-            float spacing = 10f;
-            int requested = 24;
-
-            var rings = BuildRingChain(circle, spacing);
-            Assert.True(rings.Count > 2, "Ce test suppose plusieurs anneaux pour être significatif.");
-            var innermost = rings[rings.Count - 1];
-
-            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(spacing, requested));
-            var stoppedShortOfInnermost = segments
-                .Where(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) >= 1f)
-                .ToList();
-
-            Assert.NotEmpty(stoppedShortOfInnermost); // sinon la capacité n'a jamais été atteinte, le scénario ne teste rien
-            foreach (var seg in stoppedShortOfInnermost)
-            {
-                Assert.False(seg.IsCulDeSacEnd,
-                    $"Un rayon arrêté par réduction de capacité ne doit jamais porter IsCulDeSacEnd (poserait un cercle de retournement sur une intersection déjà existante) : {seg.Start} -> {seg.End}");
-                bool onSomeRing = rings.Any(ring => DistanceToPolylineXZ(seg.End.xz, ring) < 1f);
-                Assert.True(onSomeRing, $"Le point d'arrêt {seg.End} devrait être sur un anneau réel, jamais un bout suspendu.");
-            }
-        }
-
-        [Fact]
-        public void ModerateRadialCount_NeverReducedWhenCapacityComfortablyExceedsRequest()
-        {
-            // Espacement généreux (peu d'anneaux, chacun encore large) : la réduction de capacité
-            // ne devrait jamais s'activer — les 4 rayons demandés atteignent tous l'anneau le
-            // plus intérieur, exactement comme avant la réécriture en boucle par anneau.
-            var circle = DensifiedCircle(80f, 48);
-            float spacing = 60f;
-            int requested = 4;
-
-            var rings = BuildRingChain(circle, spacing);
-            Assert.True(rings.Count > 1);
-            var innermost = rings[rings.Count - 1];
-
-            var segments = GridGenerator.GenerateAdaptiveGrid(circle, AdaptiveParams(spacing, requested));
-            int reachedInnermost = segments
-                .Where(s => s.IsRadial && DistanceToPolylineXZ(s.End.xz, innermost) < 1f)
-                .Select(s => s.End.xz)
-                .Distinct()
-                .Count();
-
-            Assert.Equal(requested, reachedInnermost);
-        }
-
-        [Theory]
-        [InlineData(5f, 5f, true)]    // strictement à l'intérieur
-        [InlineData(-5f, 5f, false)]  // strictement à l'extérieur (à gauche)
-        [InlineData(50f, 5f, false)]  // strictement à l'extérieur (à droite)
-        [InlineData(5f, -50f, false)] // loin en dessous
-        public void PointInPolygon_SquareCases(float x, float y, bool expectedInside)
-        {
-            var square = new List<float2> { new float2(0f, 0f), new float2(10f, 0f), new float2(10f, 10f), new float2(0f, 10f) };
-            Assert.Equal(expectedInside, GridGenerator.PointInPolygon(new float2(x, y), square));
-        }
-
-        [Fact]
-        public void GeneratedAdaptiveGeometry_NeverHasASegmentWhoseMidpointExitsTheOriginalPerimeter()
-        {
-            // Bug rapporté en jeu (grande boucle triangulaire hors du périmètre sélectionné,
-            // "Objetos sobrepostos" persistant) : un rayon peut, sur un périmètre réel complexe
-            // (concave ou avec un sommet "en pointe" — ex. une impasse fine accidentellement
-            // incluse dans la sélection), calculer une direction ou un point d'arrivée qui fait
-            // sortir la corde current->next du périmètre d'origine (voir les gardes-fous
-            // PointInPolygon ajoutés dans EmitRadialConnections, sur la direction initiale ET sur
-            // chaque corde). Vérifié ici sur toutes les formes concaves déjà utilisées par cette
-            // classe de tests (L, sablier, cercle densifié), avec un nombre de rayons généreux
-            // pour maximiser les chances d'atteindre un sommet à risque.
-            var lShape = new List<float3>
-            {
-                new float3(0f, 0f, 0f), new float3(300f, 0f, 0f), new float3(300f, 0f, 150f),
-                new float3(150f, 0f, 150f), new float3(150f, 0f, 300f), new float3(0f, 0f, 300f),
-            };
-            var hourglass = new List<float3>
-            {
-                new float3(0f, 0f, 0f), new float3(100f, 0f, 0f), new float3(100f, 0f, 90f),
-                new float3(60f, 0f, 90f), new float3(60f, 0f, 110f), new float3(100f, 0f, 110f),
-                new float3(100f, 0f, 200f), new float3(0f, 0f, 200f), new float3(0f, 0f, 110f),
-                new float3(40f, 0f, 110f), new float3(40f, 0f, 90f), new float3(0f, 0f, 90f),
-            };
-            var circle = DensifiedCircle(50f, 48);
-
-            var cases = new (string name, List<float3> nodes, float spacing)[]
-            {
-                ("L", lShape, 20f),
-                ("hourglass", hourglass, 15f),
-                ("circle", circle, 10f),
-            };
-
-            foreach (var (name, nodes, spacing) in cases)
-            {
-                var perimeter2D = nodes.Select(p => new float2(p.x, p.z)).ToList();
-                var segments = GridGenerator.GenerateAdaptiveGrid(nodes, AdaptiveParams(spacing, 24));
-
-                Assert.All(segments, s =>
-                {
-                    float2 midpoint = (s.Start.xz + s.End.xz) * 0.5f;
-                    Assert.True(GridGenerator.PointInPolygon(midpoint, perimeter2D) || DistanceToPolylineXZ(midpoint, perimeter2D) < 1f,
-                        $"[{name}] Segment sort du périmètre d'origine (milieu hors polygone) : {s.Start} -> {s.End}");
-                });
-            }
-        }
-
-        [Fact]
-        public void ConcaveLShape_DoesNotProduceDegenerateOrNaNGeometry()
-        {
-            // Forme en L (coin réflexe/concave en (150,150)) : le point délicat de
-            // OffsetVertex (miter limit) et de OffsetPolygonInward (détection
-            // d'auto-intersection) doit empêcher toute géométrie cassée, jamais planter.
-            var lShape = new List<float3>
-            {
-                new float3(0f, 0f, 0f),
-                new float3(300f, 0f, 0f),
-                new float3(300f, 0f, 150f),
-                new float3(150f, 0f, 150f),
-                new float3(150f, 0f, 300f),
-                new float3(0f, 0f, 300f),
-            };
-
-            var segments = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(30f, 3));
-
-            Assert.NotEmpty(segments);
-            Assert.All(segments, s =>
-            {
-                Assert.True(math.all(math.isfinite(s.Start)), "Segment.Start doit être fini (pas de NaN/Infinity) même au coin concave.");
-                Assert.True(math.all(math.isfinite(s.End)), "Segment.End doit être fini même au coin concave.");
-                // Marge généreuse : le clamp de miter limit peut légèrement déborder d'un coin
-                // très aigu, mais jamais s'échapper loin de la bounding box du périmètre.
-                Assert.InRange(s.Start.x, -50f, 350f);
-                Assert.InRange(s.Start.z, -50f, 350f);
-            });
-        }
-
-        [Fact]
-        public void TinyPerimeter_LargeSpacing_StillEmitsOriginalPerimeterInsteadOfNothing()
-        {
-            // Bug corrigé ("la grille disparaît au-delà de X m") : si l'espacement dépasse la
-            // demi-largeur du périmètre choisi, le tout premier anneau intérieur est déjà
-            // dégénéré (OffsetPolygonInward retourne null immédiatement) — la boucle de
-            // GenerateAdaptiveGrid ne tournait alors jamais, et RIEN n'était émis, alors que le
-            // périmètre d'origine lui-même (déjà validé plus haut dans la fonction) reste une
-            // route parfaitement valide. Pas un plafond codé en dur (aucune valeur de ce genre
-            // trouvée dans le code, vérifié) : une vraie dégénérescence géométrique propre à la
-            // taille du périmètre choisi — mais qui ne doit plus vider le résultat pour autant.
-            var tinySquare = new List<float3>
-            {
-                new float3(0f, 0f, 0f),
-                new float3(100f, 0f, 0f),
-                new float3(100f, 0f, 100f),
-                new float3(0f, 0f, 100f),
-            };
-
-            // Demi-largeur 50 m : un espacement de 60 m dégénère dès le premier anneau intérieur.
-            var segments = GridGenerator.GenerateAdaptiveGrid(tinySquare, AdaptiveParams(60f, 0));
-
-            Assert.NotEmpty(segments);
-            // Doit correspondre au périmètre d'origine tel quel (4 arêtes de 100 m, boucle fermée).
-            Assert.Equal(4, segments.Count);
-            Assert.All(segments, s => Assert.False(s.IsRadial));
-        }
-
-        [Fact]
-        public void ConcaveLShape_EventuallyDegeneratesWithoutInfiniteRings()
-        {
-            // Garde-fou pratique : même sur une forme concave, la boucle de génération doit
-            // s'arrêter (dégénérescence détectée) bien avant MaxAdaptiveRings, jamais tourner
-            // en rond jusqu'à la limite de sécurité.
-            var lShape = new List<float3>
-            {
-                new float3(0f, 0f, 0f),
-                new float3(300f, 0f, 0f),
-                new float3(300f, 0f, 150f),
-                new float3(150f, 0f, 150f),
-                new float3(150f, 0f, 300f),
-                new float3(0f, 0f, 300f),
-            };
-
-            var segments = GridGenerator.GenerateAdaptiveGrid(lShape, AdaptiveParams(30f, 0));
-
-            // Le bras le plus étroit du L fait 150 m : largement moins de
-            // MaxAdaptiveRings * 30 m d'anneaux possibles avant dégénérescence.
-            int approxRingCount = segments.Count / 6; // 6 arêtes par anneau sur cette forme
-            Assert.True(approxRingCount < GridGenerator.MaxAdaptiveRings,
-                "La génération devrait s'arrêter bien avant la limite de sécurité sur cette forme concave.");
-        }
-
-        [Fact]
-        public void CurvedPerimeter_RingsFollowTheCurveInsteadOfItsChord()
-        {
-            // Renflement doux et tangent-continu (arc de cercle, rayon 75, quasi-circulaire via
-            // k=4/3*(sqrt(2)-1)) plutôt qu'une cuspide extrême (control point Bézier placé
-            // derrière le sommet, comme utilisé par GridGeneratorCurveSamplingTests — pertinent
-            // pour l'ancien clipping pair-impair, qui ne dépend d'aucune continuité de tangente,
-            // mais pas représentatif d'une vraie route courbe pour un algorithme d'offset).
-            float radius = 75f;
-            float k = 0.5522847f;
-            var center = new float2(200f, 100f);
-            float3 a = new float3(center.x, 0f, center.y - radius);
-            float3 d = new float3(center.x - radius, 0f, center.y);
-            float3 b = new float3(center.x, 0f, center.y - radius + radius * k);
-            float3 c = new float3(center.x - radius + radius * k, 0f, center.y);
-            List<float3> curveSamples = GridGenerator.SampleCurve(a, b, c, d);
-
-            var straightChordPerimeter = new List<float3>
-            {
-                new float3(0f, 0f, 0f),
-                new float3(200f, 0f, 0f),
-                new float3(200f, 0f, 200f),
-                new float3(0f, 0f, 200f),
-            };
-            var curveAwarePerimeter = new List<float3> { new float3(0f, 0f, 0f), a };
-            curveAwarePerimeter.AddRange(curveSamples);
-            curveAwarePerimeter.Add(d);
-            curveAwarePerimeter.Add(new float3(0f, 0f, 200f));
-
-            // Comparaison directe du PREMIER anneau (OffsetPolygonInward, internal) plutôt que
-            // de chercher des sommets près de z=100 dans la sortie complète : un anneau carré
-            // n'a que 4 coins, presque jamais pile à z=100, donc regarder les sommets seuls ne
-            // dirait rien d'utile ici. On calcule plutôt où le contour de l'anneau CROISE la
-            // ligne z=100 (interpolation le long de chaque arête), une mesure directement
-            // comparable entre les deux périmètres.
-            var straightPoly = straightChordPerimeter.Select(p => new float2(p.x, p.z)).ToList();
-            var curvedPoly = curveAwarePerimeter.Select(p => new float2(p.x, p.z)).ToList();
-
-            var straightRing1 = GridGenerator.OffsetPolygonInward(straightPoly, 15f);
-            var curvedRing1 = GridGenerator.OffsetPolygonInward(curvedPoly, 15f);
-
-            Assert.NotNull(straightRing1);
-            Assert.NotNull(curvedRing1);
-
-            float RingXAtZ(List<float2> ring, float z)
-            {
-                float maxX = float.MinValue;
-                int n = ring.Count;
-                for (int i = 0; i < n; i++)
-                {
-                    float2 a = ring[i];
-                    float2 b = ring[(i + 1) % n];
-                    bool crosses = (a.y <= z && z < b.y) || (b.y <= z && z < a.y);
-                    if (!crosses) continue;
-                    float t = (z - a.y) / (b.y - a.y);
-                    maxX = math.max(maxX, a.x + t * (b.x - a.x));
-                }
-                return maxX;
-            }
-
-            float straightX = RingXAtZ(straightRing1, 100f);
-            float curvedX = RingXAtZ(curvedRing1, 100f);
-
-            Assert.True(curvedX < straightX - 20f,
-                $"Le premier anneau du périmètre courbe devrait croiser z=100 nettement en retrait du renflement (x attendu nettement < {straightX}), obtenu {curvedX}.");
-        }
-
-        [Fact]
-        public void DegenerateInput_FewerThanTwoNodes_ReturnsEmptyWithoutThrowing()
-        {
-            var segments = GridGenerator.GenerateAdaptiveGrid(new List<float3> { new float3(0f, 0f, 0f) }, AdaptiveParams(40f, 0));
-            Assert.Empty(segments);
-        }
-    }
-
     // ------------------------------------------------------------------
     // Avenue (troisième niveau : colonne/rangée choisie librement, jamais de
     // cul-de-sac, rotonde optionnelle au croisement des deux) — carré 300×300,
@@ -1658,8 +1006,12 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
-        public void BothAvenuesEnabled_AddsRoundaboutLoopAtTheirCrossing_AndTrimsTheFourArms()
+        public void BothAvenuesEnabled_ReportsRoundaboutCenterAndRadius_WithoutTrimmingTheArms()
         {
+            // Comme le cercle de retournement d'un cul-de-sac : plus de rognage des bras ni de
+            // boucle en arcs générée côté géométrie — les deux avenues se croisent normalement
+            // en +, et seul centre/rayon (pour poser l'asset décoratif complet côté ECS) sont
+            // renvoyés via RoundaboutInfo.
             var parameters = BaseParameters();
             parameters.AvenueColumnEnabled = true;
             parameters.AvenueColumnIndex = 2; // u = 180
@@ -1668,58 +1020,19 @@ namespace GridRoadGenerator.Tests
             var center = new float2(180f, 180f);
             float expectedRadius = math.min(parameters.SpacingMeters * 0.25f, 25f);
 
-            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters, out _, out RoundaboutInfo roundabout);
             var avenueSegments = segments.Where(s => s.IsAvenue).ToList();
 
-            // Aucun bras d'avenue ne doit plus passer exactement par le centre du croisement :
-            // tous les points d'avenue sont soit sur le cercle (rotonde), soit à distance du
-            // centre supérieure ou égale au rayon (bras recadrés, pas de croisement en X).
-            foreach (var seg in avenueSegments)
-            {
-                Assert.True(math.distance(seg.Start.xz, center) >= expectedRadius - 0.5f);
-                Assert.True(math.distance(seg.End.xz, center) >= expectedRadius - 0.5f);
-            }
+            Assert.True(roundabout.HasRoundabout);
+            Assert.Equal(center, roundabout.Center.xz);
+            Assert.Equal(expectedRadius, roundabout.Radius, 2);
 
-            // La boucle circulaire elle-même : au moins un point d'avenue exactement sur le
-            // cercle (les extrémités des facettes de la rotonde), à distance ~radius du centre.
-            Assert.Contains(avenueSegments, s => math.abs(math.distance(s.Start.xz, center) - expectedRadius) < 0.5f);
+            // Le croisement en + normal : au moins un bras d'avenue passe exactement par le
+            // centre (aucun rognage), contrairement à l'ancien comportement.
+            Assert.Contains(avenueSegments, s =>
+                math.distance(s.Start.xz, center) < 0.5f || math.distance(s.End.xz, center) < 0.5f);
 
             GridGeneratorTests.AssertCommonInvariants(segments);
-        }
-
-        [Fact]
-        public void RoundaboutLoop_IsBuiltFromArcsWithUnitTangentsPerpendicularToRadius()
-        {
-            var parameters = BaseParameters();
-            parameters.AvenueColumnEnabled = true;
-            parameters.AvenueColumnIndex = 2; // u = 180
-            parameters.AvenueRowEnabled = true;
-            parameters.AvenueRowIndex = 2; // v = 180
-            var center = new float2(180f, 180f);
-            float expectedRadius = math.min(parameters.SpacingMeters * 0.25f, 25f);
-
-            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
-            var loopFacets = segments
-                .Where(s => s.IsArc
-                    && math.abs(math.distance(s.Start.xz, center) - expectedRadius) < 0.5f
-                    && math.abs(math.distance(s.End.xz, center) - expectedRadius) < 0.5f)
-                .ToList();
-
-            Assert.NotEmpty(loopFacets);
-            foreach (var facet in loopFacets)
-            {
-                // Tangente unitaire...
-                Assert.Equal(1f, math.length(facet.StartTangent), 2);
-                Assert.Equal(1f, math.length(facet.EndTangent), 2);
-                // ...et perpendiculaire au rayon (produit scalaire nul) à chaque bout.
-                float2 radiusAtStart = facet.Start.xz - center;
-                float2 radiusAtEnd = facet.End.xz - center;
-                Assert.Equal(0f, math.dot(math.normalize(radiusAtStart), facet.StartTangent.xz), 2);
-                Assert.Equal(0f, math.dot(math.normalize(radiusAtEnd), facet.EndTangent.xz), 2);
-            }
-
-            // Les bras d'avenue et le reste de la grille, eux, restent des lignes droites.
-            Assert.Contains(segments, s => !s.IsArc);
         }
 
         [Fact]
@@ -1730,17 +1043,881 @@ namespace GridRoadGenerator.Tests
             parameters.AvenueColumnIndex = 2;
             // AvenueRowEnabled reste false : un seul axe, pas de croisement à traiter.
 
-            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters);
+            var segments = GridGenerator.GenerateGrid(SquareNodes, parameters, out _, out RoundaboutInfo roundabout);
             var avenueSegments = segments.Where(s => s.IsAvenue).ToList();
 
-            // La colonne avenue traverse toujours la grille normalement (sous-segmentée à
-            // chaque croisement avec une ligne v, avenue ou non) — mais sans rotonde
-            // (RoundaboutFacets = 16 segments si elle était ajoutée) : bien moins de segments
-            // avenue qu'une boucle circulaire à elle seule n'en produirait.
+            Assert.False(roundabout.HasRoundabout);
             Assert.NotEmpty(avenueSegments);
-            Assert.True(avenueSegments.Count < 16,
-                $"Pas de rotonde attendue (une seule avenue activée) : {avenueSegments.Count} segments avenue, la boucle seule en ajouterait 16.");
             GridGeneratorTests.AssertCommonInvariants(segments);
+        }
+
+        [Fact]
+        public void OutOfRangeAvenueCrossing_ReportsNoRoundabout()
+        {
+            var parameters = BaseParameters();
+            parameters.AvenueColumnEnabled = true;
+            parameters.AvenueColumnIndex = 999;
+            parameters.AvenueRowEnabled = true;
+            parameters.AvenueRowIndex = -1;
+
+            GridGenerator.GenerateGrid(SquareNodes, parameters, out _, out RoundaboutInfo roundabout);
+
+            Assert.False(roundabout.HasRoundabout);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Loop (collectrices éparses + laço interne par super-îlot) — voir
+    // GridGenerator.GenerateLoopGrid/EmitLoopBlock.
+    // ------------------------------------------------------------------
+    public class GridGeneratorLoopGridTests
+    {
+        private static GridParameters LoopParams(float collectorSpacing, float culDeSacRatio = 0f) => new GridParameters
+        {
+            CollectorSpacingMeters = collectorSpacing,
+            LoopCulDeSacRatio = culDeSacRatio,
+            CulDeSacDepth = 0.75f,
+        };
+
+        private static readonly List<float3> SquareNodes300 = new List<float3>
+        {
+            new float3(0f, 0f, 0f),
+            new float3(300f, 0f, 0f),
+            new float3(300f, 0f, 300f),
+            new float3(0f, 0f, 300f),
+        };
+
+        // Cellule intérieure plus grande (300×300 à l'espacement 300, contre 100×100 pour
+        // SquareNodes300/100) : nécessaire pour les tests liés au cul-de-sac, dont le segment du
+        // haut (voir EmitLoopBlock) doit dépasser 2×MinSegmentLength pour pouvoir être coupé en
+        // deux sans que les deux moitiés ne soient éliminées comme trop courtes.
+        private static readonly List<float3> SquareNodes900 = new List<float3>
+        {
+            new float3(0f, 0f, 0f),
+            new float3(900f, 0f, 0f),
+            new float3(900f, 0f, 900f),
+            new float3(0f, 0f, 900f),
+        };
+
+        [Fact]
+        public void DegenerateInput_FewerThanTwoNodes_ReturnsEmptyWithoutThrowing()
+        {
+            var segments = GridGenerator.GenerateLoopGrid(new List<float3> { new float3(0f, 0f, 0f) }, LoopParams(100f));
+            Assert.Empty(segments);
+        }
+
+        [Fact]
+        public void TooSmallForAnyCollector_ReturnsEmptyWithoutThrowing()
+        {
+            var tiny = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(20f, 0f, 0f),
+                new float3(20f, 0f, 20f),
+                new float3(0f, 0f, 20f),
+            };
+            var segments = GridGenerator.GenerateLoopGrid(tiny, LoopParams(100f));
+            Assert.Empty(segments);
+        }
+
+        [Fact]
+        public void SingleInteriorSuperblock_ProducesOneLoopWithFourArcsAndNoCulDeSac()
+        {
+            // 300×300, collectrices tous les 100 m -> lignes internes à 100 et 200 sur chaque
+            // axe (DistributeFixed exclut les bords) -> 1 super-îlot pleinement intérieur (entre
+            // 100 et 200) ET 8 bandes de bord (entre le périmètre et la collectrice la plus
+            // proche, voir GenerateLoopGrid — v1 les ignorait totalement, retour en jeu :
+            // "demasiados perímetros vazios sem laços") -> 3×3 = 9 super-îlots au total -> 4 arcs
+            // par laço rectangulaire (EmitSimpleLoopBlock, 4 coins) -> 36 arcs.
+            var segments = GridGenerator.GenerateLoopGrid(SquareNodes300, LoopParams(100f, culDeSacRatio: 0f));
+
+            var arcs = segments.Where(s => s.IsArc).ToList();
+            var culDeSacs = segments.Where(s => s.IsCulDeSacEnd).ToList();
+
+            Assert.Equal(36, arcs.Count);
+            Assert.Empty(culDeSacs);
+        }
+
+        [Fact]
+        public void SingleInteriorSuperblock_FullCulDeSacRatio_AddsOneCulDeSacSpurPerBlock()
+        {
+            // Espacement 300 (pas 100) : le segment du haut du laço doit dépasser
+            // 2×MinSegmentLength pour que la coupure en deux (voir EmitLoopBlock) laisse un
+            // cul-de-sac raccordé plutôt que de le supprimer comme orphelin trop court.
+            // 900×900 à l'espacement 300 -> 3×3 = 9 super-îlots (intérieur + bandes de bord,
+            // voir GenerateLoopGrid) -> 9 rayons à 100% de fréquence.
+            var segments = GridGenerator.GenerateLoopGrid(SquareNodes900, LoopParams(300f, culDeSacRatio: 100f));
+
+            var culDeSacs = segments.Where(s => s.IsCulDeSacEnd).ToList();
+            Assert.Equal(9, culDeSacs.Count);
+        }
+
+        [Fact]
+        public void CulDeSacSpur_StartPointIsAnExactSharedVertexWithTheTopSegments()
+        {
+            // Bug rapporté en jeu : "os alley não estão mesmo ligados ao principal" — le rayon
+            // cul-de-sac partait d'un point milieu du segment du haut, jamais l'extrémité d'AUCUN
+            // segment émis (coordonnée coïncidente, mais pas un vrai sommet partagé côté jeu).
+            // Corrigé en coupant le segment du haut en deux AU point de jonction exact. Ce test
+            // vérifie, pour CHAQUE rayon (9, voir test précédent), que son point de départ est
+            // EXACTEMENT (mêmes floats, pas juste proche) l'extrémité d'au moins un des segments
+            // non-arc, non-cul-de-sac du laço.
+            var segments = GridGenerator.GenerateLoopGrid(SquareNodes900, LoopParams(300f, culDeSacRatio: 100f));
+
+            var spurs = segments.Where(s => s.IsCulDeSacEnd).ToList();
+            var loopStraightPieces = segments.Where(s => !s.IsArc && !s.IsCulDeSacEnd && !s.IsAvenue).ToList();
+
+            Assert.NotEmpty(spurs);
+            foreach (RoadSegmentDef spur in spurs)
+            {
+                bool sharesExactVertex = loopStraightPieces.Any(s =>
+                    math.all(s.Start == spur.Start) || math.all(s.End == spur.Start));
+
+                Assert.True(sharesExactVertex,
+                    $"Le point de départ du rayon ({spur.Start}) devrait être EXACTEMENT l'extrémité d'un segment droit du laço, pas une simple coïncidence de coordonnée.");
+            }
+        }
+
+        [Fact]
+        public void LoopConnectorAttachPoint_IsAnExactSharedVertexOfTheLoopEdge()
+        {
+            // Retour utilisateur en jeu : "colisões entre a via que acede ao loop e o loop" —
+            // l'embranchement (EmitSimpleLoopBlock) touchait le MILIEU d'un côté du rectangle
+            // du laço (uMid) sans jamais couper ce côté à cet endroit exact : deux tronçons du
+            // même laço (embranchement + bord du rectangle) se croisaient sans partager de
+            // sommet réel — même bug structurel que celui déjà corrigé entre collectrice et
+            // laço (voir LoopLegAttachPoints_AreExactSharedVerticesWithAvenueSegments), mais À
+            // L'INTÉRIEUR même du réseau du laço. Corrigé en coupant TOUJOURS le côté de
+            // l'embranchement en deux, exactement au point de jonction. Ce test vérifie
+            // qu'aucun point d'un tronçon droit non-avenue (laço/embranchement/cul-de-sac) ne
+            // tombe au MILIEU (t strictement entre 0 et 1) d'un AUTRE tronçon droit non-avenue,
+            // sans en être une extrémité exacte — un vrai croisement structurel, pas juste une
+            // coïncidence de bord.
+            var segments = GridGenerator.GenerateLoopGrid(SquareNodes900, LoopParams(300f, culDeSacRatio: 100f));
+            var straightLoopPieces = segments.Where(s => !s.IsArc && !s.IsAvenue).ToList();
+            Assert.NotEmpty(straightLoopPieces);
+
+            for (int ti = 0; ti < straightLoopPieces.Count; ti++)
+            {
+                RoadSegmentDef target = straightLoopPieces[ti];
+                float2 a = target.Start.xz;
+                float2 ab = target.End.xz - a;
+                float lenSq = math.lengthsq(ab);
+                if (lenSq < 1e-4f)
+                {
+                    continue;
+                }
+                for (int oi = 0; oi < straightLoopPieces.Count; oi++)
+                {
+                    if (oi == ti)
+                    {
+                        continue;
+                    }
+                    RoadSegmentDef other = straightLoopPieces[oi];
+                    foreach (float3 point in new[] { other.Start, other.End })
+                    {
+                        float t = math.dot(point.xz - a, ab) / lenSq;
+                        if (t <= 0.01f || t >= 0.99f)
+                        {
+                            continue; // à/au-delà d'une extrémité de CETTE cible : rien à signaler ici
+                        }
+                        float2 projected = a + t * ab;
+                        bool onThisLine = math.distance(projected, point.xz) < 0.5f;
+                        Assert.False(onThisLine,
+                            $"Point {point} tombe au milieu du tronçon {target.Start} -> {target.End} sans être un sommet partagé (t={t:F3}).");
+                    }
+                }
+            }
+        }
+
+        [Fact]
+        public void SuperblockMode_ZonesFillTheSelectionWithACollectorEveryThirdLine()
+        {
+            // Retour utilisateur : zones de taille réglable (SuperblockZoneMeters, min 100 m),
+            // ajustées pour remplir exactement la sélection ("o tamanho das células adapta-se ao
+            // perímetro"), avec une collectrice toutes les 3 zones ("coletor > pedonal > pedonal
+            // > coletor"). Jamais de cul-de-sac ; CollectorSpacingMeters sans effet ici.
+            foreach (float spacing in new[] { 200f, 400f })
+            {
+                // 900 m / zones de 100 m = 9 zones par axe -> lignes 100..800, collectrices à 300/600.
+                var parameters = LoopParams(spacing, culDeSacRatio: 100f);
+                parameters.SuperblockMode = true;
+                parameters.SuperblockZoneMeters = 100f;
+                var segments = GridGenerator.GenerateLoopGrid(SquareNodes900, parameters);
+
+                Assert.DoesNotContain(segments, s => s.IsCulDeSacEnd);
+                Assert.All(segments, s => Assert.True(s.IsAvenue != s.IsPedestrian, $"Chaque tronçon est soit collectrice soit piéton : {s.Start} -> {s.End}"));
+
+                var avenueU = segments.Where(s => s.IsAvenue && !s.IsHorizontal).Select(s => (float)math.round(s.Start.x)).Distinct().OrderBy(x => x).ToList();
+                var pedU = segments.Where(s => s.IsPedestrian && !s.IsHorizontal).Select(s => (float)math.round(s.Start.x)).Distinct().OrderBy(x => x).ToList();
+                var avenueV = segments.Where(s => s.IsAvenue && s.IsHorizontal).Select(s => (float)math.round(s.Start.z)).Distinct().OrderBy(x => x).ToList();
+                var pedV = segments.Where(s => s.IsPedestrian && s.IsHorizontal).Select(s => (float)math.round(s.Start.z)).Distinct().OrderBy(x => x).ToList();
+                Assert.Equal(new[] { 300f, 600f }, avenueU);
+                Assert.Equal(new[] { 300f, 600f }, avenueV);
+                Assert.Equal(new[] { 100f, 200f, 400f, 500f, 700f, 800f }, pedU);
+                Assert.Equal(new[] { 100f, 200f, 400f, 500f, 700f, 800f }, pedV);
+            }
+        }
+
+        [Fact]
+        public void SuperblockMode_ThreeZonesOrFewer_IsASingleSuperblockAdaptedToTheArea()
+        {
+            // Zone ≈ 1/3 de la sélection -> un seul super-quarteirão 3×3, sans collectrice
+            // interne : le périmètre (route existante) le ferme. La taille réelle des zones
+            // s'adapte à la zone (ici 506 m / 170 m -> 3 zones de 168,7 m).
+            var square506 = new List<float3>
+            {
+                new float3(0f, 0f, 0f), new float3(506f, 0f, 0f), new float3(506f, 0f, 506f), new float3(0f, 0f, 506f),
+            };
+            var parameters = LoopParams(300f, culDeSacRatio: 100f);
+            parameters.SuperblockMode = true;
+            parameters.SuperblockZoneMeters = 170f;
+            var segments = GridGenerator.GenerateLoopGrid(square506, parameters);
+
+            Assert.DoesNotContain(segments, s => s.IsAvenue);
+            Assert.All(segments, s => Assert.True(s.IsPedestrian));
+            Assert.Equal(12, segments.Count); // 2 lignes par axe, chacune coupée en 3
+            var uLines = segments.Where(s => !s.IsHorizontal).Select(s => (float)math.round(s.Start.x)).Distinct().OrderBy(x => x).ToList();
+            Assert.Equal(new[] { 169f, 337f }, uLines);
+        }
+
+        [Fact]
+        public void SuperblockMode_InteriorGridFormsAConsistentAlternatingSwirl()
+        {
+            // 900×900 -> un seul super-quarteirão, lignes internes à 300/600 sur chaque axe
+            // (SuperblockSubdivisions). Chaque cellule (iu,iv) tourne horaire si iu+iv est pair,
+            // antihoraire sinon (voir ApplyOneWaySwirl).
+            var parameters = LoopParams(300f, culDeSacRatio: 0f);
+            parameters.SuperblockMode = true;
+            parameters.SuperblockZoneMeters = 300f;
+            var segments = GridGenerator.GenerateLoopGrid(SquareNodes900, parameters);
+
+            var interior = segments.Where(s => s.IsPedestrian && !s.IsArc).ToList();
+            Assert.NotEmpty(interior);
+
+            // Ligne horizontale (v=300) entre u=[0,300] : cellule (iu=0,iv=1), parité impaire =
+            // antihoraire -> u décroissant.
+            var segsA = interior.Where(s => s.IsHorizontal
+                && math.abs(s.Start.z - 300f) < 1f && math.min(s.Start.x, s.End.x) > -1f && math.max(s.Start.x, s.End.x) < 301f).ToList();
+            Assert.NotEmpty(segsA);
+            Assert.All(segsA, s => Assert.True(s.Start.x > s.End.x, $"Segment A attendu u décroissant : {s.Start} -> {s.End}"));
+
+            // Ligne horizontale (v=300) entre u=[300,600] : cellule (iu=1,iv=1), parité paire =
+            // horaire -> u croissant.
+            var segsB = interior.Where(s => s.IsHorizontal
+                && math.abs(s.Start.z - 300f) < 1f && math.min(s.Start.x, s.End.x) > 299f && math.max(s.Start.x, s.End.x) < 601f).ToList();
+            Assert.NotEmpty(segsB);
+            Assert.All(segsB, s => Assert.True(s.Start.x < s.End.x, $"Segment B attendu u croissant : {s.Start} -> {s.End}"));
+
+            // Ligne verticale (u=300) entre v=[0,300] : cellule (iu=1,iv=0), parité impaire =
+            // antihoraire -> v croissant.
+            var segsC = interior.Where(s => !s.IsHorizontal
+                && math.abs(s.Start.x - 300f) < 1f && math.min(s.Start.z, s.End.z) > -1f && math.max(s.Start.z, s.End.z) < 301f).ToList();
+            Assert.NotEmpty(segsC);
+            Assert.All(segsC, s => Assert.True(s.Start.z < s.End.z, $"Segment C attendu v croissant : {s.Start} -> {s.End}"));
+
+            // Ligne verticale (u=300) entre v=[300,600] : cellule (iu=1,iv=1), parité paire =
+            // horaire -> v décroissant.
+            var segsD = interior.Where(s => !s.IsHorizontal
+                && math.abs(s.Start.x - 300f) < 1f && math.min(s.Start.z, s.End.z) > 299f && math.max(s.Start.z, s.End.z) < 601f).ToList();
+            Assert.NotEmpty(segsD);
+            Assert.All(segsD, s => Assert.True(s.Start.z > s.End.z, $"Segment D attendu v décroissant : {s.Start} -> {s.End}"));
+        }
+
+        /// <summary>
+        /// Vrai si `point` (xz) tombe sur l'un des côtés du périmètre choisi (avec tolérance) —
+        /// miroir du helper interne GridGenerator.IsPointOnPolygonEdge, utilisé ici pour que les
+        /// tests de connectivité acceptent qu'une extrémité piétonne posée sur le VRAI périmètre
+        /// n'est pas une impasse (MakeCoursePos la raccorde en jeu, voir GenerateSuperblockInterior).
+        /// </summary>
+        private static bool IsOnPerimeterBoundary(float3 point, IReadOnlyList<float3> perimeter, float tolerance)
+        {
+            float2 p = point.xz;
+            int n = perimeter.Count;
+            for (int i = 0; i < n; i++)
+            {
+                float2 a = perimeter[i].xz;
+                float2 b = perimeter[(i + 1) % n].xz;
+                float2 ab = b - a;
+                float lenSq = math.lengthsq(ab);
+                if (lenSq < 1e-6f) continue;
+                float t = math.clamp(math.dot(p - a, ab) / lenSq, 0f, 1f);
+                float2 projected = a + t * ab;
+                if (math.distance(projected, p) < tolerance) return true;
+            }
+            return false;
+        }
+
+        [Fact]
+        public void LoopAndSuperblock_IgnoreClassicGridOnlySettings()
+        {
+            // Retour utilisateur en jeu (log) : "só estão 6 áreas construtivas em vez de 9" —
+            // l'avenue sur colonne/rangée N et le mode culs-de-sac du mode Grelha, restés
+            // actifs, contaminaient BuildSubSegments (partagé) : une ligne piétonne devenait
+            // collectrice et d'autres disparaissaient. Le résultat doit être identique avec ou
+            // sans ces réglages.
+            foreach (bool superblock in new[] { true, false })
+            {
+                var clean = LoopParams(300f);
+                clean.SuperblockMode = superblock;
+                var polluted = clean;
+                polluted.AvenueColumnEnabled = true;
+                polluted.AvenueColumnIndex = 1;
+                polluted.AvenueRowEnabled = true;
+                polluted.AvenueRowIndex = 0;
+                polluted.CulDeSacMode = true;
+                polluted.CulDeSacRatio = 100f;
+
+                var expected = GridGenerator.GenerateLoopGrid(SquareNodes900, clean);
+                var actual = GridGenerator.GenerateLoopGrid(SquareNodes900, polluted);
+
+                Assert.Equal(expected.Count, actual.Count);
+                for (int i = 0; i < expected.Count; i++)
+                {
+                    Assert.Equal(expected[i].Start, actual[i].Start);
+                    Assert.Equal(expected[i].End, actual[i].End);
+                    Assert.Equal(expected[i].IsAvenue, actual[i].IsAvenue);
+                    Assert.Equal(expected[i].IsPedestrian, actual[i].IsPedestrian);
+                    Assert.Equal(expected[i].IsCulDeSacEnd, actual[i].IsCulDeSacEnd);
+                }
+            }
+        }
+
+        [Fact]
+        public void SuperblockMode_EveryInteriorEndpointIsAnExactSharedVertex_NeverADeadEnd()
+        {
+            // Retour utilisateur en jeu : "Ainda tem os cul de sac" — vérifie que la grille fine
+            // intérieure (voir GenerateSuperblockInterior) est bien ENTIÈREMENT connectée : CHAQUE
+            // extrémité d'un tronçon piéton doit être soit un sommet EXACTEMENT partagé avec un
+            // autre tronçon (piéton OU collectrice), soit posée sur le VRAI périmètre choisi (que
+            // MakeCoursePos raccorde en jeu, voir GenerateSuperblockInterior — retour utilisateur :
+            // "as estradas pedonais também têm que se conectar à estrada que serve de base") —
+            // jamais un bout libre qui apparaîtrait en jeu comme une impasse. Scénario réaliste à
+            // plusieurs super-quarteirões (900×900 / 300 -> grille 3×3 de super-quarteirões,
+            // chacun subdivisé en 3×3 zones) pour ne pas se limiter au cas trivial à un seul
+            // super-quarteirão des tests précédents.
+            var parameters = LoopParams(300f, culDeSacRatio: 0f);
+            parameters.SuperblockMode = true;
+            var segments = GridGenerator.GenerateLoopGrid(SquareNodes900, parameters);
+
+            var interior = segments.Where(s => s.IsPedestrian && !s.IsArc).ToList();
+            var all = segments.Where(s => !s.IsArc).ToList();
+            Assert.NotEmpty(interior);
+
+            foreach (RoadSegmentDef segment in interior)
+            {
+                foreach (float3 endpoint in new[] { segment.Start, segment.End })
+                {
+                    bool sharedWithAnother = all.Any(other =>
+                        !(math.all(other.Start == segment.Start) && math.all(other.End == segment.End)) // pas le même tronçon
+                        && (math.all(other.Start == endpoint) || math.all(other.End == endpoint)));
+                    bool onPerimeter = IsOnPerimeterBoundary(endpoint, SquareNodes900, 0.5f);
+                    Assert.True(sharedWithAnother || onPerimeter,
+                        $"Extrémité {endpoint} du tronçon piéton {segment.Start} -> {segment.End} n'est ni partagée ni sur le périmètre — impasse.");
+                }
+            }
+        }
+
+        [Fact]
+        public void SuperblockMode_IrregularPerimeter_NeverLeavesADeadEndPedestrianSegment()
+        {
+            // Retour utilisateur en jeu, répété : "Ainda tem os cul de sac... retira por
+            // completo" — un périmètre IRRÉGULIER peut faire clipper une ligne interne en plein
+            // milieu par le vrai contour (ClipLineToPolygon), pas seulement à ses 4 coins —
+            // exactement le genre de cas que PruneDeadEndPedestrianSegments doit rattraper. Même
+            // octogone bruité que IrregularRealPerimeter_... (non-régression Loop), réutilisé ici
+            // pour Superblock : si la purge fonctionne, AUCUN tronçon piéton restant ne doit avoir
+            // une extrémité qui ne soit ni partagée ni sur le vrai périmètre, quel que soit
+            // l'espacement de collectrice essayé.
+            var rnd = new System.Random(7);
+            var perimeter = new List<float3>();
+            const int nodeCount = 10;
+            for (int i = 0; i < nodeCount; i++)
+            {
+                float angle = i * 2f * math.PI / nodeCount;
+                float r = 250f * (1f + (float)(rnd.NextDouble() - 0.5) * 0.5f);
+                perimeter.Add(new float3(r * math.cos(angle), 0f, r * math.sin(angle)));
+            }
+
+            foreach (float spacing in new[] { 200f, 250f, 300f })
+            {
+                var parameters = LoopParams(spacing, culDeSacRatio: 0f);
+                parameters.SuperblockMode = true;
+                var segments = GridGenerator.GenerateLoopGrid(perimeter, parameters);
+
+                var interior = segments.Where(s => s.IsPedestrian && !s.IsArc).ToList();
+                var all = segments.Where(s => !s.IsArc).ToList();
+
+                foreach (RoadSegmentDef segment in interior)
+                {
+                    foreach (float3 endpoint in new[] { segment.Start, segment.End })
+                    {
+                        bool sharedWithAnother = all.Any(other =>
+                            !(math.all(other.Start == segment.Start) && math.all(other.End == segment.End))
+                            && (math.all(other.Start == endpoint) || math.all(other.End == endpoint)));
+                        bool onPerimeter = IsOnPerimeterBoundary(endpoint, perimeter, 0.5f);
+                        Assert.True(sharedWithAnother || onPerimeter,
+                            $"Extrémité {endpoint} du tronçon piéton {segment.Start} -> {segment.End} (spacing={spacing}) n'est ni partagée ni sur le périmètre — impasse.");
+                    }
+                }
+            }
+        }
+
+        [Fact]
+        public void CollectorSegments_AreMarkedAvenue_LoopAndSpurAreNot()
+        {
+            // 3 réseaux distincts (voir RoadSegmentDef.IsAvenue/IsCulDeSacEnd) : collectrices
+            // éparses -> réseau avenue, laço -> réseau principal, rayon cul-de-sac -> réseau
+            // secondaire. Voir GenerateLoopGrid. 9 super-îlots (intérieur + bandes de bord).
+            var segments = GridGenerator.GenerateLoopGrid(SquareNodes900, LoopParams(300f, culDeSacRatio: 100f));
+
+            var spur = segments.Where(s => s.IsCulDeSacEnd).ToList();
+            var collectors = segments.Where(s => !s.IsCulDeSacEnd && s.IsAvenue).ToList();
+            var loopPieces = segments.Where(s => !s.IsCulDeSacEnd && !s.IsAvenue).ToList();
+
+            Assert.NotEmpty(collectors);
+            Assert.NotEmpty(loopPieces);
+            Assert.Equal(9, spur.Count);
+            Assert.All(spur, s => Assert.False(s.IsAvenue, $"Rayon cul-de-sac attendu IsAvenue=false (réseau secondaire) : {s.Start} -> {s.End}"));
+            // Le laço (loopPieces) doit contenir 4 arcs par super-îlot (9 x 4 = 36).
+            Assert.Equal(36, loopPieces.Count(s => s.IsArc));
+        }
+
+        [Fact]
+        public void ArcTangents_AreNeverBackwardsAlongTheChord()
+        {
+            // Même garde-fou que pour l'ancien mode Adaptativo (voir historique du mod) :
+            // une tangente d'arc qui pointe à l'opposé du sens de parcours produit une
+            // courbe aberrante côté jeu ("Forma inválida"). Ici les tangentes sont FIXES
+            // par construction ((0,1)/(1,0) en repère local, jamais dérivées d'un nuage de
+            // points), donc ce test est une garantie de non-régression plutôt qu'une
+            // découverte, mais reste peu coûteux à vérifier.
+            var segments = GridGenerator.GenerateLoopGrid(SquareNodes300, LoopParams(100f));
+            var arcs = segments.Where(s => s.IsArc).ToList();
+            Assert.NotEmpty(arcs);
+
+            foreach (RoadSegmentDef arc in arcs)
+            {
+                float2 chord = math.normalize(arc.End.xz - arc.Start.xz);
+                float startDot = math.dot(math.normalize(arc.StartTangent.xz), chord);
+                float endDot = math.dot(math.normalize(arc.EndTangent.xz), chord);
+                Assert.True(startDot > 0.3f, $"Tangente de départ quasi retournée : {arc.Start} -> {arc.End}, dot={startDot:F2}");
+                Assert.True(endDot > 0.3f, $"Tangente d'arrivée quasi retournée : {arc.Start} -> {arc.End}, dot={endDot:F2}");
+            }
+        }
+
+        [Fact]
+        public void MirroredRow_ArcsAndCulDeSacSpurAreValid()
+        {
+            // 1800x1800 (5 lignes internes par axe à l'espacement 300 -> iu ET iv vont de 0 à 3)
+            // : garantit qu'au moins un bloc a iv impair (mirrorV=true, voir GenerateLoopGrid —
+            // alternance introduite pour "laços des deux côtés de la collectrice"). Un rectangle
+            // dont l'axe court n'a qu'une seule ligne interne aurait iv TOUJOURS 0 et ne
+            // testerait jamais mirrorV=true.
+            var square1800 = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(1800f, 0f, 0f),
+                new float3(1800f, 0f, 1800f),
+                new float3(0f, 0f, 1800f),
+            };
+            var segments = GridGenerator.GenerateLoopGrid(square1800, LoopParams(300f, culDeSacRatio: 100f));
+
+            var arcs = segments.Where(s => s.IsArc).ToList();
+            var spurs = segments.Where(s => s.IsCulDeSacEnd).ToList();
+
+            Assert.Equal(144, arcs.Count); // 36 blocs (6x6, intérieur + bandes de bord) x 4 arcs
+            Assert.Equal(36, spurs.Count); // 1 par bloc
+
+            foreach (RoadSegmentDef arc in arcs)
+            {
+                float2 chord = math.normalize(arc.End.xz - arc.Start.xz);
+                float startDot = math.dot(math.normalize(arc.StartTangent.xz), chord);
+                float endDot = math.dot(math.normalize(arc.EndTangent.xz), chord);
+                Assert.True(startDot > 0.3f, $"Tangente de départ quasi retournée : {arc.Start} -> {arc.End}, dot={startDot:F2}");
+                Assert.True(endDot > 0.3f, $"Tangente d'arrivée quasi retournée : {arc.Start} -> {arc.End}, dot={endDot:F2}");
+            }
+
+            var loopStraightPieces = segments.Where(s => !s.IsArc && !s.IsCulDeSacEnd && !s.IsAvenue).ToList();
+            foreach (RoadSegmentDef spur in spurs)
+            {
+                bool sharesExactVertex = loopStraightPieces.Any(s => math.all(s.Start == spur.Start) || math.all(s.End == spur.Start));
+                Assert.True(sharesExactVertex, $"Rayon cul-de-sac ({spur.Start}) pas connecté à un sommet exact du laço.");
+            }
+        }
+
+        [Fact]
+        public void LoopLegAttachPoints_AreExactSharedVerticesWithAvenueSegments()
+        {
+            // Bug rapporté en jeu : "a estrada principal (laço) não fusiona na coletora" — les
+            // jambes du laço (EmitLoopBlock) s'accrochent à la collectrice en retrait de
+            // `margin` de ses bords, donc AU MILIEU de son tracé, jamais à ses extrémités —
+            // sans division de la collectrice à ce point exact (voir
+            // SplitAvenuesAtLoopAttachPoints), les deux se touchent sans jamais partager de
+            // sommet réel. Ce test vérifie que TOUT point d'un tronçon non-avenue qui tombe sur
+            // la LIGNE d'un tronçon avenue (à l'intérieur de son tracé) est EXACTEMENT l'une des
+            // deux extrémités de ce tronçon avenue — jamais un point de milieu.
+            var square1800 = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(1800f, 0f, 0f),
+                new float3(1800f, 0f, 1800f),
+                new float3(0f, 0f, 1800f),
+            };
+            var segments = GridGenerator.GenerateLoopGrid(square1800, LoopParams(300f, culDeSacRatio: 100f));
+
+            var avenues = segments.Where(s => s.IsAvenue).ToList();
+            var nonAvenues = segments.Where(s => !s.IsAvenue).ToList();
+            Assert.NotEmpty(avenues);
+            Assert.NotEmpty(nonAvenues);
+
+            foreach (RoadSegmentDef nonAvenue in nonAvenues)
+            {
+                foreach (float3 point in new[] { nonAvenue.Start, nonAvenue.End })
+                {
+                    foreach (RoadSegmentDef avenue in avenues)
+                    {
+                        float2 a = avenue.Start.xz;
+                        float2 ab = avenue.End.xz - a;
+                        float lenSq = math.lengthsq(ab);
+                        if (lenSq < 1e-4f)
+                        {
+                            continue;
+                        }
+                        float t = math.dot(point.xz - a, ab) / lenSq;
+                        if (t <= 0.01f || t >= 0.99f)
+                        {
+                            continue; // à/au-delà d'une extrémité de CETTE avenue : rien à signaler ici
+                        }
+                        float2 projected = a + t * ab;
+                        bool onThisAvenueLine = math.distance(projected, point.xz) < 0.5f;
+                        Assert.False(onThisAvenueLine,
+                            $"Point {point} tombe au milieu de l'avenue {avenue.Start} -> {avenue.End} sans être un sommet partagé (t={t:F3}).");
+                    }
+                }
+            }
+        }
+
+        /// <summary>Vrai si a/b (droits) sont colinéaires ET si b.Start ou b.End tombe strictement à l'intérieur de a (chevauchement de tracé, pas un simple croisement).</summary>
+        private static bool SegmentsOverlapCollinearly(RoadSegmentDef a, RoadSegmentDef b)
+        {
+            float2 aDir = math.normalize(a.End.xz - a.Start.xz);
+            float2 bDir = math.normalize(b.End.xz - b.Start.xz);
+            if (math.abs(aDir.x * bDir.y - aDir.y * bDir.x) > 0.01f)
+            {
+                return false; // pas colinéaires
+            }
+            float2 aA = a.Start.xz;
+            float2 aAB = a.End.xz - aA;
+            float aLenSq = math.lengthsq(aAB);
+            if (aLenSq < 1e-4f)
+            {
+                return false;
+            }
+            foreach (float3 p3 in new[] { b.Start, b.End })
+            {
+                float t = math.dot(p3.xz - aA, aAB) / aLenSq;
+                float2 proj = aA + t * aAB;
+                if (t > 0.02f && t < 0.98f && math.distance(proj, p3.xz) < 0.3f)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>Vrai si a/b (droits, niveaux DIFFÉRENTS) se croisent à un point qui n'est l'extrémité d'AUCUN des deux — jonction manquante.</summary>
+        private static bool SegmentsCrossWithoutSharedJunction(RoadSegmentDef a, RoadSegmentDef b)
+        {
+            float2 a1 = a.Start.xz, a2 = a.End.xz, b1 = b.Start.xz, b2 = b.End.xz;
+            float2 r1 = a2 - a1, r2 = b2 - b1;
+            float denom = r1.x * r2.y - r1.y * r2.x;
+            if (math.abs(denom) < 1e-6f)
+            {
+                return false;
+            }
+            float t = ((b1.x - a1.x) * r2.y - (b1.y - a1.y) * r2.x) / denom;
+            float u = ((b1.x - a1.x) * r1.y - (b1.y - a1.y) * r1.x) / denom;
+            return t > 0.02f && t < 0.98f && u > 0.02f && u < 0.98f;
+        }
+
+        [Fact]
+        public void MultipleSuperblocks_EachInteriorCellGetsExactlyOneLoop()
+        {
+            // 500×500, collectrices tous les 100 m -> lignes internes à 100/200/300/400 sur
+            // chaque axe -> 3×3 = 9 super-îlots pleinement intérieurs + bandes de bord (voir
+            // GenerateLoopGrid) -> 5×5 = 25 super-îlots au total -> 4 arcs par laço rectangulaire
+            // (EmitSimpleLoopBlock, 4 coins) -> 100 arcs.
+            var square500 = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(500f, 0f, 0f),
+                new float3(500f, 0f, 500f),
+                new float3(0f, 0f, 500f),
+            };
+            var segments = GridGenerator.GenerateLoopGrid(square500, LoopParams(100f));
+            var arcs = segments.Where(s => s.IsArc).ToList();
+            Assert.Equal(100, arcs.Count);
+        }
+
+        [Fact]
+        public void NarrowCell_CulDeSacIsSkippedRatherThanForcedIntoAnInvalidShape()
+        {
+            // Bande 100×900 : BuildLocalFrame aligne u sur l'arête la PLUS LONGUE (les côtés de
+            // 900), donc sans rotation, u=900 (largeur du laço, pas de problème) et v=100
+            // (profondeur, vPositions vide -> rien émis du tout, ne teste pas ce qu'on veut).
+            // AngleOffsetDegrees=90° tourne u de 90°, ce qui échange effectivement les deux axes :
+            // u=100 (largeur) et v=900 (profondeur, assez pour plusieurs bandes). DistributeFixed
+            // (0,100,300) donne cellCount=round(100/300)=0<=1 -> aucune collectrice interne sur u
+            // -> uBounds=[0,100] (une seule bande couvrant toute la largeur) -> largeur utile après
+            // marge (leftU=25, rightU=75) = 50m, sous MinCulDeSacCellWidth (60m). Le cul-de-sac
+            // doit être ignoré ici plutôt que forcé dans un espace trop étroit (retour utilisateur
+            // en jeu : "não é obrigatório haver becos sem saída em espaços menos largos" — la
+            // ramification collée aux deux arcs presque jointifs produisait une forme
+            // dégénérée/invalide).
+            var narrowStrip = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(100f, 0f, 0f),
+                new float3(100f, 0f, 900f),
+                new float3(0f, 0f, 900f),
+            };
+            GridParameters parameters = LoopParams(300f, culDeSacRatio: 100f);
+            parameters.AngleOffsetDegrees = 90f;
+            var segments = GridGenerator.GenerateLoopGrid(narrowStrip, parameters);
+            Assert.Empty(segments.Where(s => s.IsCulDeSacEnd));
+            // Le laço lui-même doit quand même exister, juste sans ramification.
+            Assert.NotEmpty(segments.Where(s => s.IsArc));
+        }
+
+        [Fact]
+        public void IrregularRealPerimeter_NeverThrowsAndKeepsAllSegmentsInsidePerimeter()
+        {
+            // Périmètre réel irrégulier capturé en jeu (voir l'incident "Forma inválida" du
+            // mode Adaptativo) : le test le plus utile n'est pas une forme synthétique
+            // parfaite, mais une géométrie réelle bruitée. Ici un octogone irrégulier
+            // (rayons variables) sert de test de non-régression pour Loop.
+            var rnd = new System.Random(7);
+            var perimeter = new List<float3>();
+            const int nodeCount = 10;
+            for (int i = 0; i < nodeCount; i++)
+            {
+                float angle = i * 2f * math.PI / nodeCount;
+                float r = 250f * (1f + (float)(rnd.NextDouble() - 0.5) * 0.5f);
+                perimeter.Add(new float3(r * math.cos(angle), 0f, r * math.sin(angle)));
+            }
+
+            foreach (float spacing in new[] { 60f, 90f, 120f, 180f })
+            {
+                var segments = GridGenerator.GenerateLoopGrid(perimeter, LoopParams(spacing, culDeSacRatio: 50f));
+                // Ne doit jamais lever d'exception (déjà garanti par l'exécution du test),
+                // et chaque segment doit rester géométriquement raisonnable (longueur non
+                // nulle, pas de NaN).
+                foreach (RoadSegmentDef s in segments)
+                {
+                    Assert.False(float.IsNaN(s.Start.x) || float.IsNaN(s.Start.z) || float.IsNaN(s.End.x) || float.IsNaN(s.End.z),
+                        $"Segment NaN (spacing={spacing}) : {s.Start} -> {s.End}");
+                    Assert.True(math.distance(s.Start.xz, s.End.xz) >= GridGenerator.MinSegmentLength - 0.01f,
+                        $"Segment plus court que MinSegmentLength (spacing={spacing}) : {s.Start} -> {s.End}");
+                }
+            }
+        }
+
+        [Fact]
+        public void ChamferedCorner_StillGetsADepthAdaptedLoop_AnchoredToTheCollector()
+        {
+            // Carré 900×900 avec un coin coupé en biais (chanfrein) : le super-îlot le plus
+            // proche du coin coupé échoue le test "4 coins intérieurs" strict. Plutôt que de
+            // laisser ce coin de terrain entièrement vide (bug rapporté en jeu), un laço à
+            // PROFONDEUR ADAPTÉE mais LARGEUR PLEINE doit y apparaître (voir
+            // TryFitDepthPreservingWidth — plus de rétrécissement uniforme largeur+profondeur,
+            // qui produisait des laços visiblement miniatures), toujours ancré à la collectrice
+            // (vMin fixe, jamais rétréci).
+            var chamfered = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(900f, 0f, 0f),
+                new float3(900f, 0f, 750f),
+                new float3(750f, 0f, 900f),
+                new float3(0f, 0f, 900f),
+            };
+
+            var segments = GridGenerator.GenerateLoopGrid(chamfered, LoopParams(300f, culDeSacRatio: 0f));
+
+            Assert.NotEmpty(segments);
+            var arcs = segments.Where(s => s.IsArc).ToList();
+            Assert.True(arcs.Count >= 2, $"Attendu au moins 1 laço (2 arcs), obtenu {arcs.Count} arc(s).");
+
+            // Contrôle géométrique DIRECT plutôt qu'une comparaison de décompte d'arcs avec le
+            // carré plein : depuis l'ajout des bandes de bord (voir GenerateLoopGrid), le coin
+            // chanfreiné peut désormais recevoir un laço à profondeur adaptée là où, avant cet
+            // ajout, il n'y avait même pas de super-îlot candidat à cet endroit — le nombre total
+            // d'arcs peut donc rester identique au carré plein (l'adaptation ne change jamais le
+            // nombre d'arcs émis, seulement la profondeur du laço), ce qui ne prouve plus rien
+            // par comparaison de décompte. Le vrai contrat à vérifier : aucun segment ne dépasse
+            // la ligne du chanfrein (x+z <= 1650, la diagonale coupée entre (900,750) et
+            // (750,900)) — petite tolérance pour l'arrondi en virgule flottante (JoinTolerance de
+            // GridGenerator est privé, pas accessible ici).
+            const float tolerance = 1f;
+            foreach (RoadSegmentDef s in segments)
+            {
+                Assert.True(s.Start.x + s.Start.z <= 1650f + tolerance,
+                    $"Segment déborde du chanfrein (Start) : {s.Start}");
+                Assert.True(s.End.x + s.End.z <= 1650f + tolerance,
+                    $"Segment déborde du chanfrein (End) : {s.End}");
+            }
+
+            foreach (RoadSegmentDef s in segments)
+            {
+                Assert.False(float.IsNaN(s.Start.x) || float.IsNaN(s.Start.z) || float.IsNaN(s.End.x) || float.IsNaN(s.End.z),
+                    $"Segment NaN : {s.Start} -> {s.End}");
+            }
+        }
+
+        [Fact]
+        public void ChamferedCorner_LoopLegsAdaptIndependently_GivingADiagonalBackSegment()
+        {
+            // Même chanfrein que le test précédent, mais vérifie la vraie nouveauté (retour
+            // utilisateur en jeu avec capture d'écran : "a forma mais parecida com a área da
+            // célula", une jambe raccourcie par une coupe en diagonale, PAS les deux jambes
+            // rétrécies à la même profondeur) : la cellule d'angle (600-900 en u ET v, coupée par
+            // x+z<=1650) doit donner une jambe côté u=900 clairement plus courte que côté u=600
+            // (plus proche du coin coupé), avec un segment du fond qui suit cette diagonale au
+            // lieu de rester horizontal comme ailleurs dans la grille.
+            var chamfered = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(900f, 0f, 0f),
+                new float3(900f, 0f, 750f),
+                new float3(750f, 0f, 900f),
+                new float3(0f, 0f, 900f),
+            };
+
+            var segments = GridGenerator.GenerateLoopGrid(chamfered, LoopParams(300f, culDeSacRatio: 0f));
+
+            // Segments "fond" candidats : droits, pas une collectrice/laço marqué autrement —
+            // angle=0 donc u=x, v=z, la comparaison directe sur .z est valide sans transformer de
+            // repère local.
+            var backSegments = segments.Where(s => !s.IsArc && !s.IsAvenue && !s.IsCulDeSacEnd).ToList();
+            Assert.NotEmpty(backSegments);
+
+            float maxZDelta = backSegments.Max(s => math.abs(s.Start.z - s.End.z));
+            Assert.True(maxZDelta > 5f,
+                $"Aucun segment du fond n'est diagonal (plus grand écart en z trouvé : {maxZDelta:F2}m) — la jambe côté chanfrein devrait être plus courte que l'autre, donnant un fond incliné plutôt qu'horizontal partout.");
+
+            // Toujours à l'intérieur du chanfrein, même vérification que le test précédent —
+            // s'assure que l'adaptation par jambe n'a pas réintroduit de débordement.
+            const float tolerance = 1f;
+            foreach (RoadSegmentDef s in segments)
+            {
+                Assert.True(s.Start.x + s.Start.z <= 1650f + tolerance, $"Segment déborde du chanfrein (Start) : {s.Start}");
+                Assert.True(s.End.x + s.End.z <= 1650f + tolerance, $"Segment déborde du chanfrein (End) : {s.End}");
+            }
+        }
+
+    }
+
+    /// <summary>
+    /// Régression de performance — retour utilisateur (forum du mod) : "the mod lags hard the
+    /// more rows and columns there are... BuildSubSegments runs at O(n^4) complexity and gets
+    /// executed every single frame" avec le défaut Spacing=10m. Vérifié fondé : BuildSubSegments
+    /// balayait TOUS les points déjà acceptés à chaque nouveau croisement (O(n²) dans une
+    /// double boucle déjà O(n²)), et GridRoadToolSystem.OnUpdate régénère bien l'aperçu à CHAQUE
+    /// frame tant que ≥2 nœuds sont sélectionnés — un petit espacement sur un grand périmètre se
+    /// traduisait en gel du jeu. Remplacé par SpatialPointIndex (grille de baldes, voisinage
+    /// 3×3) — ce test verrouille un budget temps généreux mais strict pour empêcher toute
+    /// régression future vers un comportement O(n⁴).
+    /// </summary>
+    public class GridGeneratorPerformanceTests
+    {
+        [Fact]
+        public void LargeAreaWithSmallSpacing_GeneratesWellUnderOneSecond()
+        {
+            // ~450x450m avec Spacing=10m (le défaut historique visé par le retour utilisateur)
+            // -> ~45x45 lignes, ~2000 croisements : négligeable avec un index spatial,
+            // plusieurs dizaines de millions d'opérations avec l'ancien balayage linéaire.
+            var perimeter = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(450f, 0f, 0f),
+                new float3(450f, 0f, 450f),
+                new float3(0f, 0f, 450f),
+            };
+            var parameters = GridParameters.Default;
+            parameters.Mode = SpacingMode.FixedSpacing;
+            parameters.SpacingMeters = 10f;
+
+            var stopwatch = Stopwatch.StartNew();
+            var segments = GridGenerator.GenerateGrid(perimeter, parameters);
+            stopwatch.Stop();
+
+            Assert.NotEmpty(segments);
+            Assert.True(stopwatch.ElapsedMilliseconds < 1000,
+                $"GenerateGrid a pris {stopwatch.ElapsedMilliseconds}ms pour un espacement de 10m sur 450x450m — " +
+                "régression vers une complexité quadratique/pire dans la fusion des croisements probable.");
+        }
+
+        [Fact]
+        public void VeryLargeAreaWithSmallSpacing_StillGeneratesQuickly()
+        {
+            // Cas extrême : ~200x200 lignes, ~40 000 croisements — scénario exact décrit sur le
+            // forum du mod ("the mod lags hard the more rows and columns there are"). L'ancien
+            // balayage linéaire (O(n²) DANS une boucle déjà O(n²)) aurait fait des dizaines de
+            // millions d'opérations ici ; SpatialPointIndex garde ça quasi linéaire.
+            var perimeter = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(2000f, 0f, 0f),
+                new float3(2000f, 0f, 2000f),
+                new float3(0f, 0f, 2000f),
+            };
+            var parameters = GridParameters.Default;
+            parameters.Mode = SpacingMode.FixedSpacing;
+            parameters.SpacingMeters = 10f;
+
+            var stopwatch = Stopwatch.StartNew();
+            var segments = GridGenerator.GenerateGrid(perimeter, parameters);
+            stopwatch.Stop();
+
+            Assert.NotEmpty(segments);
+            Assert.True(stopwatch.ElapsedMilliseconds < 5000,
+                $"GenerateGrid a pris {stopwatch.ElapsedMilliseconds}ms pour un espacement de 10m sur 2000x2000m " +
+                $"({segments.Count} segments) — ce scénario est celui exact rapporté comme gelant le jeu.");
+        }
+
+        [Fact]
+        public void LoopMode_LargeAreaWithManyBlocks_GeneratesQuickly()
+        {
+            // Retour utilisateur (log de performance en jeu, ~31 nœuds sélectionnés, modo Loop) :
+            // 325-351ms par régénération complète, contre <1ms pour le modo Grid équivalent.
+            // Cause : SplitSegmentsAtMidSpanAttachPoints (O(cibles × points d'ancrage)) sans
+            // index spatial, alors même appelée plusieurs fois par régénération avec l'ancienne
+            // hiérarchie à 2 niveaux (Arterial > Coletora, depuis supprimée — voir GridGenerator.
+            // GenerateLoopGrid). ~2000x2000m / CollectorSpacingMeters=200 (le minimum autorisé
+            // par le panneau) -> ~100 quarteirões, un seul appel global à
+            // SplitSegmentsAtMidSpanAttachPoints sur TOUS leurs points d'ancrage.
+            var perimeter = new List<float3>
+            {
+                new float3(0f, 0f, 0f),
+                new float3(2000f, 0f, 0f),
+                new float3(2000f, 0f, 2000f),
+                new float3(0f, 0f, 2000f),
+            };
+            var parameters = new GridParameters
+            {
+                CollectorSpacingMeters = 200f,
+                LoopCulDeSacRatio = 50f,
+                CulDeSacDepth = 0.75f,
+            };
+
+            var stopwatch = Stopwatch.StartNew();
+            var segments = GridGenerator.GenerateLoopGrid(perimeter, parameters);
+            stopwatch.Stop();
+
+            Assert.NotEmpty(segments);
+            Assert.True(stopwatch.ElapsedMilliseconds < 2000,
+                $"GenerateLoopGrid a pris {stopwatch.ElapsedMilliseconds}ms pour ~49 pâtés de maison sur 2000x2000m " +
+                $"({segments.Count} segments) — régression probable dans SplitSegmentsAtMidSpanAttachPoints.");
         }
     }
 }

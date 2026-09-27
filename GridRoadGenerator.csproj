@@ -6,7 +6,7 @@
     <Nullable>disable</Nullable>
     <!-- Doit rester alignée avec "version" dans UI/mod.json (numéro affiché dans Options >
          Mods > Sobre, via Mod.Version). -->
-    <Version>0.2.0</Version>
+    <Version>0.3.1</Version>
   </PropertyGroup>
 
   <!-- Template officiel du toolchain de modding CS2 : Mod.props fournit TargetFramework,
@@ -20,9 +20,11 @@
     <!-- Sources décompilées de Game.dll : référence d'API uniquement, jamais compilées. -->
     <Compile Remove="decompiled\**" />
     <None Remove="decompiled\**" />
+    <EmbeddedResource Remove="decompiled\**" />
     <!-- Mods open-source de référence (non versionnés, non compilés). -->
     <Compile Remove="reference\**" />
     <None Remove="reference\**" />
+    <EmbeddedResource Remove="reference\**" />
     <!-- Tests unitaires : projet séparé (Tests/), jamais compilés dans la DLL du mod. -->
     <Compile Remove="Tests\**" />
     <None Remove="Tests\**" />

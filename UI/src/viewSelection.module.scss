@@ -6,9 +6,13 @@
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    padding: 0 12rem 8rem;
-    border-bottom: 1rem solid #9645ff59; // accent violet, atténué (même teinte que les foldouts)
-    margin-bottom: 8rem;
+    // padding-top : sans ça, cette rangée (premier enfant du contenu du panneau, avant même
+    // toute section repliable) colle directement à l'en-tête — le panneau natif (gridPanelNative.
+    // tsx/Panel) n'a pas de padding-top propre sur sa zone de contenu, contrairement au panneau
+    // custom historique (bug rapporté en jeu : "Vista" collée au sommet du panneau).
+    padding: 10rem 12rem 10rem;
+    border-bottom: 1rem solid #1e83aa59; // accent (même teinte que le jeu, --selectedColor), atténué
+    margin-bottom: 12rem;
 }
 
 .viewLabel {

@@ -70,29 +70,57 @@ namespace GridRoadGenerator
             }
         }
 
+        /// <summary>Langues déjà enregistrées (voir RegisterLocalizations, appelé plusieurs fois).</summary>
+        // Créé dans RegisterLocalizations et non par un initialiseur de champ : le jeu instancie
+        // le mod sans exécuter les initialiseurs (vécu : NullReferenceException ici au
+        // chargement, mod déchargé aussitôt, panneau qui n'ouvre plus).
+        private System.Collections.Generic.HashSet<string> _registeredLocales;
+        private bool _localeListenerAttached;
+
         /// <summary>
-        /// Enregistre les 16 langues : 12 officielles + 4 communautaires (pt-PT, uk-UA, th-TH, vi-VN).
-        /// Les langues communautaires ne sont enregistrées que si la locale existe dans le jeu,
-        /// c'est-à-dire si le joueur a installé un mod de langue (ex. I18n EveryWhere).
-        /// L'anglais sert de fallback natif pour toute locale absente.
+        /// Enregistre les langues officielles du jeu, plus les langues communautaires dès qu'un mod
+        /// de langue (I18N Everywhere, packs de langue) les ajoute au jeu. L'anglais sert de
+        /// fallback natif pour toute locale absente.
+        ///
+        /// Ces mods ajoutent leurs locales APRÈS le chargement de ce mod (log : "pt-PT non
+        /// disponible" alors que le pack était installé) ; or AddSource sur une locale encore
+        /// inconnue ne fait rien, et AddLocale ne rattrape pas les sources ajoutées avant. D'où
+        /// l'écoute de onSupportedLocalesChanged : chaque nouvelle locale est enregistrée dès
+        /// qu'elle apparaît.
         /// </summary>
         private void RegisterLocalizations()
         {
             var localizationManager = GameManager.instance.localizationManager;
+            if (_registeredLocales == null)
+            {
+                _registeredLocales = new System.Collections.Generic.HashSet<string>();
+            }
+            if (!_localeListenerAttached)
+            {
+                localizationManager.onSupportedLocalesChanged += RegisterLocalizations;
+                _localeListenerAttached = true;
+            }
 
             foreach (var pair in Translations.All)
             {
                 string localeCode = pair.Key;
-
-                if (localizationManager.SupportsLocale(localeCode))
+                if (_registeredLocales.Contains(localeCode) || !localizationManager.SupportsLocale(localeCode))
+                {
+                    continue;
+                }
+                // Une langue en échec ne doit ni empêcher les autres ni remonter jusqu'au mod de
+                // langue qui a déclenché onSupportedLocalesChanged.
+                try
                 {
                     localizationManager.AddSource(localeCode,
                         new LocaleSource(Translations.Build(Settings, pair.Value)));
+                    _registeredLocales.Add(localeCode);
                     Log.Info($"Localisation enregistrée : {localeCode}");
                 }
-                else
+                catch (System.Exception e)
                 {
-                    Log.Info($"Locale {localeCode} non disponible dans le jeu (mod de langue requis), ignorée.");
+                    _registeredLocales.Add(localeCode);
+                    Log.Error(e, $"Échec de l'enregistrement de la langue {localeCode}.");
                 }
             }
         }
@@ -100,6 +128,12 @@ namespace GridRoadGenerator
         public void OnDispose()
         {
             Log.Info("GridRoadGenerator déchargé.");
+            var localizationManager = GameManager.instance?.localizationManager;
+            if (localizationManager != null && _localeListenerAttached)
+            {
+                localizationManager.onSupportedLocalesChanged -= RegisterLocalizations;
+                _localeListenerAttached = false;
+            }
             if (_toggleToolAction != null)
             {
                 _toggleToolAction.onInteraction -= OnToggleToolAction;

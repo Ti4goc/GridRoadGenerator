@@ -200,6 +200,93 @@ namespace GridRoadGenerator.Tests
         }
 
         [Fact]
+        public void TraceBoundary_DeadEndSpurThatWinsTheAngleTiebreak_IsIgnoredInFavorOfTheMainLoop()
+        {
+            // Carré A-B-C-D-A ; un beco sem saída E pend de B, positionné pour "gagner"
+            // l'angle horaire minimal contre la continuation C (90° contre 270° depuis la
+            // référence d'arrivée en B) — sans la correction, le suivi partait dans E, une
+            // vraie impasse (0 arête restante), et échouait complètement au lieu de continuer
+            // sur le vrai anneau. Avec la correction (IgnoreShortDetours), E est reconnu comme
+            // un détour court (impasse simple, 10 m) et écarté au profit de C.
+            var graph = new DictGraph();
+            graph.AddNode(1, new float2(0f, 0f));     // A
+            graph.AddNode(2, new float2(0f, 100f));   // B
+            graph.AddNode(3, new float2(100f, 100f)); // C
+            graph.AddNode(4, new float2(100f, 0f));   // D
+            graph.AddNode(5, new float2(-10f, 100f)); // E (beco sem saída pendu à B)
+            graph.AddEdge(1, 2);
+            graph.AddEdge(2, 3);
+            graph.AddEdge(3, 4);
+            graph.AddEdge(4, 1);
+            graph.AddEdge(2, 5);
+
+            var loop = new List<int>();
+            bool found = NetworkGraphAlgorithms.TraceBoundary(graph, 1, loop);
+
+            Assert.True(found);
+            Assert.Equal(new[] { 1, 2, 3, 4 }, loop);
+        }
+
+        [Fact]
+        public void TraceBoundary_TurnaroundLoopThatWinsTheAngleTiebreak_IsIgnoredInFavorOfTheMainLoop()
+        {
+            // Même carré A-B-C-D-A, mais cette fois B-E-F-B forme une petite boucle de
+            // retournement (un rond-point en bout de beco sem saída, comme le "cul-de-sac"
+            // du jeu) au lieu d'une simple impasse. Sans la correction, le suivi entrait dans
+            // E, faisait le tour jusqu'à F, puis rebouclait sur B (déjà visité, pas le point de
+            // départ A) — échec. Avec la correction, E et F sont tous deux reconnus comme un
+            // détour court qui referme sur B (46,5 m cumulés) et écartés au profit de C.
+            var graph = new DictGraph();
+            graph.AddNode(1, new float2(0f, 0f));      // A
+            graph.AddNode(2, new float2(0f, 100f));    // B
+            graph.AddNode(3, new float2(100f, 100f));  // C
+            graph.AddNode(4, new float2(100f, 0f));    // D
+            graph.AddNode(5, new float2(-10f, 100f));  // E
+            graph.AddNode(6, new float2(-20f, 110f));  // F
+            graph.AddEdge(1, 2);
+            graph.AddEdge(2, 3);
+            graph.AddEdge(3, 4);
+            graph.AddEdge(4, 1);
+            graph.AddEdge(2, 5);
+            graph.AddEdge(5, 6);
+            graph.AddEdge(6, 2);
+
+            var loop = new List<int>();
+            bool found = NetworkGraphAlgorithms.TraceBoundary(graph, 1, loop);
+
+            Assert.True(found);
+            Assert.Equal(new[] { 1, 2, 3, 4 }, loop);
+        }
+
+        [Fact]
+        public void TraceBoundary_LongDeadEndSpur_StillFailsCleanlyInsteadOfBeingSilentlyIgnored()
+        {
+            // Même configuration que le beco sem saída simple ci-dessus, mais à 160 m de B
+            // (au-delà de ShortDetourMaxLength=150) : ce n'est plus un détour court, donc il
+            // continue de rivaliser normalement pour l'angle horaire minimal (et le gagne,
+            // même configuration géométrique) — le suivi part dedans et échoue proprement en
+            // trouvant une impasse, exactement comme avant la correction. Garde-fou : la
+            // correction ne doit jamais masquer un vrai problème de sélection manuelle en
+            // ignorant indistinctement toute branche.
+            var graph = new DictGraph();
+            graph.AddNode(1, new float2(0f, 0f));      // A
+            graph.AddNode(2, new float2(0f, 100f));    // B
+            graph.AddNode(3, new float2(100f, 100f));  // C
+            graph.AddNode(4, new float2(100f, 0f));    // D
+            graph.AddNode(5, new float2(-160f, 100f)); // E, beco sem saída long (160 m)
+            graph.AddEdge(1, 2);
+            graph.AddEdge(2, 3);
+            graph.AddEdge(3, 4);
+            graph.AddEdge(4, 1);
+            graph.AddEdge(2, 5);
+
+            var loop = new List<int>();
+            bool found = NetworkGraphAlgorithms.TraceBoundary(graph, 1, loop);
+
+            Assert.False(found);
+        }
+
+        [Fact]
         public void TraceBoundary_ExceedsMaxNodes_FailsCleanly()
         {
             // Longue chaîne fermée en boucle mais avec une limite de nœuds trop basse

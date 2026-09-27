@@ -45,6 +45,20 @@ const modulePaths: ModulePath[] = [
         path: "game-ui/editor/widgets/fields/dropdown-field.tsx",
         components: ["DropdownField"],
     },
+    {
+        // Rangée/section du panneau d'info sélection natif (ex. fiche bâtiment) —
+        // PAS exportés par cs2/ui malgré leur présence dans les types (vérifié :
+        // ni le mod Move It ni CS2-NetworkTools ne les lisent depuis cs2/ui, tous
+        // deux passent par ce même chemin de registre direct). Utilisés par
+        // gridPanelNative.tsx pour un contenu visuellement identique aux fiches
+        // natives (ex. panneau d'info d'un bâtiment).
+        path: "game-ui/game/components/selected-info-panel/shared-components/info-section/info-section.tsx",
+        components: ["InfoSection"],
+    },
+    {
+        path: "game-ui/game/components/selected-info-panel/shared-components/info-row/info-row.tsx",
+        components: ["InfoRow"],
+    },
 ];
 
 const themePaths: ThemePath[] = [
@@ -55,6 +69,10 @@ const themePaths: ThemePath[] = [
     {
         path: "game-ui/game/components/tool-options/mouse-tool-options/mouse-tool-options.module.scss",
         name: "mouseToolOptions",
+    },
+    {
+        path: "game-ui/game/components/selected-info-panel/shared-components/info-row/info-row.module.scss",
+        name: "infoRow",
     },
 ];
 

@@ -19,52 +19,67 @@ namespace GridRoadGenerator.Core
         /// </summary>
         public bool IsCulDeSacEnd;
         /// <summary>
-        /// Vrai pour une connexion radiale (mode Adaptativo, voir EmitRadialConnections) — jamais
-        /// pour un anneau (EmitRingSegments). Comme IsCulDeSacEnd, sert à l'appelant ECS à
-        /// distinguer un tronçon "traversant" (collectrice/anneau) d'un tronçon "local/terminal"
-        /// (rayon), par exemple pour y appliquer un réseau secondaire différent.
-        /// </summary>
-        public bool IsRadial;
-        /// <summary>
         /// Vrai pour un tronçon de la colonne/rangée choisie comme avenue (GridParameters.
         /// AvenueColumnIndex/AvenueRowIndex) — traversant comme une collectrice normale (jamais
-        /// de cul-de-sac sur une avenue), mais avec un troisième prefab dédié. Inclut aussi les
-        /// segments de la rotonde générée à l'intersection de deux avenues (EmitAvenueRoundabout).
+        /// de cul-de-sac sur une avenue), mais avec un troisième prefab dédié.
         /// </summary>
         public bool IsAvenue;
         /// <summary>
-        /// Vrai pour une facette de la boucle circulaire de la rotonde (EmitAvenueRoundabout) :
-        /// l'appelant ECS construit une courbe (NetUtils.FitCurve, tangentes StartTangent/
-        /// EndTangent) plutôt qu'une ligne droite (NetUtils.StraightCurve). Sans effet sur les
-        /// bras d'avenue eux-mêmes, seulement la boucle. StartTangent/EndTangent n'ont de sens
-        /// que si IsArc est vrai.
+        /// Vrai pour un tronçon de l'intérieur pédonal d'un super-quarteirão (GridParameters.
+        /// SuperblockMode, voir GenerateLoopGrid/EmitSimpleLoopBlock) : réutilise le troisième
+        /// emplacement de prefab ("secundária", inutilisé par ailleurs en mode Loop — l'Arterial
+        /// qui l'occupait a été retiré) pour un réseau piéton dédié, plutôt que le laço/beco
+        /// carrossable habituel. Jamais vrai en même temps que IsAvenue.
+        /// </summary>
+        public bool IsPedestrian;
+        /// <summary>
+        /// Vrai pour un tronçon COURBE (mode Loop, voir GridGenerator.GenerateLoopGrid) : une
+        /// vraie courbe (NetUtils.FitCurve côté ECS, tangentes StartTangent/EndTangent) plutôt
+        /// qu'une ligne droite. Jamais vrai pour un tronçon de collectrice ou un rayon de
+        /// cul-de-sac (toujours droits). StartTangent/EndTangent n'ont de sens que si IsArc
+        /// est vrai.
         /// </summary>
         public bool IsArc;
         public float3 StartTangent;
         public float3 EndTangent;
 
-        public RoadSegmentDef(float3 start, float3 end, bool isHorizontal, bool isCulDeSacEnd = false, bool isRadial = false, bool isAvenue = false)
+        public RoadSegmentDef(float3 start, float3 end, bool isHorizontal, bool isCulDeSacEnd = false, bool isAvenue = false)
         {
             Start = start;
             End = end;
             IsHorizontal = isHorizontal;
             IsCulDeSacEnd = isCulDeSacEnd;
-            IsRadial = isRadial;
             IsAvenue = isAvenue;
+            IsPedestrian = false;
             IsArc = false;
             StartTangent = default;
             EndTangent = default;
         }
 
-        /// <summary>Facette d'arc de rotonde (voir IsArc) : tangentes unitaires, toutes deux orientées dans le sens de parcours.</summary>
-        public static RoadSegmentDef Arc(float3 start, float3 end, float3 startTangent, float3 endTangent)
+        /// <summary>Facette courbe (voir IsArc) : tangentes unitaires, toutes deux orientées dans le sens de parcours.</summary>
+        public static RoadSegmentDef Arc(float3 start, float3 end, float3 startTangent, float3 endTangent, bool isCulDeSacEnd = false)
         {
-            var def = new RoadSegmentDef(start, end, isHorizontal: false, isAvenue: true);
+            var def = new RoadSegmentDef(start, end, isHorizontal: false, isCulDeSacEnd: isCulDeSacEnd);
             def.IsArc = true;
             def.StartTangent = startTangent;
             def.EndTangent = endTangent;
             return def;
         }
+    }
+
+    /// <summary>
+    /// Rotonde à l'intersection de deux avenues (colonne ET rangée activées, voir
+    /// ComputeAvenueRoundabout) : Center/Radius servent uniquement à choisir et positionner
+    /// l'asset décoratif complet côté ECS (GridRoadToolSystem.TryResolveRoundaboutIslandPrefab)
+    /// — aucun segment de route n'est généré pour la boucle elle-même, les bras d'avenue
+    /// traversent normalement (croisement en +), comme un cul-de-sac garde son croisement
+    /// simple sous le cercle de retournement décoratif.
+    /// </summary>
+    public struct RoundaboutInfo
+    {
+        public bool HasRoundabout;
+        public float3 Center;
+        public float Radius;
     }
 
     public enum SpacingMode
@@ -123,29 +138,55 @@ namespace GridRoadGenerator.Core
         public int AvenueRowIndex;
 
         /// <summary>
-        /// Mode Adaptativo (voir GridGenerator.GenerateAdaptiveGrid) : nombre de connexions
-        /// radiales reliant les anneaux entre eux (0 = aucune, anneaux isolés). Coins toujours
-        /// arrondis, rayons toujours traversants jusqu'au dernier anneau (pas d'option).
+        /// Mode "Loop" (voir GenerateLoopGrid) : espacement (m) des collectrices ÉPARSES qui
+        /// délimitent les super-îlots — indépendant de SpacingMeters/Rows/Columns (réservés à
+        /// GenerateGrid). Généralement bien plus grand qu'un espacement de grille classique :
+        /// chaque super-îlot reçoit ensuite un laço interne (voir LoopCulDeSacRatio).
         /// </summary>
-        public int RadialConnections;
-
+        public float CollectorSpacingMeters;
+        /// <summary>Fréquence (0–100 %) à laquelle un laço reçoit une ramification cul-de-sac vers son centre (voir GenerateLoopGrid).</summary>
+        public float LoopCulDeSacRatio;
+        /// <summary>
+        /// Mode "super-quarteirão" (mode Loop uniquement, inspiré des superilles de Barcelone) :
+        /// la sélection est découpée en zones d'environ SuperblockZoneMeters, séparées par des
+        /// rues PIÉTONNES (RoadSegmentDef.IsPedestrian) — une ligne sur SuperblockSubdivisions est
+        /// une collectrice, délimitant des super-quarteirões de 3×3 zones. Jamais de cul-de-sac.
+        /// Voir GenerateLoopGrid.
+        /// </summary>
+        public bool SuperblockMode;
+        /// <summary>
+        /// Taille visée (m) d'une zone constructible en mode super-quarteirão, ajustée pour que
+        /// les zones remplissent exactement la sélection (retour utilisateur : "alterar a escala
+        /// dos quadrados, mais pequenos com um mínimo tipo 100 m").
+        /// </summary>
+        public float SuperblockZoneMeters;
+        /// <summary>
+        /// Mode "Concêntrico" (mode Loop uniquement, exclusif avec SuperblockMode) : anneaux qui
+        /// reprennent la forme du périmètre, voir ConcentricGenerator.
+        /// </summary>
+        public bool ConcentricMode;
+        /// <summary>Nombre d'anneaux intérieurs demandés (ConcentricMode) — moins si la forme est trop étroite.</summary>
+        public int ConcentricLayers;
+        /// <summary>Nombre de rayons amorcés sur chaque anneau le plus intérieur (ConcentricMode).</summary>
+        public int ConcentricConnections;
         public static GridParameters Default => new GridParameters
         {
             Mode = SpacingMode.FitToArea,
             Rows = 3,
             Columns = 3,
-            SpacingMeters = 60f,
+            SpacingMeters = 100f,
             AngleOffsetDegrees = 0f,
             CulDeSacMode = false,
             CulDeSacAxis = CulDeSacAxis.Columns,
-            CulDeSacDepth = 0.75f,
+            CulDeSacDepth = 0.6f,
             Staggered = true,
             CulDeSacRatio = 100f,
             AvenueColumnEnabled = false,
             AvenueColumnIndex = 0,
             AvenueRowEnabled = false,
             AvenueRowIndex = 0,
-            RadialConnections = 8
+            CollectorSpacingMeters = 150f,
+            LoopCulDeSacRatio = 50f,
         };
     }
 
@@ -203,6 +244,71 @@ namespace GridRoadGenerator.Core
         /// </summary>
         private const float JoinTolerance = 0.05f;
 
+        /// <summary>
+        /// Index spatial en grille de baldes (côté = MinNodeDistance) pour retrouver le point
+        /// déjà accepté le plus proche d'une position, SANS balayer toute la liste — retour
+        /// utilisateur (forum du mod) : avec un petit espacement sur une grande zone, le nombre
+        /// de croisements explose, et BuildSubSegments balayait alors TOUS les points déjà
+        /// acceptés à CHAQUE nouveau croisement (dans une double boucle déjà O(lignes u × lignes
+        /// v)) — un vrai O(n²) dans une fonction déjà O(n²), donc O(n⁴) en pratique, rejoué à
+        /// CHAQUE FRAME pendant l'aperçu (voir GridRoadToolSystem.OnUpdate, "chaque frame, comme
+        /// le NetTool"). Résultat vécu : jeu qui se fige avec un espacement faible sur un grand
+        /// périmètre. Seules les baldes voisines (3×3) sont regardées : avec une taille de balde
+        /// = MinNodeDistance, aucun point à moins de MinNodeDistance ne peut se trouver plus
+        /// loin qu'une balde voisine directe.
+        /// </summary>
+        private sealed class SpatialPointIndex
+        {
+            private readonly float _cellSize;
+            private readonly Dictionary<(int, int), List<float3>> _buckets = new Dictionary<(int, int), List<float3>>();
+
+            public SpatialPointIndex(float cellSize)
+            {
+                _cellSize = math.max(cellSize, 0.01f);
+            }
+
+            private (int, int) CellOf(float2 xz) => ((int)math.floor(xz.x / _cellSize), (int)math.floor(xz.y / _cellSize));
+
+            public void Add(float3 point)
+            {
+                var cell = CellOf(point.xz);
+                if (!_buckets.TryGetValue(cell, out List<float3> list))
+                {
+                    list = new List<float3>();
+                    _buckets[cell] = list;
+                }
+                list.Add(point);
+            }
+
+            /// <summary>Point accepté le plus proche à moins de maxDistance, s'il y en a un.</summary>
+            public bool TryFindNearest(float3 point, float maxDistance, out float3 nearest)
+            {
+                (int cx, int cy) = CellOf(point.xz);
+                float bestDist = float.MaxValue;
+                nearest = default;
+                bool found = false;
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        if (!_buckets.TryGetValue((cx + dx, cy + dy), out List<float3> list))
+                            continue;
+                        foreach (float3 candidate in list)
+                        {
+                            float d = math.distance(candidate.xz, point.xz);
+                            if (d < maxDistance && d < bestDist)
+                            {
+                                bestDist = d;
+                                nearest = candidate;
+                                found = true;
+                            }
+                        }
+                    }
+                }
+                return found;
+            }
+        }
+
         /// <summary>Ligne de grille clippée : sa position sur l'axe transverse et ses intervalles intérieurs.</summary>
         private struct GridLine
         {
@@ -211,19 +317,28 @@ namespace GridRoadGenerator.Core
             public List<float2> Intervals;
         }
 
-        /// <summary>Surcharge pratique quand le diagnostic d'omission n'est pas nécessaire (ex. tests existants).</summary>
+        /// <summary>Surcharge pratique quand ni le diagnostic d'omission ni la rotonde ne sont nécessaires (ex. tests existants).</summary>
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
-            => GenerateGrid(selectedNodePositions, parameters, out _);
+            => GenerateGrid(selectedNodePositions, parameters, out _, out _);
+
+        /// <summary>Surcharge pratique quand seul le diagnostic d'omission est nécessaire (ex. tests existants).</summary>
+        public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
+            GridParameters parameters, out int omittedNodeCount)
+            => GenerateGrid(selectedNodePositions, parameters, out omittedNodeCount, out _);
 
         /// <summary>
         /// Génère la grille. omittedNodeCount compte, agrégés : les croisements FUSIONNÉS avec
         /// un nœud généré déjà accepté trop proche (MinNodeDistance — voir BuildSubSegments,
         /// le nœud lui-même est conservé, seulement fusionné) et les stubs de cul-de-sac
         /// purement omis faute de nœud existant à fusionner (EmitLine) — 0 si aucun des deux.
+        /// roundabout : voir RoundaboutInfo/ComputeAvenueRoundabout (HasRoundabout=false si les
+        /// deux axes avenue ne sont pas actifs simultanément, ou si leur croisement tombe hors
+        /// du polygone).
         /// </summary>
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
-            GridParameters parameters, out int omittedNodeCount)
+            GridParameters parameters, out int omittedNodeCount, out RoundaboutInfo roundabout)
         {
+            roundabout = default;
             omittedNodeCount = 0;
             if (selectedNodePositions == null || selectedNodePositions.Count < 2)
                 throw new ArgumentException("Il faut au moins 2 nœuds sélectionnés.");
@@ -284,7 +399,7 @@ namespace GridRoadGenerator.Core
             foreach (var v in vPositions)
                 vLines.Add(new GridLine { Position = v, Intervals = ClipLineToPolygon(local, axisIsU: false, position: v) });
 
-            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount);
+            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount, out roundabout);
         }
 
         // ------------------------------------------------------------------
@@ -309,14 +424,16 @@ namespace GridRoadGenerator.Core
         /// croisement le plus tardif qui cède sa position au profit du premier accepté.
         /// </summary>
         private static List<RoadSegmentDef> BuildSubSegments(List<GridLine> uLines, List<GridLine> vLines,
-            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters, out int omittedNodeCount)
+            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters, out int omittedNodeCount,
+            out RoundaboutInfo roundabout)
         {
+            roundabout = default;
             var uSplits = new List<(float t, float3 world)>[uLines.Count];
             var vSplits = new List<(float t, float3 world)>[vLines.Count];
             for (int i = 0; i < uLines.Count; i++) uSplits[i] = new List<(float, float3)>();
             for (int i = 0; i < vLines.Count; i++) vSplits[i] = new List<(float, float3)>();
 
-            var acceptedWorldPoints = new List<float3>();
+            var acceptedWorldPoints = new SpatialPointIndex(MinNodeDistance);
             // Compte les croisements de grille FUSIONNÉS avec un nœud déjà accepté (ci-dessous)
             // ET les vrais culs-de-sac omis plus loin (EmitLine, motif distinct — un stub
             // presque à distance de sa collectrice est purement supprimé, pas fusionné : rien
@@ -344,19 +461,7 @@ namespace GridRoadGenerator.Core
                     // émises pour de précédents croisements le référencent telles quelles, les
                     // recalculer rétroactivement ajouterait de la complexité sans bénéfice
                     // visible (l'écart est par définition < MinNodeDistance).
-                    float3 mergeTarget = world;
-                    float bestDist = float.MaxValue;
-                    bool merged = false;
-                    foreach (float3 accepted in acceptedWorldPoints)
-                    {
-                        float d = math.distance(accepted.xz, world.xz);
-                        if (d < MinNodeDistance && d < bestDist)
-                        {
-                            bestDist = d;
-                            mergeTarget = accepted;
-                            merged = true;
-                        }
-                    }
+                    bool merged = acceptedWorldPoints.TryFindNearest(world, MinNodeDistance, out float3 mergeTarget);
 
                     if (merged)
                     {
@@ -388,13 +493,14 @@ namespace GridRoadGenerator.Core
                 EmitLine(segments, vLines[i], vSplits[i], axisIsU: false, origin, uDir, vDir, y, parameters, ref omittedNodeCount, isAvenueLine);
             }
 
-            // Rotonde à l'intersection de deux avenues (colonne ET rangée activées) : rogne les
-            // 4 bras d'avenue qui touchaient le croisement et ajoute une boucle circulaire à la
-            // place — voir EmitAvenueRoundabout. Sans effet si une seule avenue est activée (une
-            // avenue seule traverse simplement tout le périmètre, comme une collectrice normale).
+            // Rotonde à l'intersection de deux avenues (colonne ET rangée activées) — voir
+            // ComputeAvenueRoundabout : les bras d'avenue traversent normalement (croisement en
+            // +), un asset décoratif complet est posé par-dessus côté ECS. Sans effet si une
+            // seule avenue est activée (une avenue seule traverse simplement tout le périmètre,
+            // comme une collectrice normale).
             if (parameters.AvenueColumnEnabled && parameters.AvenueRowEnabled)
             {
-                EmitAvenueRoundabout(segments, uLines, vLines, origin, uDir, vDir, y, parameters);
+                roundabout = ComputeAvenueRoundabout(uLines, vLines, origin, uDir, vDir, y, parameters);
             }
 
             return segments;
@@ -488,106 +594,35 @@ namespace GridRoadGenerator.Core
         }
 
         /// <summary>
-        /// Si la colonne ET la rangée avenue sont actives simultanément, ajoute une rotonde
-        /// circulaire à leur croisement : recadre les bras d'avenue qui touchent ce point pour
-        /// qu'ils s'arrêtent au bord du cercle plutôt que de se croiser en son centre, puis émet
-        /// la boucle circulaire elle-même (même motif que EmitRingSegments). Sans effet si le
-        /// croisement tombe hors du polygone à cet endroit (ContainsPosition) — les index
-        /// eux-mêmes sont déjà garantis valides par l'appelant (BuildSubSegments).
-        ///
-        /// La correspondance "ce bout de segment est au croisement" tolère jusqu'à
-        /// MinNodeDistance plutôt qu'une égalité stricte : un croisement de grille peut avoir
-        /// été fusionné (voir la fusion de nœuds proches dans BuildSubSegments) vers un point
-        /// world légèrement différent du centre recalculé ici à partir de u/v.
+        /// Si la colonne ET la rangée avenue sont actives simultanément, signale une rotonde à
+        /// leur croisement — même principe que le cercle de retournement d'un cul-de-sac (voir
+        /// GridRoadToolSystem.TryResolveCulDeSacCapPrefab) : les bras d'avenue traversent
+        /// normalement (croisement en +, aucun rognage), et un asset décoratif complet
+        /// ("&lt;Taille&gt;Roundabout01", déjà une rotonde entière avec anneau pavé et
+        /// marquages — pas un simple îlot central) est posé par-dessus côté ECS. Aucun segment
+        /// de route en arc n'est plus généré ici : ne renvoie que centre/rayon (pour choisir la
+        /// taille de l'asset), via RoundaboutInfo. Sans effet si le croisement tombe hors du
+        /// polygone à cet endroit (ContainsPosition) — les index eux-mêmes sont déjà garantis
+        /// valides par l'appelant (BuildSubSegments).
         /// </summary>
-        private static void EmitAvenueRoundabout(List<RoadSegmentDef> segments, List<GridLine> uLines,
+        private static RoundaboutInfo ComputeAvenueRoundabout(List<GridLine> uLines,
             List<GridLine> vLines, float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters)
         {
             // Index hors plage (ex. Columns/Rows réduit après avoir choisi un index avenue plus
             // grand) : silencieusement sans effet, comme AvenueColumnIndex/AvenueRowIndex ailleurs.
-            if (parameters.AvenueColumnIndex < 0 || parameters.AvenueColumnIndex >= uLines.Count) return;
-            if (parameters.AvenueRowIndex < 0 || parameters.AvenueRowIndex >= vLines.Count) return;
+            if (parameters.AvenueColumnIndex < 0 || parameters.AvenueColumnIndex >= uLines.Count) return default;
+            if (parameters.AvenueRowIndex < 0 || parameters.AvenueRowIndex >= vLines.Count) return default;
 
             GridLine uLine = uLines[parameters.AvenueColumnIndex];
             GridLine vLine = vLines[parameters.AvenueRowIndex];
             float u = uLine.Position;
             float v = vLine.Position;
             if (!ContainsPosition(uLine.Intervals, v) || !ContainsPosition(vLine.Intervals, u))
-                return;
+                return default;
 
             float3 center = ToWorld(origin, uDir, vDir, u, v, y);
-            float radius = math.max(MinRoundaboutRadius, math.min(parameters.SpacingMeters * 0.25f, 25f));
-
-            for (int i = segments.Count - 1; i >= 0; i--)
-            {
-                var seg = segments[i];
-                if (!seg.IsAvenue) continue;
-
-                bool startAtCenter = math.distance(seg.Start.xz, center.xz) < MinNodeDistance;
-                bool endAtCenter = math.distance(seg.End.xz, center.xz) < MinNodeDistance;
-                if (!startAtCenter && !endAtCenter) continue;
-
-                float3 anchor = startAtCenter ? seg.End : seg.Start;
-                float2 dir = math.normalizesafe(anchor.xz - center.xz);
-                float3 trimmed = new float3(center.x + dir.x * radius, center.y, center.z + dir.y * radius);
-
-                if (math.distance(trimmed.xz, anchor.xz) < MinSegmentLength)
-                {
-                    segments.RemoveAt(i); // bras d'avenue entièrement avalé par la rotonde
-                    continue;
-                }
-
-                segments[i] = startAtCenter
-                    ? new RoadSegmentDef(trimmed, seg.End, seg.IsHorizontal, seg.IsCulDeSacEnd, seg.IsRadial, seg.IsAvenue)
-                    : new RoadSegmentDef(seg.Start, trimmed, seg.IsHorizontal, seg.IsCulDeSacEnd, seg.IsRadial, seg.IsAvenue);
-            }
-
-            // Chaque facette est une VRAIE courbe (NetUtils.FitCurve côté ECS, tangentes ci-
-            // dessous), pas une corde droite : un polygone à peu de côtés (RoundaboutFacetCount
-            // reste faible sur un petit rayon, contrainte MinSegmentLength) donnait un rond très
-            // anguleux ("hexagone" visible en jeu) même si géométriquement correct. La tangente
-            // au cercle en un point d'angle θ (paramétrage centre + rayon·(cosθ, 0, sinθ)) est sa
-            // dérivée par rapport à θ, normalisée : (-sinθ, 0, cosθ), dans le sens de parcours
-            // (θ croissant, celui utilisé ci-dessous).
-            int facets = RoundaboutFacetCount(radius);
-            for (int i = 0; i < facets; i++)
-            {
-                float angleA = i * 2f * math.PI / facets;
-                float angleB = (i + 1) * 2f * math.PI / facets;
-                var a = new float3(center.x + math.cos(angleA) * radius, y, center.z + math.sin(angleA) * radius);
-                var b = new float3(center.x + math.cos(angleB) * radius, y, center.z + math.sin(angleB) * radius);
-                var tangentA = new float3(-math.sin(angleA), 0f, math.cos(angleA));
-                var tangentB = new float3(-math.sin(angleB), 0f, math.cos(angleB));
-                segments.Add(RoadSegmentDef.Arc(a, b, tangentA, tangentB));
-            }
-        }
-
-        /// <summary>
-        /// Rayon plancher de la rotonde : garantit que même le nombre de facettes minimal
-        /// (RoundaboutMinFacets, un triangle) produit des cordes d'au moins MinSegmentLength —
-        /// sinon RoundaboutFacetCount n'aurait aucun nombre de facettes valide à proposer, et la
-        /// boucle générée violerait la même contrainte "segment trop court" que le reste du
-        /// générateur. Dérivé géométriquement (corde = 2 * rayon * sin(pi / facettes)), pas une
-        /// valeur choisie à l'oeil.
-        /// </summary>
-        private static readonly float MinRoundaboutRadius =
-            MinSegmentLength / (2f * math.sin(math.PI / RoundaboutMinFacets)) + 0.1f;
-
-        private const int RoundaboutMinFacets = 3;
-        private const int RoundaboutMaxFacets = 16;
-
-        /// <summary>
-        /// Nombre de facettes de la rotonde pour un rayon donné : vise des cordes d'environ
-        /// 1.25 * MinSegmentLength (marge de sécurité au-delà du plancher), borné entre
-        /// RoundaboutMinFacets (petit rayon) et RoundaboutMaxFacets (rayon confortable, rond
-        /// visuellement fluide). MinRoundaboutRadius garantit que ce nombre de facettes reste
-        /// toujours géométriquement valide (corde &gt;= MinSegmentLength).
-        /// </summary>
-        private static int RoundaboutFacetCount(float radius)
-        {
-            float circumference = 2f * math.PI * radius;
-            int facets = (int)math.floor(circumference / (MinSegmentLength * 1.25f));
-            return math.clamp(facets, RoundaboutMinFacets, RoundaboutMaxFacets);
+            float radius = math.min(parameters.SpacingMeters * 0.25f, 25f);
+            return new RoundaboutInfo { HasRoundabout = true, Center = center, Radius = radius };
         }
 
         /// <summary>
@@ -621,7 +656,7 @@ namespace GridRoadGenerator.Core
                 return; // départ hors polygone/collectrice réelle : impasse supprimée
             }
 
-            float depth = math.clamp(parameters.CulDeSacDepth, 0.5f, 0.9f);
+            float depth = math.clamp(parameters.CulDeSacDepth, 0.5f, 0.8f);
             float stubT = start.t + (end.t - start.t) * depth;
             float3 stubWorld = InterpolateAlongLine(line, axisIsU, stubT, origin, uDir, vDir, y);
 
@@ -815,17 +850,27 @@ namespace GridRoadGenerator.Core
             return result;
         }
 
+        /// <summary>
+        /// Positions internes espacées d'ENVIRON `spacing`, réparties ÉGALEMENT sur tout
+        /// [min, max] (délègue à DistributeEvenly avec le nombre de cellules le plus proche de
+        /// `spacing`) — PAS un pas fixe posé depuis `min` avec le reliquat entier collé sur la
+        /// dernière cellule (ancien comportement). Retour utilisateur en jeu : la dernière
+        /// cellule d'un axe (le reliquat de span % spacing) pouvait finir nettement plus LARGE
+        /// (ou plus étroite) que toutes les autres — "o de cima está mais largo que o de baixo"
+        /// — invisible tant qu'un rétrécissement uniforme des cellules en bord de périmètre
+        /// masquait la différence, mais bien réel dès qu'une cellule en bord de région (pas
+        /// forcément coupée par le périmètre) recevait purement et simplement le reliquat entier.
+        /// Répartir la même petite marge sur TOUTES les cellules d'un coup (via DistributeEvenly)
+        /// donne des cellules de largeur quasi identique partout, au prix d'un espacement réel
+        /// légèrement différent de `spacing` (jamais plus de spacing/2 d'écart).
+        /// </summary>
         private static List<float> DistributeFixed(float min, float max, float spacing)
         {
-            var result = new List<float>();
-            if (spacing <= 0.5f) return result;
-            float pos = min + spacing;
-            while (pos < max - 0.5f)
-            {
-                result.Add(pos);
-                pos += spacing;
-            }
-            return result;
+            if (spacing <= 0.5f) return new List<float>();
+            float span = max - min;
+            int cellCount = (int)math.round(span / spacing);
+            if (cellCount <= 1) return new List<float>();
+            return DistributeEvenly(min, max, cellCount - 1);
         }
 
         // ------------------------------------------------------------------
@@ -849,6 +894,71 @@ namespace GridRoadGenerator.Core
         /// Aucune dépendance à Colossal.Mathematics ici (Bezier4x3 est décomposée en 4
         /// float3 par l'appelant) : Core reste testable sans le SDK du jeu.
         /// </summary>
+        /// <summary>Virage (degrés) au-delà duquel un sommet du périmètre est un aller-retour parasite, s'il touche une arête courte.</summary>
+        public const float BacktrackTurnDegrees = 150f;
+        /// <summary>Longueur (m) d'arête sous laquelle un virage de plus de BacktrackTurnDegrees est traité comme un aller-retour.</summary>
+        public const float BacktrackMaxLength = 20f;
+
+        /// <summary>
+        /// Retire les allers-retours d'un contour fermé : sommets où le tracé repart presque en
+        /// arrière (virage > BacktrackTurnDegrees) sur une arête courte. Vécu sur un vrai
+        /// périmètre : au raccord de deux routes, les derniers échantillons d'une courbe
+        /// dépassaient le nœud suivant de ~3 m, puis le contour revenait en arrière (virage de
+        /// 179°). Un vrai coin de route n'est jamais aussi aigu sur si peu de longueur.
+        /// </summary>
+        public static void RemoveBacktracks(List<float2> loop)
+        {
+            bool removed = true;
+            while (removed && loop.Count > 3)
+            {
+                removed = false;
+                for (int i = 0; i < loop.Count && loop.Count > 3; i++)
+                {
+                    int count = loop.Count;
+                    float2 prev = loop[(i - 1 + count) % count];
+                    float2 curr = loop[i];
+                    float2 next = loop[(i + 1) % count];
+                    float2 dIn = math.normalizesafe(curr - prev);
+                    float2 dOut = math.normalizesafe(next - curr);
+                    bool shortEdge = math.distance(prev, curr) < BacktrackMaxLength || math.distance(curr, next) < BacktrackMaxLength;
+                    if (shortEdge && math.dot(dIn, dOut) < math.cos(math.radians(BacktrackTurnDegrees)))
+                    {
+                        loop.RemoveAt(i);
+                        removed = true;
+                        i--;
+                    }
+                }
+            }
+        }
+
+        /// <summary>Même chose que RemoveBacktracks(List&lt;float2&gt;), sur des positions 3D (plan xz).</summary>
+        public static void RemoveBacktracks(List<float3> loop)
+        {
+            var flat = new List<float2>(loop.Count);
+            foreach (float3 p in loop)
+            {
+                flat.Add(p.xz);
+            }
+            RemoveBacktracks(flat);
+            if (flat.Count == loop.Count)
+            {
+                return;
+            }
+            // Garde les sommets restants dans l'ordre (avec leur hauteur d'origine).
+            var kept = new List<float3>(flat.Count);
+            int j = 0;
+            foreach (float3 p in loop)
+            {
+                if (j < flat.Count && math.all(p.xz == flat[j]))
+                {
+                    kept.Add(p);
+                    j++;
+                }
+            }
+            loop.Clear();
+            loop.AddRange(kept);
+        }
+
         public static List<float3> SampleCurve(float3 a, float3 b, float3 c, float3 d)
         {
             var result = new List<float3>();
@@ -884,36 +994,100 @@ namespace GridRoadGenerator.Core
         }
 
         // ------------------------------------------------------------------
-        // Mode adaptativo : anneaux concentriques par offset de polygone
+        // Mode Loop ("super-quarteirões") : UNE seule grille de collectrices (plus de niveau
+        // Arterial séparé — voir doc de GenerateLoopGrid) délimite des quarteirões réguliers,
+        // chacun rempli d'un laço UNIFORME à coins fixes (EmitSimpleLoopBlock).
         // ------------------------------------------------------------------
 
-        /// <summary>Nombre max d'anneaux générés : garde-fou anti-boucle sur un polygone pathologique.</summary>
-        public const int MaxAdaptiveRings = 200;
+        /// <summary>Rayon d'arrondi des coins du laço (voir EmitSimpleLoopBlock), avant réduction pour un petit quarteirão.</summary>
+        private const float LoopCornerRadiusMax = 20f;
 
         /// <summary>
-        /// Un point offset dont la distance au sommet d'origine dépasse MiterLimit × distance
-        /// d'offset est clampé à cette distance au lieu d'être laissé filer — voir OffsetVertex.
+        /// Largeur/profondeur minimale du laço en dessous de laquelle le cul-de-sac n'est PAS
+        /// obligatoire, même si la fréquence choisie l'aurait normalement placé ici. Retour
+        /// utilisateur en jeu : "não é obrigatório haver becos sem saída em espaços menos
+        /// largos" — dans une cellule trop étroite, la ramification collée aux coins arrondis
+        /// produisait une forme dégénérée/invalide plutôt qu'un simple laço sans branche. 3×
+        /// LoopCornerRadiusMax : assez de place pour que les coins ET la ramification restent
+        /// visuellement distincts.
         /// </summary>
-        private const float MiterLimit = 4f;
+        private const float MinCulDeSacCellWidth = LoopCornerRadiusMax * 3f;
 
         /// <summary>
-        /// Génère le mode "Adaptativo" : des routes concentriques obtenues en décalant le
-        /// polygone du périmètre vers l'intérieur par pas de parameters.SpacingMeters (anneaux,
-        /// comme des courbes de niveau — jonction en pointe/miter à chaque coin, voir
-        /// OffsetPolygonInward ; un périmètre déjà courbe, ex. une avenue existante densifiée par
-        /// SampleCurve, produit donc des anneaux visuellement arrondis SANS traitement de coin
-        /// spécial — c'est la forme d'entrée qui dicte le rendu), plus quelques connexions
-        /// radiales reliant les anneaux entre eux (parameters.RadialConnections, toujours
-        /// traversantes jusqu'au dernier anneau atteignable — jamais d'impasse ici, contrairement
-        /// à la grille classique). Épouse n'importe quelle forme de périmètre (convexe, en L,
-        /// courbe) sans qu'aucun segment ne semble arbitraire : c'est la forme du polygone qui
-        /// crée l'irrégularité, pas du hasard. Voir OffsetPolygonInward pour l'algorithme d'offset
-        /// et sa gestion (volontairement simplifiée) des coins concaves.
+        /// Fraction de la plus petite dimension du quarteirão utilisée comme marge entre le
+        /// laço et la collectrice (voir EmitSimpleLoopBlock/LoopMarginMin/LoopMarginMax). Une
+        /// marge FIXE (essai initial, 10 m) laissait le laço quasi coller aux collectrices dès
+        /// que CollectorSpacingMeters dépassait une centaine de mètres — visuellement
+        /// indissociable d'une grille classique plus dense (bug rapporté en jeu : "tudo
+        /// colado"). Une fraction garantit une cour visible autour du laço, proportionnée à la
+        /// taille réelle du quarteirão.
         /// </summary>
-        public static List<RoadSegmentDef> GenerateAdaptiveGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
+        private const float LoopMarginFraction = 0.25f;
+
+        /// <summary>Marge minimale (m) : évite un laço qui touche presque la collectrice sur un petit quarteirão.</summary>
+        private const float LoopMarginMin = 15f;
+
+        /// <summary>Marge maximale (m) : évite un laço ridiculement petit et centré sur un très grand quarteirão.</summary>
+        private const float LoopMarginMax = 45f;
+
+        /// <summary>
+        /// Échelles essayées, dans l'ordre, pour faire rentrer le rectangle du laço dans un
+        /// quarteirão de bord coupé par le périmètre (voir EmitSimpleLoopBlock) — 100% d'abord
+        /// (taille normale), puis rétrécissement symétrique vers le centre du quarteirão par
+        /// paliers de 15 points, jusqu'à 40% (en dessous, le laço deviendrait un point ridicule
+        /// plutôt qu'une vraie rue) ; le premier qui rentre entièrement dans le polygone est
+        /// utilisé, ou aucun laço si même 40% déborde encore.
+        /// </summary>
+        private static readonly float[] LoopFitScales = { 1f, 0.85f, 0.7f, 0.55f, 0.4f };
+
+        /// <summary>
+        /// Génère le mode "Loop" : une grille UNIQUE de collectrices (mêmes primitives que
+        /// GenerateGrid — BuildLocalFrame/DistributeFixed/ClipLineToPolygon/BuildSubSegments,
+        /// à CollectorSpacingMeters) découpe le périmètre en quarteirões réguliers ; chaque
+        /// quarteirão ENTIÈREMENT intérieur au périmètre (voir PointInPolygon, testé aux 4
+        /// coins de son laço) reçoit un laço UNIFORME à coins fixes (EmitSimpleLoopBlock),
+        /// relié à la collectrice par un seul embranchement.
+        ///
+        /// Remplace une ancienne version à 2 niveaux (Arterial épars &gt; Coletora &gt; laço), dont
+        /// le laço suivait le contour réel du périmètre par échantillonnage adaptatif
+        /// (FindMaxLegDepth) — cause répétée de formes dégénérées en jeu (retours utilisateur
+        /// successifs : fond en biais, coins disproportionnés, brisures multiples) ET du coût
+        /// dominant en performance (échantillonnage + double appel à SplitSegmentsAtMidSpan-
+        /// AttachPoints par quarteirão arterial, voir le journal de performance en jeu montrant
+        /// jusqu'à 350 ms/régénération). Le niveau Arterial souffrait aussi d'un bug structurel
+        /// séparé : un quarteirão arterial trop étroit ne gardait aucune collectrice interne
+        /// (filtre de dégagement contre l'arterial), donc AUCUN laço — "quanto mais se baixa
+        /// [Arterial Spacing] mais os loops desaparecem". Un seul niveau, une géométrie fixe
+        /// (rectangle à coins arrondis, jamais adaptative) : plus simple, plus robuste, et
+        /// nettement moins coûteux à régénérer à chaque frame de prévisualisation.
+        ///
+        /// Limitation connue : un quarteirão de bord coupé par le contour réel (périmètre non
+        /// rectangulaire) tente plusieurs tailles de rectangle rétrécies vers son centre avant
+        /// d'abandonner (voir EmitSimpleLoopBlock/LoopFitScales) — reste donc vide seulement si
+        /// même la plus petite taille testée (40% de la normale) déborde encore, ou si le centre
+        /// du quarteirão lui-même tombe hors du polygone.
+        /// </summary>
+        public static List<RoadSegmentDef> GenerateLoopGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
         {
-            if (selectedNodePositions == null || selectedNodePositions.Count < 2 || parameters.SpacingMeters <= 0.5f)
+            if (parameters.ConcentricMode)
+            {
+                return ConcentricGenerator.Generate(selectedNodePositions, parameters.ConcentricLayers, parameters.ConcentricConnections);
+            }
+
+            if (selectedNodePositions == null || selectedNodePositions.Count < 2 || parameters.CollectorSpacingMeters <= 0.5f)
                 return new List<RoadSegmentDef>();
+
+            // Réglages propres à la grille CLASSIQUE (avenue sur la colonne/rangée N, culs-de-sac
+            // par ligne) : BuildSubSegments/EmitLine, partagés avec GenerateGrid, les appliquent
+            // à TOUTE grille qu'ils construisent — y compris les collectrices et la grille fine
+            // piétonne d'ici. Restés actifs depuis le mode Grelha, ils transformaient une ligne
+            // intérieure en collectrice et en coupaient/supprimaient d'autres (retour utilisateur,
+            // log en jeu : "só estão 6 áreas construtivas em vez de 9", "tudo misturado"). Le
+            // mode Loop a ses propres réglages (LoopCulDeSacRatio, CulDeSacDepth) : neutralisés
+            // ici pour tout le reste de la génération.
+            parameters.AvenueColumnEnabled = false;
+            parameters.AvenueRowEnabled = false;
+            parameters.CulDeSacMode = false;
 
             float y = 0f;
             foreach (var p in selectedNodePositions) y += p.y;
@@ -922,7 +1096,6 @@ namespace GridRoadGenerator.Core
             var pts = new List<float2>(selectedNodePositions.Count);
             foreach (var p in selectedNodePositions) pts.Add(new float2(p.x, p.z));
 
-            // 2 nœuds : rectangle aligné sur les axes, coins opposés (même convention que GenerateGrid).
             if (pts.Count == 2)
             {
                 float2 mn = math.min(pts[0], pts[1]);
@@ -934,469 +1107,853 @@ namespace GridRoadGenerator.Core
             if (polygon.Count < 3 || math.abs(SignedArea(polygon)) < 1f)
                 return new List<RoadSegmentDef>();
 
-            var segments = new List<RoadSegmentDef>();
-            var rings = new List<List<float2>> { polygon };
+            (float2 origin, float2 uDir, float2 vDir) = BuildLocalFrame(polygon, parameters.AngleOffsetDegrees);
 
-            List<float2> current = polygon;
-            for (int ring = 0; ring < MaxAdaptiveRings; ring++)
+            var local = new List<float2>(polygon.Count);
+            float2 lmin = new float2(float.MaxValue), lmax = new float2(float.MinValue);
+            foreach (var p in polygon)
             {
-                List<float2> next = OffsetPolygonInward(current, parameters.SpacingMeters);
-                if (next == null)
-                    break; // dégénéré : aire trop petite, retournée, ou auto-intersectante
-
-                EmitRingSegments(segments, next, y);
-                rings.Add(next);
-                current = next;
+                var lp = new float2(math.dot(p - origin, uDir), math.dot(p - origin, vDir));
+                local.Add(lp);
+                lmin = math.min(lmin, lp);
+                lmax = math.max(lmax, lp);
             }
 
-            // Espacement trop grand pour ce périmètre : même le premier anneau intérieur est
-            // dégénéré (aire trop petite/retournée/auto-intersectante), donc la boucle
-            // ci-dessus n'a jamais tourné — le résultat serait autrement complètement vide,
-            // alors que le périmètre D'ORIGINE (déjà validé plus haut) reste une route
-            // parfaitement valide en lui-même.
-            if (rings.Count == 1)
+            // Mode super-quarteirão : la sélection est découpée en zones d'environ
+            // SuperblockZoneMeters, réparties ÉGALEMENT pour la remplir exactement ("o tamanho das
+            // células adapta-se ao perímetro e tamanho da área"). Une ligne sur
+            // SuperblockSubdivisions est une collectrice ("coletor > pedonal > pedonal > coletor"),
+            // les autres sont piétonnes (voir GenerateSuperblockInterior) ; le périmètre choisi
+            // (route existante) ferme le tout. Une petite sélection (≤ 3 zones par axe) n'a donc
+            // aucune collectrice interne : un seul super-quarteirão.
+            List<float> uPositions;
+            List<float> vPositions;
+            List<float> uPedestrian = null;
+            List<float> vPedestrian = null;
+            if (parameters.SuperblockMode)
             {
-                EmitRingSegments(segments, polygon, y);
+                SplitSuperblockLines(lmin.x, lmax.x, parameters.SuperblockZoneMeters, out uPositions, out uPedestrian);
+                SplitSuperblockLines(lmin.y, lmax.y, parameters.SuperblockZoneMeters, out vPositions, out vPedestrian);
+            }
+            else
+            {
+                uPositions = DistributeFixed(lmin.x, lmax.x, parameters.CollectorSpacingMeters);
+                vPositions = DistributeFixed(lmin.y, lmax.y, parameters.CollectorSpacingMeters);
             }
 
-            if (parameters.RadialConnections > 0 && rings.Count > 1)
+            var uLines = new List<GridLine>(uPositions.Count);
+            foreach (var u in uPositions)
+                uLines.Add(new GridLine { Position = u, Intervals = ClipLineToPolygon(local, axisIsU: true, position: u) });
+            var vLines = new List<GridLine>(vPositions.Count);
+            foreach (var v in vPositions)
+                vLines.Add(new GridLine { Position = v, Intervals = ClipLineToPolygon(local, axisIsU: false, position: v) });
+
+            var segments = BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out _, out _);
+
+            // Collectrices = réseau "avenue" (2ᵉ prefab, voir RoadSegmentDef.IsAvenue) — le
+            // laço (émis plus bas, jamais IsAvenue) reste sur le réseau PRINCIPAL, le rayon
+            // cul-de-sac (IsCulDeSacEnd) partage ce même réseau (voir GridRoadToolSystem).
+            for (int i = 0; i < segments.Count; i++)
             {
-                EmitRadialConnections(segments, rings, parameters.RadialConnections, y, parameters.SpacingMeters);
+                RoadSegmentDef collector = segments[i];
+                collector.IsAvenue = true;
+                segments[i] = collector;
+            }
+
+            // uBounds/vBounds ajoutent les extrémités du PÉRIMÈTRE aux positions de collectrices
+            // internes, pour que chaque bande — bord compris — soit traitée comme un quarteirão
+            // à part entière (sans ça, aucune collectrice interne du tout produit un quarteirão
+            // unique = le polygone entier, ce qui reste géré correctement puisque le test des 4
+            // coins du laço filtre déjà les cas où ce serait trop grand/hors polygone).
+            var uBounds = new List<float> { lmin.x };
+            uBounds.AddRange(uPositions);
+            uBounds.Add(lmax.x);
+            var vBounds = new List<float> { lmin.y };
+            vBounds.AddRange(vPositions);
+            vBounds.Add(lmax.y);
+
+            int blockIndex = 0;
+            for (int iu = 0; iu + 1 < uBounds.Count; iu++)
+            {
+                for (int iv = 0; iv + 1 < vBounds.Count; iv++)
+                {
+                    float uMinCell = uBounds[iu];
+                    float uMaxCell = uBounds[iu + 1];
+                    float vMinCell = vBounds[iv];
+                    float vMaxCell = vBounds[iv + 1];
+
+                    // Super-quarteirão (retour utilisateur en jeu, inspiré des superilles de
+                    // Barcelone — capture d'écran du modèle réel) : PAS un laço unique, une VRAIE
+                    // grille fine à l'intérieur de CHAQUE quarteirão délimité par les collectrices
+                    // — voir GenerateSuperblockInterior. Quand uMinCell/uMaxCell/vMinCell/vMaxCell
+                    // touchent le bord du POLYGONE choisi (pas une collectrice interne), la grille
+                    // fine s'y accroche quand même : ce bord est presque toujours une VRAIE route
+                    // existante en jeu (le joueur clique le long d'elle) — MakeCoursePos (règle 2)
+                    // la raccorde automatiquement, exactement comme les collectrices le font déjà
+                    // (retour utilisateur : "as estradas pedonais também têm que se conectar à
+                    // estrada que serve de base, não apenas as coletoras" — laisser un anneau vide
+                    // entre le vrai périmètre et la 1re collectrice gaspille tout ce terrain).
+                    // Les extrémités qui NE touchent aucune route réelle (cas synthétique sans
+                    // route au bord) sont filtrées après coup par PruneDeadEndPedestrianSegments.
+                    if (parameters.SuperblockMode)
+                    {
+                        GenerateSuperblockInterior(segments, local, new float2(uMinCell, vMinCell), new float2(uMaxCell, vMaxCell),
+                            WithinRange(uPedestrian, uMinCell, uMaxCell), WithinRange(vPedestrian, vMinCell, vMaxCell),
+                            origin, uDir, vDir, y, parameters);
+                        continue;
+                    }
+
+                    // Aucune collectrice interne du tout sur l'axe V (espacement plus grand que
+                    // tout le périmètre) : ni vMin ni vMax de cette unique bande ne sont une VRAIE
+                    // collectrice (vBounds ne contient alors que [lmin.y, lmax.y], les bornes du
+                    // polygone, pas des routes) — jamais de laço orphelin plutôt qu'un
+                    // embranchement raccroché dans le vide.
+                    if (vPositions.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    // Côté d'accès (vers vMin ou vMax) : la bande de bord initiale (iv==0, avant
+                    // la 1re collectrice interne) DOIT s'accrocher à vMax (la 1re collectrice
+                    // réelle) — vMin n'est ici que le bord du polygone, pas une route. Bande de
+                    // bord finale (dernière collectrice -> bord) : DOIT s'accrocher à vMin, même
+                    // raison. Bandes pleinement intérieures : alterné par rangée réelle — sans ça,
+                    // TOUS les laços de la ville s'accrocheraient au même côté absolu de chaque
+                    // collectrice (retour en jeu : "os laços deviam estar dos dois lados da
+                    // estrada principal").
+                    bool isFirstStrip = iv == 0;
+                    bool isLastStrip = iv == vBounds.Count - 2;
+                    bool connectToMin = isFirstStrip ? false : isLastStrip ? true : (iv & 1) == 0;
+
+                    bool withCulDeSac = IsCulDeSacBlock(blockIndex, parameters.LoopCulDeSacRatio);
+                    bool emitted = EmitSimpleLoopBlock(segments, uMinCell, uMaxCell, vMinCell, vMaxCell, local,
+                        origin, uDir, vDir, y, withCulDeSac, parameters.CulDeSacDepth, connectToMin);
+                    if (emitted)
+                    {
+                        blockIndex++;
+                    }
+                }
+            }
+
+            // L'embranchement du laço (EmitSimpleLoopBlock) se raccorde à la collectrice EN
+            // RETRAIT du bord du quarteirão (jamais à une extrémité de la collectrice
+            // elle-même) : BuildSubSegments, appelé AVANT cette boucle, n'a aucune connaissance
+            // de ce point d'ancrage (calculé bien après, par quarteirão) — collectrice et laço
+            // se touchent visuellement mais ne partagent aucun sommet réel tant que cette
+            // post-passe n'a pas tourné (retour en jeu : "a estrada principal (laço) não fusiona
+            // na coletora").
+            segments = SplitSegmentsAtMidSpanAttachPoints(segments, isTarget: s => s.IsAvenue, isAttachSource: s => !s.IsAvenue);
+
+            // Filet de sécurité final (retour utilisateur en jeu, répété : "Ainda tem os cul de
+            // sac... retira por completo") : au-delà du garde-fou uMinReal/uMaxReal/vMinReal/
+            // vMaxReal déjà appliqué dans GenerateSuperblockInterior (qui couvre le cas simple —
+            // périmètre rectangulaire), un périmètre IRRÉGULIER peut encore faire clipper une
+            // ligne interne en plein milieu par ClipLineToPolygon (le vrai contour, pas juste la
+            // boîte englobante lmin/lmax) à un endroit qui ne correspond à AUCUN autre tronçon —
+            // supprime ITÉRATIVEMENT tout tronçon piéton dont une extrémité n'est partagée par
+            // AUCUN autre tronçon (piéton ou collectrice), jusqu'à point fixe (une suppression
+            // peut en exposer une autre plus loin dans la même chaîne). Garantit qu'AUCUNE
+            // impasse ne peut survivre en mode super-quarteirão, quelle que soit la cause exacte.
+            if (parameters.SuperblockMode)
+            {
+                segments = PruneDeadEndPedestrianSegments(segments, polygon);
             }
 
             return segments;
         }
 
-        /// <summary>Émet les arêtes d'un anneau comme des RoadSegmentDef (boucle fermée, segments trop courts éliminés).</summary>
-        private static void EmitRingSegments(List<RoadSegmentDef> segments, List<float2> ring, float y)
-        {
-            for (int i = 0; i < ring.Count; i++)
-            {
-                float2 a = ring[i];
-                float2 b = ring[(i + 1) % ring.Count];
-                if (math.distance(a, b) < MinSegmentLength) continue;
-                segments.Add(new RoadSegmentDef(new float3(a.x, y, a.y), new float3(b.x, y, b.y), isHorizontal: false));
-            }
-        }
-
         /// <summary>
-        /// Décale chaque arête du polygone vers l'intérieur de distance mètres, puis reconstruit
-        /// chaque sommet par intersection des deux droites-support adjacentes décalées ("jonction
-        /// en pointe"/miter join) — un seul point de sortie par sommet d'entrée valide.
-        ///
-        /// Avant ce calcul, ResamplePolygon ré-échantillonne les arêtes plus courtes que distance :
-        /// un polygone densifié (périmètre courbe échantillonné par SampleCurve, par exemple) a
-        /// des arêtes bien plus courtes que la distance d'offset typique, et le miter join PAR
-        /// SOMMET ne peut pas rester géométriquement cohérent sur une arête plus courte que le
-        /// décalage lui-même (les deux droites-support adjacentes se croisent hors de l'arête
-        /// d'origine) — sans ce ré-échantillonnage préalable, un anneau entier serait rejeté à
-        /// tort dès qu'une seule arête est trop courte. Conséquence : le nombre de sommets peut
-        /// varier d'un anneau à l'autre (voir EmitRadialConnections, qui ne suppose pas une
-        /// correspondance d'index fixe entre anneaux).
-        ///
-        /// Coins concaves ou presque plats ("le point délicat") : l'intersection des deux droites
-        /// peut filer très loin du sommet d'origine (droites quasi parallèles, ou virage en
-        /// pointe très aiguë). Plutôt qu'un vrai bevel (qui ajouterait un sommet), le point est
-        /// CLAMPÉ à MiterLimit × distance du sommet d'origine, dans la même direction — un petit
-        /// méplat au lieu d'une pointe qui s'échappe à l'infini. Voir OffsetVertex pour le détail.
-        ///
-        /// Retourne null si le résultat est dégénéré : aire signée qui a changé de signe (le
-        /// polygone s'est "retourné", signe que l'offset a dépassé la largeur locale de la
-        /// forme), aire trop petite, ou auto-intersection entre arêtes non adjacentes détectée
-        /// (O(n²), n est petit — quelques dizaines de sommets au plus). Pas de tentative de
-        /// scinder la forme en sous-polygones (vrai straight-skeleton, hors scope volontairement :
-        /// un algorithme simple suffit ici) : sur une forme très concave (ex. un U étroit), les
-        /// anneaux s'arrêtent simplement plus tôt qu'un algorithme complet ne le ferait.
-        ///
-        /// Toujours jonction en pointe (miter) — pas d'option d'arrondi de coin ("round join") :
-        /// un essai précédent remplaçait chaque coin convexe par un petit arc centré sur le
-        /// sommet d'origine, mais cet arc rentre TOUJOURS plus près du sommet que ne le fait la
-        /// jonction miter (qui avance le long des deux arêtes adjacentes) — sur un coin nettement
-        /// anguleux (ex. un rectangle), les deux arêtes adjacentes à l'arc continuent alors leur
-        /// tracé jusqu'à LEUR PROPRE point miter théorique et se croisent entre elles avant même
-        /// d'atteindre l'arc, un anneau auto-intersectant à coup sûr. Un périmètre déjà courbe
-        /// (avenue existante densifiée par SampleCurve) n'a pas ce problème et produit des anneaux
-        /// visuellement arrondis avec la seule jonction miter, sans traitement de coin spécial.
+        /// Supprime itérativement tout tronçon piéton (RoadSegmentDef.IsPedestrian) dont AU MOINS
+        /// une extrémité n'est NI partagée par un autre tronçon NI posée sur le vrai périmètre
+        /// choisi par le joueur (voir l'appel dans GenerateLoopGrid pour le pourquoi). Une
+        /// extrémité "partagée" signifie qu'un AUTRE tronçon a un Start ou un End EXACTEMENT
+        /// (bit-à-bit) à cette même position — cohérent avec le reste du mod (voir
+        /// SplitSegmentsAtMidSpanAttachPoints). Une extrémité sur le VRAI périmètre n'est PAS une
+        /// impasse : en jeu, ce périmètre est presque toujours une route existante, que
+        /// MakeCoursePos (règle 2) raccorde automatiquement — la traiter comme une impasse
+        /// gaspillait tout le terrain entre le périmètre et la 1re collectrice (retour
+        /// utilisateur : "as estradas pedonais também têm que se conectar à estrada que serve de
+        /// base"). Itératif car retirer un tronçon peut rendre orpheline l'extrémité d'un AUTRE
+        /// tronçon plus loin dans la même chaîne — tourne jusqu'à ce qu'aucune suppression ne soit
+        /// plus nécessaire.
         /// </summary>
-        internal static List<float2> OffsetPolygonInward(List<float2> rawPolygon, float distance)
+        private static List<RoadSegmentDef> PruneDeadEndPedestrianSegments(List<RoadSegmentDef> segments, List<float2> polygon)
         {
-            List<float2> polygon = ResamplePolygon(rawPolygon, distance);
-            int n = polygon.Count;
-            if (n < 3) return null;
-
-            float originalArea = SignedArea(polygon);
-            if (math.abs(originalArea) < Epsilon) return null;
-            float windingSign = math.sign(originalArea);
-
-            var result = new List<float2>(n);
-            var clamped = new bool[n];
-            for (int i = 0; i < n; i++)
+            var result = new List<RoadSegmentDef>(segments);
+            const float boundaryTolerance = 0.05f;
+            bool removedAny;
+            do
             {
-                float2 prev = polygon[(i - 1 + n) % n];
-                float2 curr = polygon[i];
-                float2 next = polygon[(i + 1) % n];
-                result.Add(OffsetVertex(prev, curr, next, distance, windingSign, out clamped[i]));
-            }
-
-            // Un coin dont le décalage a "mangé" plus que la largeur locale disponible se
-            // retrouve, avec son voisin, à pointer dans le sens INVERSE du tracé d'origine (les
-            // deux corrections de sommets se sont croisées) : détectable coin à coin, sans
-            // attendre que ça déforme la forme globale. C'est le cas typique d'une forme convexe
-            // simple sur-érodée (offset > la moitié de sa largeur locale) — l'aire signée globale
-            // et l'auto-intersection (ci-dessous) ne le détectent pas forcément à elles seules
-            // (vérifié empiriquement : le résultat peut rester un polygone simple, juste
-            // géométriquement faux). Comparaison coin à COIN (DetectCorners), jamais sommet à
-            // sommet : un coin net (miter) s'avance légitimement plus loin le long de l'arête que
-            // son voisin immédiat ré-échantillonné (ResamplePolygon), ce qui créerait un faux
-            // positif si on comparait chaque petite arête individuellement — seul l'écart NET
-            // entre deux vrais coins consécutifs (en ignorant les points intermédiaires) indique
-            // une véritable inversion. Exemptés : les coins clampés (miter limit) — une vraie
-            // cuspide (ex. courbe très serrée) retourne légitimement l'arête locale, c'est
-            // justement ce que le clamp absorbe du mieux possible plutôt que de rejeter tout
-            // l'anneau à cause d'elle.
-            bool[] isCorner = DetectCorners(polygon, out int cornerCount);
-            if (cornerCount > 0)
-            {
-                int firstCorner = 0;
-                while (!isCorner[firstCorner]) firstCorner++;
-                int ci = firstCorner;
-                do
+                removedAny = false;
+                var pointCounts = new Dictionary<(float, float, float), int>();
+                void CountPoint(float3 p)
                 {
-                    int cj = (ci + 1) % n;
-                    while (!isCorner[cj]) cj = (cj + 1) % n;
-                    if (!clamped[ci] && !clamped[cj])
+                    var key = (p.x, p.y, p.z);
+                    pointCounts[key] = pointCounts.TryGetValue(key, out int c) ? c + 1 : 1;
+                }
+                foreach (RoadSegmentDef s in result)
+                {
+                    CountPoint(s.Start);
+                    CountPoint(s.End);
+                }
+                bool IsDangling(float3 p)
+                {
+                    if (pointCounts[(p.x, p.y, p.z)] > 1)
                     {
-                        float2 originalEdge = polygon[cj] - polygon[ci];
-                        float2 newEdge = result[cj] - result[ci];
-                        if (math.dot(originalEdge, newEdge) <= 0f)
-                            return null;
+                        return false; // partagé par un autre tronçon : jamais une impasse
                     }
-                    ci = cj;
-                } while (ci != firstCorner);
-            }
-
-            float resultArea = SignedArea(result);
-            // Anneau plus petit qu'un carré de ~2×MinSegmentLength de côté : plus de sens comme route.
-            float minArea = 4f * MinSegmentLength * MinSegmentLength;
-            if (math.sign(resultArea) != windingSign || math.abs(resultArea) < minArea)
-                return null;
-
-            if (HasSelfIntersection(result, clamped))
-                return null;
-
+                    // Comparaison en espace MONDE (segment.Start/End sont déjà en espace monde,
+                    // tout comme `polygon` ici — voir GenerateLoopGrid) : PAS de conversion vers
+                    // l'espace local u/v, qui comparerait des repères différents et ferait
+                    // échouer le test même pour un point réellement posé sur le périmètre (bug
+                    // corrigé : gaspillait le même anneau de terrain que le défaut d'origine).
+                    return !IsPointOnPolygonEdge(p.xz, polygon, boundaryTolerance);
+                }
+                for (int i = result.Count - 1; i >= 0; i--)
+                {
+                    RoadSegmentDef s = result[i];
+                    if (!s.IsPedestrian)
+                    {
+                        continue; // ne jamais purger une collectrice : toujours traversante par nature
+                    }
+                    if (IsDangling(s.Start) || IsDangling(s.End))
+                    {
+                        result.RemoveAt(i);
+                        removedAny = true;
+                    }
+                }
+            } while (removedAny);
             return result;
         }
 
-        /// <summary>Virage (degrés, 0-180) à partir duquel un sommet est considéré comme un "vrai" coin par ResamplePolygon.</summary>
-        private const float CornerAngleThresholdDegrees = 20f;
-
-        /// <summary>Vrai pour chaque sommet dont le virage dépasse CornerAngleThresholdDegrees (ou dégénéré) ; realCornerCount = nombre de vrais.</summary>
-        private static bool[] DetectCorners(List<float2> polygon, out int realCornerCount)
-        {
-            int n = polygon.Count;
-            var isRealCorner = new bool[n];
-            realCornerCount = 0;
-            for (int i = 0; i < n; i++)
-            {
-                float2 dirIn = polygon[i] - polygon[(i - 1 + n) % n];
-                float2 dirOut = polygon[(i + 1) % n] - polygon[i];
-                float lenIn = math.length(dirIn);
-                float lenOut = math.length(dirOut);
-                bool corner;
-                if (lenIn < Epsilon || lenOut < Epsilon)
-                {
-                    corner = true; // sommet dupliqué/dégénéré : à traiter comme un coin plutôt que d'y toucher
-                }
-                else
-                {
-                    float cosAngle = math.clamp(math.dot(dirIn / lenIn, dirOut / lenOut), -1f, 1f);
-                    corner = math.degrees(math.acos(cosAngle)) > CornerAngleThresholdDegrees;
-                }
-                isRealCorner[i] = corner;
-                if (corner) realCornerCount++;
-            }
-            return isRealCorner;
-        }
-
         /// <summary>
-        /// Ré-échantillonne les tronçons "denses" (arêtes courtes, typiquement l'échantillonnage
-        /// de SampleCurve le long d'un périmètre courbe) à espacement régulier le long de l'arc,
-        /// EN CONSERVANT tel quel chaque sommet "réel" — un virage de plus de
-        /// CornerAngleThresholdDegrees, ex. les coins d'un carré ou d'un L. Chaque "tronçon" entre
-        /// deux coins réels consécutifs est ré-échantillonné indépendamment par interpolation le
-        /// long de son propre tracé (jamais par fusion de sommets voisins), donc il reste
-        /// représentatif de la forme d'origine quel que soit le nombre de points retirés.
-        ///
-        /// Si aucun sommet ne dépasse le seuil (polygone déjà lisse, ex. un cercle sans coin net),
-        /// tout le polygone est traité comme un seul tronçon ancré arbitrairement au premier sommet.
+        /// Vrai si `point` (espace local u/v) tombe sur l'un des segments du polygone (avec
+        /// tolérance), utilisé par PruneDeadEndPedestrianSegments pour distinguer une extrémité
+        /// posée sur le vrai périmètre (jamais une impasse, MakeCoursePos la raccorde en jeu)
+        /// d'une extrémité réellement orpheline en plein milieu du terrain.
         /// </summary>
-        private static List<float2> ResamplePolygon(List<float2> polygon, float targetSpacing)
-        {
-            int n = polygon.Count;
-            if (n <= 3) return polygon;
-
-            bool[] isRealCorner = DetectCorners(polygon, out int realCornerCount);
-            // Un polygone entièrement lisse (ex. un cercle sans coin net) est traité comme un
-            // seul tronçon bouclé, ancré arbitrairement au premier sommet — cette ancre n'étant
-            // PAS un vrai coin, elle ne crée aucun risque de dépassement de type miter, donc pas
-            // besoin de la marge de dégagement (CornerClearanceFactor) réservée pour un vrai coin :
-            // sans ça, un petit périmètre lisse perdrait le plus gros de sa longueur utile en
-            // marge des DEUX côtés d'un tronçon qui n'a en réalité aucune extrémité à protéger.
-            bool applyCornerMargin = realCornerCount > 0;
-            if (realCornerCount == 0)
-            {
-                isRealCorner[0] = true;
-            }
-
-            int firstAnchor = 0;
-            while (!isRealCorner[firstAnchor]) firstAnchor++;
-
-            var result = new List<float2>();
-            int current = firstAnchor;
-            do
-            {
-                int next = (current + 1) % n;
-                while (!isRealCorner[next]) next = (next + 1) % n;
-                AppendResampledRun(result, polygon, current, next, targetSpacing, applyCornerMargin);
-                current = next;
-            } while (current != firstAnchor);
-
-            return result.Count >= 3 ? result : polygon;
-        }
-
-        /// <summary>
-        /// Marge (× la distance d'offset du prochain OffsetPolygonInward) laissée libre de tout
-        /// point ré-échantillonné à chaque extrémité d'un tronçon (voir AppendResampledRun) : le
-        /// point offset d'un coin net (miter join) avance légitimement le long de l'arête d'une
-        /// distance de cet ordre de grandeur (exactement 1× à 90°, davantage pour un coin plus
-        /// aigu) — sans cette marge, un point ré-échantillonné juste à côté du coin se ferait
-        /// "dépasser" par le coin lui-même une fois décalé, créant un repli local (auto-
-        /// intersection ou inversion de sens détectés à tort comme une vraie dégénérescence).
-        /// </summary>
-        private const float CornerClearanceFactor = 2f;
-
-        /// <summary>
-        /// Ajoute à result le sommet startIdx (conservé exactement) puis, si le tronçon
-        /// startIdx→...→endIdx (dans l'ordre du polygone, avec retour au début possible) est
-        /// assez long, quelques points intermédiaires interpolés à intervalle régulier le long
-        /// de son tracé réel, en laissant CornerClearanceFactor × targetSpacing d'espace libre à
-        /// chaque extrémité (voir CornerClearanceFactor) — endIdx lui-même n'est PAS ajouté ici
-        /// (il sera le startIdx du tronçon suivant, ou déjà l'ancre de départ si la boucle se referme).
-        /// </summary>
-        private static void AppendResampledRun(List<float2> result, List<float2> polygon, int startIdx, int endIdx, float targetSpacing, bool applyCornerMargin)
-        {
-            int n = polygon.Count;
-            // do/while, jamais for(;i!=endIdx;) : quand startIdx==endIdx (UN SEUL coin détecté,
-            // ou aucun — voir ResamplePolygon, tout le polygone est alors un unique tronçon
-            // "bouclé" ancré arbitrairement) le tour complet doit quand même être parcouru une
-            // fois, pas zéro — un for(;i!=endIdx;) démarrerait avec la condition déjà fausse.
-            var runPoints = new List<float2> { polygon[startIdx] };
-            int i = startIdx;
-            do
-            {
-                i = (i + 1) % n;
-                runPoints.Add(polygon[i]);
-            } while (i != endIdx);
-
-            var cumulative = new float[runPoints.Count];
-            for (int k = 1; k < runPoints.Count; k++)
-            {
-                cumulative[k] = cumulative[k - 1] + math.distance(runPoints[k - 1], runPoints[k]);
-            }
-            float runLength = cumulative[cumulative.Length - 1];
-
-            result.Add(polygon[startIdx]);
-            if (runLength < Epsilon) return;
-
-            float margin = applyCornerMargin ? CornerClearanceFactor * targetSpacing : 0f;
-            float usable = runLength - 2f * margin;
-            if (usable < targetSpacing) return; // tronçon trop court pour insérer un point en toute sécurité
-
-            int steps = math.max(1, (int)math.round(usable / targetSpacing));
-            int segIndex = 0;
-            for (int s = 1; s <= steps; s++)
-            {
-                float targetDist = margin + usable * s / (steps + 1);
-                while (segIndex < runPoints.Count - 2 && cumulative[segIndex + 1] < targetDist)
-                    segIndex++;
-                float segStart = cumulative[segIndex];
-                float segEnd = cumulative[segIndex + 1];
-                float t = segEnd > segStart ? (targetDist - segStart) / (segEnd - segStart) : 0f;
-                result.Add(math.lerp(runPoints[segIndex], runPoints[segIndex + 1], t));
-            }
-        }
-
-        /// <summary>
-        /// Point offset d'un sommet unique (voir OffsetPolygonInward) : intersection des deux
-        /// droites-support (arête prev→curr et arête curr→next), chacune décalée vers l'intérieur
-        /// de distance le long de sa normale. windingSign vient de SignedArea(polygon d'origine) :
-        /// détermine quel côté de chaque arête est "l'intérieur", indépendamment du sens de
-        /// parcours du polygone. clamped ressort vrai si le miter limit a dû s'appliquer (voir
-        /// OffsetPolygonInward : les arêtes adjacentes à un sommet clampé sont exemptées de la
-        /// vérification "arête retournée", un vrai rebroussement — ex. cuspide d'une courbe très
-        /// serrée — étant justement le cas que le clamp existe pour absorber du mieux possible).
-        /// </summary>
-        internal static float2 OffsetVertex(float2 prev, float2 curr, float2 next, float distance, float windingSign, out bool clamped)
-        {
-            clamped = false;
-            float2 dirIn = curr - prev;
-            float2 dirOut = next - curr;
-            float lenIn = math.length(dirIn);
-            float lenOut = math.length(dirOut);
-            if (lenIn < Epsilon) return curr + InwardNormal(dirOut, windingSign) * distance;
-            if (lenOut < Epsilon) return curr + InwardNormal(dirIn, windingSign) * distance;
-            dirIn /= lenIn;
-            dirOut /= lenOut;
-
-            float2 normalIn = InwardNormal(dirIn, windingSign);
-            float2 normalOut = InwardNormal(dirOut, windingSign);
-
-            // Droite offset "in"  : passe par (prev + normalIn*distance), direction dirIn.
-            // Droite offset "out" : passe par (curr + normalOut*distance), direction dirOut.
-            float2 p1 = prev + normalIn * distance;
-            float2 p2 = curr + normalOut * distance;
-
-            float2 miter;
-            float cross = dirIn.x * dirOut.y - dirIn.y * dirOut.x;
-            if (math.abs(cross) < 1e-4f)
-            {
-                // Droites quasi parallèles (sommet presque aligné, très courant après
-                // densification des arêtes courbes — voir SampleCurve) : pas d'intersection
-                // fiable, la moyenne des deux offsets simples est la meilleure approximation locale.
-                miter = curr + (normalIn + normalOut) * 0.5f * distance;
-            }
-            else
-            {
-                // Intersection des deux droites p1 + t*dirIn = p2 + s*dirOut.
-                float2 diff = p2 - p1;
-                float t = (diff.x * dirOut.y - diff.y * dirOut.x) / cross;
-                miter = p1 + dirIn * t;
-            }
-
-            float miterDist = math.distance(miter, curr);
-            float maxDist = MiterLimit * distance;
-            if (miterDist > maxDist)
-            {
-                // Bug corrigé : recadrer le long de la direction DU POINT DE MITER lui-même
-                // pouvait préserver une direction numériquement instable — sur un périmètre réel
-                // richement échantillonné (densification des arêtes courbes, voir SampleCurve),
-                // un sommet quasiment aligné avec cross juste AU-DESSUS du seuil 1e-4 (donc dans
-                // la branche intersection, pas la branche "quasi parallèle" ci-dessus) fait
-                // diviser par un cross minuscule mais non nul : t explose, le point de miter part
-                // dans une direction quasi arbitraire (pas juste trop loin, carrément dans le
-                // mauvais sens) — observé en jeu comme une grande boucle en dents de scie hors du
-                // périmètre choisi, plusieurs sommets consécutifs touchés d'affilée sur une
-                // section richement échantillonnée. Repli sur la MÊME moyenne de normales que la
-                // branche quasi-parallèle ci-dessus (toujours stable, jamais issue d'une division
-                // par un cross proche de zéro) plutôt que sur la direction du miter brut, que la
-                // limite soit dépassée pour une vraie pointe aiguë OU pour une instabilité
-                // numérique : dans les deux cas, un sommet recadré doit rester géométriquement
-                // raisonnable, jamais hérité d'un calcul qui a déjà dérapé.
-                float2 dir = normalIn + normalOut;
-                if (math.lengthsq(dir) > Epsilon)
-                {
-                    dir = math.normalize(dir);
-                }
-                else
-                {
-                    // normalIn ≈ -normalOut (repli ultime, quasi-demi-tour à ~180°) : aucune
-                    // bissectrice stable n'existe, la normale d'une seule arête reste le choix le
-                    // moins arbitraire.
-                    dir = normalIn;
-                }
-                miter = curr + dir * maxDist;
-                clamped = true;
-            }
-            return miter;
-        }
-
-        /// <summary>Normale unitaire d'une direction d'arête, orientée vers l'intérieur du polygone selon windingSign.</summary>
-        private static float2 InwardNormal(float2 edgeDir, float windingSign)
-        {
-            float2 n = new float2(-edgeDir.y, edgeDir.x);
-            return windingSign >= 0f ? n : -n;
-        }
-
-        /// <summary>
-        /// Détection O(n²) d'auto-intersection entre arêtes NON adjacentes du polygone (les
-        /// paires d'arêtes adjacentes partagent un sommet par construction, donc exclues). n est
-        /// petit (quelques dizaines de sommets au plus pour un périmètre réaliste), le coût est
-        /// négligeable ici — voir OffsetPolygonInward pour pourquoi ce test suffit (pas de
-        /// tentative de scission topologique).
-        /// </summary>
-        private static bool HasSelfIntersection(List<float2> polygon, bool[] clamped = null)
+        private static bool IsPointOnPolygonEdge(float2 point, List<float2> polygon, float tolerance)
         {
             int n = polygon.Count;
             for (int i = 0; i < n; i++)
             {
-                int i2 = (i + 1) % n;
-                // Un sommet clampé (miter limit — voir OffsetVertex) est un "meilleur effort" sur
-                // une cuspide très serrée : le petit repli local que ça peut créer près de lui
-                // n'indique pas un anneau réellement cassé, seulement l'approximation du clamp.
-                // Voir aussi le check "arête retournée" dans OffsetPolygonInward, même principe.
-                if (clamped != null && (clamped[i] || clamped[i2])) continue;
-                float2 a1 = polygon[i];
-                float2 a2 = polygon[i2];
-                for (int j = i + 1; j < n; j++)
+                float2 a = polygon[i];
+                float2 b = polygon[(i + 1) % n];
+                float2 ab = b - a;
+                float lenSq = math.lengthsq(ab);
+                if (lenSq < 1e-6f)
                 {
-                    bool adjacent = j == i + 1 || (i == 0 && j == n - 1);
-                    if (adjacent) continue;
-                    int j2 = (j + 1) % n;
-                    if (clamped != null && (clamped[j] || clamped[j2])) continue;
-
-                    if (SegmentsIntersect(a1, a2, polygon[j], polygon[j2]))
-                        return true;
+                    continue;
+                }
+                float t = math.clamp(math.dot(point - a, ab) / lenSq, 0f, 1f);
+                float2 projected = a + t * ab;
+                if (math.distance(projected, point) < tolerance)
+                {
+                    return true;
                 }
             }
             return false;
         }
 
-        /// <summary>Test d'intersection stricte de deux segments (orientation-based) : ignore les contacts en bout de segment.</summary>
-        private static bool SegmentsIntersect(float2 a1, float2 a2, float2 b1, float2 b2)
+        /// <summary>
+        /// Sens unique en "tourbillon" (super-quarteirão, GridParameters.SuperblockMode) : chaque
+        /// cellule (iu,iv) de la grille [uBounds,vBounds] tourne en rond sur ses 4 bords, dans le
+        /// sens horaire si (iu+iv) est pair, antihoraire sinon — l'alternance garantit qu'un même
+        /// tronçon, TOUJOURS partagé par exactement 2 cellules voisines (ou 1 seule en bord de
+        /// zone), reçoit un sens unique et cohérent des deux côtés (jamais deux cellules voisines
+        /// n'exigent des sens opposés sur leur frontière commune — propriété du damier de parité,
+        /// valable pour toute paire de cellules adjacentes horizontalement OU verticalement).
+        /// Réoriente chaque tronçon filtré par isTarget (échange Start/End au besoin) SANS
+        /// changer sa géométrie : le sens du trafic sur une route à sens unique est déterminé par
+        /// l'ordre Start→End du tronçon, pas par un indicateur séparé (le moteur n'a pas de flag
+        /// "sens unique" — voir CompositionFlags, seul le PREFAB choisi peut être intrinsèquement
+        /// à sens unique, ex. un "Beco"). Appelée à 2 niveaux : la grille fine intérieure d'un
+        /// super-quarteirão (GenerateSuperblockInterior, isTarget=IsPedestrian, uBounds/vBounds
+        /// LOCAUX à CE super-quarteirão — chaque super-quarteirão redémarre sa propre parité).
+        /// Chaque tronçon couvre TOUJOURS exactement un intervalle entre 2 positions consécutives
+        /// de uBounds/vBounds (BuildSubSegments scinde à chaque croisement), donc correspond à
+        /// exactement UNE cellule de chaque côté — pas de cas où un même tronçon devrait
+        /// satisfaire plusieurs cellules à la fois.
+        /// </summary>
+        private static void ApplyOneWaySwirl(List<RoadSegmentDef> segments, List<float> uBounds, List<float> vBounds,
+            float2 origin, float2 uDir, float2 vDir, Func<RoadSegmentDef, bool> isTarget)
         {
-            float d1 = Cross(b2 - b1, a1 - b1);
-            float d2 = Cross(b2 - b1, a2 - b1);
-            float d3 = Cross(a2 - a1, b1 - a1);
-            float d4 = Cross(a2 - a1, b2 - a1);
-            return (d1 > 0f) != (d2 > 0f) && (d3 > 0f) != (d4 > 0f);
+            float2 ToLocal(float3 world) => new float2(math.dot(world.xz - origin, uDir), math.dot(world.xz - origin, vDir));
+
+            for (int i = 0; i < segments.Count; i++)
+            {
+                RoadSegmentDef seg = segments[i];
+                if (!isTarget(seg) || seg.IsArc)
+                {
+                    continue;
+                }
+
+                float2 a = ToLocal(seg.Start);
+                float2 b = ToLocal(seg.End);
+                bool desiredForward;
+                if (seg.IsHorizontal)
+                {
+                    // Ligne à V constant (l'intervalle varie en U) : frontière basse du
+                    // quarteirão (iu,iv) situé EN DESSOUS — bord "haut" de ce quarteirão, sens
+                    // horaire = +u (voir la doc de la classe pour la convention des 4 bords).
+                    int iv = FindExactBoundIndex(vBounds, (a.y + b.y) * 0.5f);
+                    int iu = FindIntervalIndex(uBounds, (a.x + b.x) * 0.5f);
+                    if (iv <= 0 || iv >= vBounds.Count - 1 || iu < 0 || iu >= uBounds.Count - 1)
+                    {
+                        continue; // pas une vraie ligne interne (bord du polygone) : jamais réorienté
+                    }
+                    bool clockwise = ((iu + iv) & 1) == 0;
+                    bool wantsIncreasingU = clockwise;
+                    desiredForward = wantsIncreasingU == (b.x >= a.x);
+                }
+                else
+                {
+                    // Ligne à U constant : bord "gauche" du quarteirão (iu,iv) situé À DROITE,
+                    // sens horaire = -v (bord gauche, voir la doc de la classe).
+                    int iu = FindExactBoundIndex(uBounds, (a.x + b.x) * 0.5f);
+                    int iv = FindIntervalIndex(vBounds, (a.y + b.y) * 0.5f);
+                    if (iu <= 0 || iu >= uBounds.Count - 1 || iv < 0 || iv >= vBounds.Count - 1)
+                    {
+                        continue;
+                    }
+                    bool clockwise = ((iu + iv) & 1) == 0;
+                    bool wantsDecreasingV = clockwise;
+                    desiredForward = wantsDecreasingV == (b.y <= a.y);
+                }
+
+                if (!desiredForward)
+                {
+                    (seg.Start, seg.End) = (seg.End, seg.Start);
+                    segments[i] = seg;
+                }
+            }
         }
 
-        private static float Cross(float2 a, float2 b) => a.x * b.y - a.y * b.x;
+        /// <summary>Indice EXACT (à 0.5 m près) de value dans bounds (triée croissante), ou -1 si aucune correspondance — utilisé par ApplyOneWayCollectorDirections pour repérer la ligne de collectrice elle-même.</summary>
+        private static int FindExactBoundIndex(List<float> bounds, float value)
+        {
+            for (int i = 0; i < bounds.Count; i++)
+            {
+                if (math.abs(bounds[i] - value) < 0.5f)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>Indice i tel que bounds[i] &lt;= value &lt;= bounds[i+1] (avec une marge de 0.5 m), ou -1 — utilisé par ApplyOneWayCollectorDirections pour repérer l'intervalle (quarteirão) couvert par le tronçon.</summary>
+        private static int FindIntervalIndex(List<float> bounds, float value)
+        {
+            for (int i = 0; i + 1 < bounds.Count; i++)
+            {
+                if (value >= bounds[i] - 0.5f && value <= bounds[i + 1] + 0.5f)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
 
         /// <summary>
-        /// Relie les anneaux entre eux par quelques rayons traversants, pour que le résultat ne
-        /// soit pas juste des boucles isolées sans connexion. count sommets du périmètre
-        /// d'origine (rings[0]) sont choisis comme points de départ, espacés le plus
-        /// uniformément possible par LONGUEUR D'ARC (pas par index brut : les arêtes courbes
-        /// déjà densifiées par SampleCurve auraient sinon une part disproportionnée des rayons).
-        ///
-        /// Chaque rayon part avec une direction calculée à ce sommet du périmètre d'origine
-        /// (ComputeRadialDirection, normale entrante moyenne des deux arêtes adjacentes — même
-        /// convention qu'OffsetVertex), PUIS intersecte cette droite avec les arêtes de l'anneau
-        /// suivant (RayPolygonIntersection) plutôt que de chercher le sommet le plus proche.
-        ///
-        /// La direction est ensuite RECALCULÉE à chaque anneau, à partir de la normale de
-        /// l'arête RÉELLEMENT traversée sur l'anneau qu'on vient d'atteindre (LocalInwardNormal)
-        /// — jamais gardée fixe depuis le périmètre d'origine : sur un contour courbe échantillonné,
-        /// la direction perpendiculaire réellement correcte évolue en suivant la courbure locale.
-        ///
-        /// Une borne de distance par pas (MaxRadialStepFactor × l'espacement entre anneaux)
-        /// s'ajoute en garde-fou : au-delà, ni l'intersection ni le repli "plus proche sommet" ne
-        /// sont acceptés — le rayon s'arrête net plutôt que de sauter vers un point aberrant, loin,
-        /// de l'autre côté d'un périmètre très pincé.
-        ///
-        /// Tous les rayons visent toujours le dernier anneau généré (plus de cul-de-sac sur un
-        /// rayon, simplification volontaire) : un rayon qui ne peut plus progresser (anneau trop
-        /// petit pour l'accueillir, ou aucune intersection plausible) s'arrête simplement là où
-        /// il tenait encore, jamais marqué IsCulDeSacEnd.
+        /// Nombre de subdivisions par axe à l'intérieur d'un super-quarteirão (voir
+        /// GenerateSuperblockInterior) — 3×3 = 9 "zones" édificáveis, exactement le modèle réel
+        /// des superilles de Barcelone (capture d'écran fournie par l'utilisateur : quatre
+        /// collectrices délimitent le super-quarteirão, une grille fine de rues piétonnes le
+        /// subdivise en 9 zones à construire — jamais un laço unique).
         /// </summary>
-        private const float MaxRadialStepFactor = 2.5f;
+        private const int SuperblockSubdivisions = 3;
 
-        /// <summary>Pas (m) utilisé pour tester si une direction de rayon calculée pointe vraiment vers l'intérieur du périmètre (voir EmitRadialConnections). Petit et arbitraire : seul le SENS compte, pas la distance.</summary>
-        private const float InwardCheckDistance = 1f;
+        /// <summary>Plancher (m) de GridParameters.SuperblockZoneMeters — sous ce seuil, les zones deviennent trop petites pour être construites.</summary>
+        public const float SuperblockZoneMetersMin = 100f;
 
-        /// <summary>Test point-dans-polygone standard (pair-impair, ray casting) — polygone quelconque, convexe ou non.</summary>
-        internal static bool PointInPolygon(float2 point, List<float2> polygon)
+        /// <summary>
+        /// Découpe [min,max] en zones d'environ zoneMeters réparties également, puis sépare les
+        /// lignes internes en collectrices (une sur SuperblockSubdivisions, voir
+        /// GridParameters.SuperblockMode) et en rues piétonnes.
+        /// </summary>
+        private static void SplitSuperblockLines(float min, float max, float zoneMeters, out List<float> collectors, out List<float> pedestrian)
+        {
+            collectors = new List<float>();
+            pedestrian = new List<float>();
+            float zone = math.max(zoneMeters, SuperblockZoneMetersMin);
+            int zoneCount = math.max(1, (int)math.round((max - min) / zone));
+            List<float> lines = DistributeEvenly(min, max, zoneCount - 1);
+            for (int i = 0; i < lines.Count; i++)
+            {
+                // Index de ligne 1-based : 3, 6, 9... = collectrices.
+                if ((i + 1) % SuperblockSubdivisions == 0)
+                {
+                    collectors.Add(lines[i]);
+                }
+                else
+                {
+                    pedestrian.Add(lines[i]);
+                }
+            }
+        }
+
+        /// <summary>Positions de `positions` strictement comprises dans ]min, max[.</summary>
+        private static List<float> WithinRange(List<float> positions, float min, float max)
+        {
+            var result = new List<float>();
+            foreach (float p in positions)
+            {
+                if (p > min + JoinTolerance && p < max - JoinTolerance)
+                {
+                    result.Add(p);
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Remplit l'intérieur d'UN super-quarteirão [regionMin,regionMax] (délimité par les
+        /// collectrices, voir GenerateLoopGrid/GridParameters.SuperblockMode) d'une VRAIE grille
+        /// fine — SuperblockSubdivisions-1 lignes internes par axe, mêmes primitives que la
+        /// grille de collectrices elle-même (DistributeFixed-like/ClipLineToPolygon/
+        /// BuildSubSegments) — au lieu du laço unique du mode Loop classique. Chaque tronçon émis
+        /// est marqué IsPedestrian (voir RoadSegmentDef) ; jamais de cul-de-sac (retour
+        /// utilisateur : "Não há cul de sac" — la grille fine est par nature entièrement
+        /// connectée, aucune impasse). Sens unique en tourbillon appliqué localement à CETTE
+        /// grille (voir ApplyOneWaySwirl) — chaque super-quarteirão redémarre sa propre parité,
+        /// indépendamment de ses voisins.
+        ///
+        /// Les lignes internes sont clippées contre le VRAI [regionMin,regionMax] du
+        /// super-quarteirão, qu'un côté donné soit une collectrice interne ou le bord du
+        /// polygone choisi par le joueur : ce bord est presque toujours une VRAIE route
+        /// existante en jeu, que MakeCoursePos (règle 2) raccorde automatiquement — retenir les
+        /// lignes en retrait de ce bord (comportement précédent) gaspillait tout le terrain entre
+        /// le vrai périmètre et la 1re collectrice (retour utilisateur : "as estradas pedonais
+        /// também têm que se conectar à estrada que serve de base"). Les extrémités qui NE
+        /// touchent aucune route réelle (cas synthétique sans route au bord, ex. tests) sont
+        /// filtrées après coup par PruneDeadEndPedestrianSegments (qui exempte spécifiquement les
+        /// points sur le vrai périmètre).
+        /// </summary>
+        private static void GenerateSuperblockInterior(List<RoadSegmentDef> segments, List<float2> polygon, float2 regionMin, float2 regionMax,
+            List<float> uPositions, List<float> vPositions,
+            float2 origin, float2 uDir, float2 vDir, float y, GridParameters parameters)
+        {
+            if (uPositions.Count == 0 && vPositions.Count == 0)
+            {
+                return; // super-quarteirão d'une seule zone : rien à subdiviser
+            }
+            float2 center = (regionMin + regionMax) * 0.5f;
+            if (!PointInPolygon(center, polygon))
+            {
+                return; // super-quarteirão entièrement hors zone développable
+            }
+
+            // Les lignes intérieures sont clippées contre la VRAIE bordure du quarteirão
+            // (regionMin/regionMax), pas une bordure rétractée — quand cette bordure coïncide
+            // avec le vrai périmètre choisi par le joueur (le cas normal en jeu : le joueur clique
+            // le long d'une route existante), MakeCoursePos (règle 2) la raccorde automatiquement
+            // à cette route réelle, exactement comme le fait déjà le réseau collecteur. Les
+            // extrémités qui ne touchent aucune route réelle sont filtrées ensuite par
+            // PruneDeadEndPedestrianSegments.
+            var uLines = new List<GridLine>(uPositions.Count);
+            foreach (float u in uPositions)
+            {
+                uLines.Add(new GridLine { Position = u, Intervals = IntersectIntervalsWithRange(ClipLineToPolygon(polygon, axisIsU: true, position: u), regionMin.y, regionMax.y) });
+            }
+            var vLines = new List<GridLine>(vPositions.Count);
+            foreach (float v in vPositions)
+            {
+                vLines.Add(new GridLine { Position = v, Intervals = IntersectIntervalsWithRange(ClipLineToPolygon(polygon, axisIsU: false, position: v), regionMin.x, regionMax.x) });
+            }
+
+            var interior = BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out _, out _);
+            for (int i = 0; i < interior.Count; i++)
+            {
+                RoadSegmentDef seg = interior[i];
+                seg.IsPedestrian = true;
+                interior[i] = seg;
+            }
+
+            var uBoundsLocal = new List<float> { regionMin.x };
+            uBoundsLocal.AddRange(uPositions);
+            uBoundsLocal.Add(regionMax.x);
+            var vBoundsLocal = new List<float> { regionMin.y };
+            vBoundsLocal.AddRange(vPositions);
+            vBoundsLocal.Add(regionMax.y);
+            ApplyOneWaySwirl(interior, uBoundsLocal, vBoundsLocal, origin, uDir, vDir, isTarget: s => s.IsPedestrian);
+
+            segments.AddRange(interior);
+        }
+
+        /// <summary>
+        /// Intersecte une liste d'intervalles (déjà clippés contre le polygone entier, voir
+        /// ClipLineToPolygon) avec [rangeMin, rangeMax] — utilisé par GenerateSuperblockInterior
+        /// pour confiner une ligne interne à SON super-quarteirão, en plus du polygone entier (le
+        /// plus restrictif des deux l'emporte).
+        /// </summary>
+        private static List<float2> IntersectIntervalsWithRange(List<float2> intervals, float rangeMin, float rangeMax)
+        {
+            var result = new List<float2>();
+            foreach (float2 interval in intervals)
+            {
+                float a = math.max(interval.x, rangeMin);
+                float b = math.min(interval.y, rangeMax);
+                if (b - a > MinSegmentLength)
+                {
+                    result.Add(new float2(a, b));
+                }
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Divise chaque tronçon "cible" (isTarget, toujours droit) là où un tronçon "source
+        /// d'ancrage" (isAttachSource) s'y raccorde STRICTEMENT AU MILIEU de son tracé, jamais à
+        /// ses propres extrémités (celles-ci sont déjà de vrais croisements, gérés par
+        /// BuildSubSegments). Utilisé par GenerateLoopGrid pour raccorder collectrice/laço
+        /// (cible=IsAvenue, source=tout le reste) : sans cette post-passe, la collectrice et
+        /// l'embranchement du laço se touchent visuellement mais ne partagent aucun sommet réel
+        /// ("X ne fusiona pas dans Y"). Un point d'ancrage est
+        /// cherché en projetant chaque extrémité Start/End d'un tronçon source sur la ligne de
+        /// CHAQUE tronçon cible (repère t ∈ ]0, 1[ strictement, et distance à la ligne quasi
+        /// nulle — ces points sont calculés pour tomber EXACTEMENT dessus, pas juste "à
+        /// proximité", donc une tolérance large signalerait une vraie coïncidence géométrique,
+        /// pas un faux positif). Plusieurs sources accrochées au même endroit produisent des
+        /// points quasi identiques, dédupliqués via MinSegmentLength.
+        /// </summary>
+        /// <summary>
+        /// Taille de balde (m) pour l'index spatial des points d'ancrage ci-dessous. Retour
+        /// utilisateur en jeu (log de performance) : le modo Loop prenait jusqu'à 350 ms par
+        /// régénération, quasi tout dans cette fonction, appelée PLUSIEURS fois (une fois par
+        /// pâté de maison + une fois globalement, voir GenerateLoopGrid) et comparant TOUS les
+        /// tronçons cibles à TOUS les points d'ancrage — O(cibles × points), même défaut
+        /// structurel que BuildSubSegments (voir SpatialPointIndex). Une taille généreuse (les
+        /// espacements collectrice/artérielle typiques font des dizaines à centaines de mètres)
+        /// garde peu de baldes à visiter par tronçon cible sans réduire les vrais candidats.
+        /// </summary>
+        private const float AttachPointBucketSize = 50f;
+
+        private static List<RoadSegmentDef> SplitSegmentsAtMidSpanAttachPoints(List<RoadSegmentDef> segments,
+            Func<RoadSegmentDef, bool> isTarget, Func<RoadSegmentDef, bool> isAttachSource)
+        {
+            var attachPoints = new List<float3>();
+            foreach (RoadSegmentDef s in segments)
+            {
+                if (isAttachSource(s))
+                {
+                    attachPoints.Add(s.Start);
+                    attachPoints.Add(s.End);
+                }
+            }
+            if (attachPoints.Count == 0)
+            {
+                return segments;
+            }
+
+            // Index spatial par baldes : au lieu de tester TOUS les points d'ancrage contre
+            // CHAQUE tronçon cible, on ne visite que les baldes recouvrant la boîte englobante
+            // du tronçon (marge = tolérance de projection ci-dessous).
+            var buckets = new Dictionary<(int, int), List<float3>>();
+            foreach (float3 p in attachPoints)
+            {
+                var cell = ((int)math.floor(p.x / AttachPointBucketSize), (int)math.floor(p.z / AttachPointBucketSize));
+                if (!buckets.TryGetValue(cell, out List<float3> bucket))
+                {
+                    bucket = new List<float3>();
+                    buckets[cell] = bucket;
+                }
+                bucket.Add(p);
+            }
+
+            var result = new List<RoadSegmentDef>(segments.Count);
+            foreach (RoadSegmentDef target in segments)
+            {
+                if (!isTarget(target) || target.IsArc)
+                {
+                    result.Add(target);
+                    continue;
+                }
+
+                float2 a = target.Start.xz;
+                float2 ab = target.End.xz - a;
+                float lenSq = math.lengthsq(ab);
+                if (lenSq < 1e-4f)
+                {
+                    result.Add(target);
+                    continue;
+                }
+
+                float2 minXz = math.min(target.Start.xz, target.End.xz) - 0.5f;
+                float2 maxXz = math.max(target.Start.xz, target.End.xz) + 0.5f;
+                int cx0 = (int)math.floor(minXz.x / AttachPointBucketSize);
+                int cx1 = (int)math.floor(maxXz.x / AttachPointBucketSize);
+                int cz0 = (int)math.floor(minXz.y / AttachPointBucketSize);
+                int cz1 = (int)math.floor(maxXz.y / AttachPointBucketSize);
+
+                var hits = new List<(float t, float3 point)>();
+                for (int cx = cx0; cx <= cx1; cx++)
+                for (int cz = cz0; cz <= cz1; cz++)
+                {
+                    if (!buckets.TryGetValue((cx, cz), out List<float3> candidates))
+                    {
+                        continue;
+                    }
+                    foreach (float3 candidate in candidates)
+                    {
+                        float2 p = candidate.xz;
+                        float t = math.dot(p - a, ab) / lenSq;
+                        if (t <= 0f || t >= 1f)
+                        {
+                            continue; // à ou au-delà d'une extrémité : jamais un vrai raccord de milieu
+                        }
+                        float2 projected = a + t * ab;
+                        if (math.distance(projected, p) > 0.5f)
+                        {
+                            continue; // pas sur ce tronçon cible
+                        }
+                        // BUG corrigé ici : recalculer le point via math.lerp(target.Start,
+                        // target.End, t) reconstruit une coordonnée INDÉPENDANTE de celle de la
+                        // source (jusqu'à 0.5 m d'écart, la tolérance ci-dessus — jamais garanti
+                        // bit-à-bit identique, même à tolérance nulle, à cause de l'arrondi flottant
+                        // sur deux chemins de calcul différents). Le pipeline ECS en aval
+                        // (GridRoadToolSystem.MakeCoursePos) ne connaît QUE des points réels
+                        // (nœud/arête déjà existants) ou des points "libres" tout neufs — deux
+                        // segments FRAÎCHEMENT générés qui devraient partager LE MÊME nœud neuf n'ont
+                        // aucun autre mécanisme pour se reconnaître comme identiques que la
+                        // coïncidence EXACTE de leur position ; le moteur natif (GenerateNodesSystem)
+                        // fusionne alors deux points quasi identiques mais pas bit-exacts en DEUX
+                        // nœuds tout proches au lieu d'un seul — précisément "Objetos sobrepostos"
+                        // sans jonction, mais entre deux tronçons qu'on a nous-mêmes générés, jamais
+                        // contre une route réelle (donc invisible à tous les diagnostics précédents,
+                        // qui ne testaient que le raccord aux routes déjà existantes). Fix : reprendre
+                        // TEL QUEL le point de la source (candidate), jamais recalculé — garantit une
+                        // coordonnée bit-à-bit identique entre les deux tronçons qui doivent se
+                        // rejoindre.
+                        float3 point = candidate;
+                        if (math.distance(point, target.Start) < MinSegmentLength
+                            || math.distance(point, target.End) < MinSegmentLength)
+                        {
+                            continue; // trop proche d'une extrémité vraie : pièce dégénérée
+                        }
+                        hits.Add((t, point));
+                    }
+                }
+
+                if (hits.Count == 0)
+                {
+                    result.Add(target);
+                    continue;
+                }
+
+                hits.Sort((x, y) => x.t.CompareTo(y.t));
+
+                float3 pieceStart = target.Start;
+                float3 lastAccepted = target.Start;
+                foreach ((float _, float3 point) in hits)
+                {
+                    if (math.distance(point, lastAccepted) < MinSegmentLength)
+                    {
+                        continue; // quasi-doublon (2 sources accrochées au même endroit)
+                    }
+                    result.Add(new RoadSegmentDef(pieceStart, point, target.IsHorizontal, isAvenue: target.IsAvenue));
+                    pieceStart = point;
+                    lastAccepted = point;
+                }
+                result.Add(new RoadSegmentDef(pieceStart, target.End, target.IsHorizontal, isAvenue: target.IsAvenue));
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Émet un laço UNIFORME à coins arrondis fixes pour UN quarteirão [uMin,uMax]x
+        /// [vMin,vMax] — remplace l'ancien EmitLoopBlock (profondeur adaptative par
+        /// échantillonnage du contour réel, voir doc de GenerateLoopGrid pour le pourquoi du
+        /// remplacement). Rectangle inséré symétriquement par une marge fixe (LoopMarginFraction/
+        /// Min/Max) sur les 4 côtés, coins arrondis à rayon fixe (LoopCornerRadiusMax, réduit si
+        /// nécessaire) — AUCUN échantillonnage, AUCUNE dépendance à la forme réelle du polygone
+        /// au-delà d'un test simple "les 4 coins du rectangle sont-ils à l'intérieur ?" (rejette
+        /// tel quel les quarteirões coupés par le bord du périmètre, plutôt que de déformer le
+        /// laço pour les épouser — géométrie toujours valide, jamais dégénérée).
+        ///
+        /// Un seul embranchement relie le laço à la collectrice, sur le côté indiqué par
+        /// connectToMin (vMin ou vMax) ; le cul-de-sac, si activé, part du côté OPPOSÉ (le "fond"
+        /// du laço, le plus loin de la collectrice) et remonte vers le centre.
+        ///
+        /// Réservée au mode Loop classique (jamais appelée quand GridParameters.SuperblockMode
+        /// est vrai — voir GenerateLoopGrid/GenerateSuperblockInterior, une grille fine remplace
+        /// ce laço unique dans ce cas).
+        /// </summary>
+        private static bool EmitSimpleLoopBlock(List<RoadSegmentDef> segments, float uMin, float uMax, float vMin, float vMax,
+            List<float2> polygon, float2 origin, float2 uDir, float2 vDir, float y, bool withCulDeSac, float culDeSacDepth, bool connectToMin)
+        {
+            float width = uMax - uMin;
+            float height = vMax - vMin;
+            float uMargin = math.clamp(width * LoopMarginFraction, LoopMarginMin, LoopMarginMax);
+            float vMargin = math.clamp(height * LoopMarginFraction, LoopMarginMin, LoopMarginMax);
+            if (width < 2f * uMargin + MinSegmentLength || height < 2f * vMargin + MinSegmentLength)
+            {
+                return false; // quarteirão trop petit pour un laço lisible
+            }
+
+            // Les 4 coins du rectangle doivent être à l'intérieur du VRAI polygone (pas juste le
+            // centre du quarteirão) — mais au lieu d'abandonner tout de suite dès que le
+            // rectangle À TAILLE PLEINE déborde (retour utilisateur en jeu : "que fazer com
+            // estes espaços vazios ?", quarteirões de bord entièrement vides sans laço), on
+            // essaie plusieurs tailles DÉCROISSANTES, TOUJOURS centrées sur le même point
+            // (LoopFitScales, 100% -> 40%) : le rectangle rétrécit symétriquement vers le
+            // centre du quarteirão jusqu'à ce que ses 4 coins rentrent, ou jusqu'au plancher
+            // (40% — en dessous, le laço deviendrait un point ridicule, mieux vaut laisser
+            // vide). AUCUN échantillonnage du contour ici (contrairement à l'ancien
+            // EmitLoopBlock) : toujours un simple rectangle, jamais une forme qui épouse le
+            // bord — juste sa TAILLE qui s'adapte, en quelques essais bon marché (4 tests
+            // PointInPolygon par échelle).
+            float centerU = (uMin + uMax) * 0.5f;
+            float centerV = (vMin + vMax) * 0.5f;
+            if (!PointInPolygon(new float2(centerU, centerV), polygon))
+            {
+                return false; // le centre lui-même n'appartient pas à la zone développable
+            }
+
+            float fullHalfWidth = width * 0.5f - uMargin;
+            float fullHalfHeight = height * 0.5f - vMargin;
+
+            float leftU = 0f, rightU = 0f, nearV = 0f, farV = 0f;
+            bool fits = false;
+            foreach (float scale in LoopFitScales)
+            {
+                float halfW = fullHalfWidth * scale;
+                float halfH = fullHalfHeight * scale;
+                float l = centerU - halfW, rr = centerU + halfW, n = centerV - halfH, f = centerV + halfH;
+                if (PointInPolygon(new float2(l, n), polygon) && PointInPolygon(new float2(rr, n), polygon)
+                    && PointInPolygon(new float2(rr, f), polygon) && PointInPolygon(new float2(l, f), polygon))
+                {
+                    leftU = l; rightU = rr; nearV = n; farV = f;
+                    fits = true;
+                    break;
+                }
+            }
+            if (!fits)
+            {
+                return false;
+            }
+
+            withCulDeSac = withCulDeSac && (rightU - leftU) >= MinCulDeSacCellWidth && (farV - nearV) >= MinCulDeSacCellWidth;
+
+            float r = math.min(LoopCornerRadiusMax, math.min(rightU - leftU, farV - nearV) * 0.5f);
+            if (r < 1f)
+            {
+                return false; // quarteirão trop étroit pour arrondir les coins de façon visible
+            }
+
+            // 4 sommets du rectangle inséré (avant arrondi des coins), sens horaire depuis le
+            // coin haut-gauche en U/V local.
+            float2 pTL = new float2(leftU, nearV), pTR = new float2(rightU, nearV);
+            float2 pBR = new float2(rightU, farV), pBL = new float2(leftU, farV);
+
+            // Points de transition droite/arc, un par coin (entrée et sortie de chaque arc).
+            float2 topEnd = new float2(pTR.x - r, pTR.y), rightStart = new float2(pTR.x, pTR.y + r);
+            float2 rightEnd = new float2(pBR.x, pBR.y - r), bottomStart = new float2(pBR.x - r, pBR.y);
+            float2 bottomEnd = new float2(pBL.x + r, pBL.y), leftStart = new float2(pBL.x, pBL.y - r);
+            float2 leftEnd = new float2(pTL.x, pTL.y + r), topStart = new float2(pTL.x + r, pTL.y);
+
+            float3 wU = new float3(uDir.x, 0f, uDir.y);
+            float3 wV = new float3(vDir.x, 0f, vDir.y);
+            float3 ToW(float2 p) => ToWorld(origin, uDir, vDir, p.x, p.y, y);
+
+            void AddStraight(float2 a, float2 b)
+            {
+                float3 wa = ToW(a), wb = ToW(b);
+                if (math.distance(wa, wb) >= MinSegmentLength)
+                {
+                    segments.Add(new RoadSegmentDef(wa, wb, isHorizontal: false));
+                }
+            }
+            void AddArc(float2 a, float2 b, float3 tangentIn, float3 tangentOut)
+            {
+                float3 wa = ToW(a), wb = ToW(b);
+                if (math.distance(wa, wb) >= MinSegmentLength)
+                {
+                    segments.Add(RoadSegmentDef.Arc(wa, wb, tangentIn, tangentOut));
+                }
+            }
+
+            // L'embranchement (toujours présent) touche le côté connectToMin (nearV=top) ou
+            // l'opposé (farV=bottom) EN SON MILIEU (uMid) — le cul-de-sac (si activé) part
+            // TOUJOURS du côté opposé à l'embranchement (le "fond" du laço), également en son
+            // milieu. uMid coupe donc TOUJOURS le côté de l'embranchement en deux, et EN PLUS
+            // le côté du fond si un cul-de-sac y est émis — sans ça, ces branches touchent le
+            // milieu d'un côté du laço sans jamais partager de sommet réel avec lui (retour
+            // utilisateur en jeu : "colisões entre a via que acede ao loop e o loop" — jonction
+            // manquante, exactement le même bug structurel que celui déjà corrigé entre
+            // collectrice et laço, voir SplitSegmentsAtMidSpanAttachPoints). Découper
+            // INCONDITIONNELLEMENT (au lieu de vérifier d'abord que les 2 moitiés dépassent
+            // MinSegmentLength) : AddStraight rejette déjà silencieusement une moitié trop
+            // courte tout en gardant l'autre — le sommet de jonction (uMid, ce côté) reste un
+            // sommet RÉEL de la moitié survivante dans tous les cas, jamais besoin d'un
+            // fallback "jonction approximative".
+            float uMid = (leftU + rightU) * 0.5f;
+            bool connectorOnTopSide = connectToMin;
+            bool spurOnTopSide = !connectToMin;
+            bool splitTop = connectorOnTopSide || (withCulDeSac && spurOnTopSide);
+            bool splitBottom = !connectorOnTopSide || (withCulDeSac && !spurOnTopSide);
+            bool emitSpur = withCulDeSac;
+
+            // Périmètre complet du laço, sens horaire : 4 côtés droits (top/bottom coupés en 2
+            // au besoin, voir ci-dessus) + 4 coins arrondis.
+            if (splitTop)
+            {
+                AddStraight(topStart, new float2(uMid, topStart.y));
+                AddStraight(new float2(uMid, topStart.y), topEnd);
+            }
+            else
+            {
+                AddStraight(topStart, topEnd);
+            }
+            AddArc(topEnd, rightStart, wU, wV);
+            AddStraight(rightStart, rightEnd);
+            AddArc(rightEnd, bottomStart, wV, -wU);
+            if (splitBottom)
+            {
+                AddStraight(bottomStart, new float2(uMid, bottomStart.y));
+                AddStraight(new float2(uMid, bottomStart.y), bottomEnd);
+            }
+            else
+            {
+                AddStraight(bottomStart, bottomEnd);
+            }
+            AddArc(bottomEnd, leftStart, -wU, -wV);
+            AddStraight(leftStart, leftEnd);
+            AddArc(leftEnd, topStart, -wV, wU);
+
+            // Embranchement unique vers la collectrice, sur le côté connectToMin (vMin) ou
+            // l'opposé (vMax) — point milieu du côté choisi (uMid, désormais un VRAI sommet
+            // partagé, voir ci-dessus) jusqu'à la ligne de collectrice réelle (bord du
+            // quarteirão AVANT la marge, voir SplitSegmentsAtMidSpanAttachPoints pour le
+            // raccord côté collectrice).
+            float connectorNearV = connectToMin ? nearV : farV;
+            float connectorFarV = connectToMin ? vMin : vMax;
+            AddStraight(new float2(uMid, connectorFarV), new float2(uMid, connectorNearV));
+
+            // Cul-de-sac : part du sommet exact où le côté "fond" a été coupé (uMid, ce côté)
+            // et remonte vers le centre — spurLength = fraction culDeSacDepth de la profondeur
+            // totale du laço, même convention que le reste du mod (CulDeSacDepthUiToReal/
+            // GridGenerator ligne classique, plafonné à 0.5-0.8).
+            if (emitSpur)
+            {
+                float farSideV = spurOnTopSide ? nearV : farV;
+                float depth = math.abs(farV - nearV);
+                float spurLength = depth * math.clamp(culDeSacDepth, 0.5f, 0.8f);
+                float spurSign = spurOnTopSide ? 1f : -1f;
+                float2 spurStart = new float2(uMid, farSideV);
+                float2 spurEnd = new float2(uMid, farSideV + spurSign * spurLength);
+                float3 wStart = ToW(spurStart), wEnd = ToW(spurEnd);
+                if (math.distance(wStart, wEnd) >= MinSegmentLength)
+                {
+                    segments.Add(new RoadSegmentDef(wStart, wEnd, isHorizontal: false, isCulDeSacEnd: true));
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Vrai si point (coordonnées locales) est intérieur à polygon (règle pair-impair, ray casting horizontal). Utilisé pour valider qu'un super-îlot Loop est entièrement à l'intérieur du périmètre.</summary>
+        private static bool PointInPolygon(float2 point, List<float2> polygon)
         {
             bool inside = false;
             int n = polygon.Count;
@@ -1404,297 +1961,19 @@ namespace GridRoadGenerator.Core
             {
                 float2 a = polygon[i];
                 float2 b = polygon[j];
-                if ((a.y > point.y) != (b.y > point.y) &&
-                    point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x)
+                bool crosses = (a.y > point.y) != (b.y > point.y);
+                if (crosses)
                 {
-                    inside = !inside;
+                    float t = (point.y - a.y) / (b.y - a.y);
+                    float xCross = a.x + t * (b.x - a.x);
+                    if (point.x < xCross)
+                    {
+                        inside = !inside;
+                    }
                 }
             }
             return inside;
         }
 
-        /// <summary>
-        /// Émet les rayons anneau par anneau (pas rayon par rayon) : nécessaire pour connaître,
-        /// à chaque anneau, le nombre de rayons encore actifs AVANT de les faire avancer, afin de
-        /// réduire ce nombre si l'anneau est trop petit pour tous les accueillir à
-        /// MinNodeDistance les uns des autres (voir RingPerimeter/SelectEvenlySpacedIndices ci-
-        /// dessous). Chaque rayon accumule ses segments dans son propre buffer, concaténés à
-        /// `segments` dans l'ordre d'origine à la fin — pour que les segments d'un même rayon
-        /// restent consécutifs dans la liste, comme avant cette réécriture (des appelants/tests
-        /// s'y fient pour détecter les "chaînes" d'un même rayon).
-        /// </summary>
-        private static void EmitRadialConnections(List<RoadSegmentDef> segments, List<List<float2>> rings, int count, float y, float spacingMeters)
-        {
-            List<float2> perimeter = rings[0];
-            int n = perimeter.Count;
-            if (n == 0) return;
-
-            var cumulative = new float[n + 1];
-            for (int i = 0; i < n; i++)
-                cumulative[i + 1] = cumulative[i] + math.distance(perimeter[i], perimeter[(i + 1) % n]);
-            float totalLength = cumulative[n];
-            if (totalLength < Epsilon) return;
-
-            var chosenIndices = new List<int>();
-            var seen = new HashSet<int>();
-            int actualCount = math.min(count, n);
-            for (int k = 0; k < actualCount; k++)
-            {
-                float target = totalLength * k / actualCount;
-                int bestIndex = 0;
-                float bestDist = float.MaxValue;
-                for (int i = 0; i < n; i++)
-                {
-                    float d = math.abs(cumulative[i] - target);
-                    if (d < bestDist) { bestDist = d; bestIndex = i; }
-                }
-                if (seen.Add(bestIndex)) chosenIndices.Add(bestIndex);
-            }
-
-            float windingSign = math.sign(SignedArea(perimeter));
-            int radialCount = chosenIndices.Count;
-
-            // État par rayon, indexé comme chosenIndices (ordre préservé jusqu'à l'émission finale).
-            var current = new float2[radialCount];
-            var direction = new float2[radialCount];
-            var alive = new bool[radialCount];
-            var buffers = new List<RoadSegmentDef>[radialCount];
-
-            for (int k = 0; k < radialCount; k++)
-            {
-                buffers[k] = new List<RoadSegmentDef>();
-                int index = chosenIndices[k];
-
-                float2 origin = perimeter[index];
-                float2 dir = ComputeRadialDirection(
-                    origin - perimeter[(index - 1 + n) % n],
-                    perimeter[(index + 1) % n] - origin,
-                    windingSign);
-                current[k] = origin;
-                direction[k] = dir;
-                // Sommet dégénéré (arêtes adjacentes nulles) ou direction qui pointe vers
-                // l'EXTÉRIEUR du périmètre (sommet "en pointe", deux arêtes adjacentes presque
-                // opposées) : pas de rayon plutôt qu'un rayon aberrant — rien ne doit sortir du
-                // périmètre choisi, c'est justement l'intérêt du mod. Vérifié en avançant d'un
-                // petit pas le long de la direction calculée.
-                bool directionIsInward = math.lengthsq(dir) >= Epsilon
-                    && PointInPolygon(origin + math.normalize(dir) * InwardCheckDistance, perimeter);
-                alive[k] = directionIsInward;
-            }
-
-            float maxStepDistance = spacingMeters * MaxRadialStepFactor;
-
-            for (int r = 1; r < rings.Count; r++)
-            {
-                var activeIndices = new List<int>();
-                for (int k = 0; k < radialCount; k++)
-                {
-                    if (alive[k]) activeIndices.Add(k);
-                }
-                if (activeIndices.Count == 0) continue;
-
-                int capacity = math.max(0, (int)math.floor(RingPerimeter(rings[r]) / MinNodeDistance));
-                List<int> survivors = activeIndices.Count > capacity
-                    ? SelectEvenlySpacedIndices(activeIndices, capacity)
-                    : activeIndices;
-
-                if (survivors.Count < activeIndices.Count)
-                {
-                    var survivorSet = new HashSet<int>(survivors);
-                    foreach (int k in activeIndices)
-                    {
-                        if (!survivorSet.Contains(k)) alive[k] = false;
-                    }
-                }
-
-                // Fusion locale entre rayons survivants SUR CET ANNEAU seulement (jamais globale,
-                // jamais contre les propres sommets de l'anneau) : si deux rayons distincts atterrissent à moins de
-                // MinNodeDistance l'un de l'autre malgré la réduction de capacité ci-dessus (peut
-                // arriver sur un anneau non convexe), le second réutilise le point exact du
-                // premier plutôt qu'un quasi-doublon (même principe "Super nó" que BuildSubSegments
-                // pour la grille classique).
-                var acceptedThisRing = new List<float2>();
-                foreach (int k in survivors)
-                {
-                    (float2 point, int edgeIndex)? hit = RayPolygonIntersection(current[k], direction[k], rings[r], maxStepDistance);
-                    float2? candidate = hit?.point;
-                    if (candidate == null)
-                    {
-                        float2 nearest = NearestPoint(rings[r], current[k]);
-                        if (math.distance(current[k], nearest) <= maxStepDistance)
-                            candidate = nearest;
-                    }
-                    if (candidate == null)
-                    {
-                        // Ni intersection ni plus proche voisin plausibles à cette distance :
-                        // mieux vaut arrêter le rayon ici (comme un cul-de-sac naturel) que de
-                        // le faire sauter vers un point aberrant, loin, de l'autre côté d'un
-                        // périmètre pincé.
-                        alive[k] = false;
-                        continue;
-                    }
-
-                    float2 next = candidate.Value;
-
-                    // Garde-fou : la corde current->next ne doit jamais sortir du périmètre
-                    // d'origine. Un segment droit entre deux points par ailleurs valides PEUT
-                    // couper à travers une encoche d'un contour concave — vérifié via le MILIEU
-                    // de la corde (moins cher qu'un vrai test d'intersection segment/polygone, et
-                    // suffisant en pratique : une encoche trop fine pour être détectée ainsi est,
-                    // par construction, plus étroite que MinSegmentLength). Même traitement que
-                    // "ni intersection ni plus proche voisin plausibles" ci-dessus : le rayon
-                    // s'arrête ici plutôt que de s'échapper hors du périmètre choisi.
-                    if (!PointInPolygon((current[k] + next) * 0.5f, perimeter))
-                    {
-                        alive[k] = false;
-                        continue;
-                    }
-
-                    for (int a = 0; a < acceptedThisRing.Count; a++)
-                    {
-                        if (math.distance(next, acceptedThisRing[a]) < MinNodeDistance)
-                        {
-                            next = acceptedThisRing[a];
-                            break;
-                        }
-                    }
-                    acceptedThisRing.Add(next);
-
-                    if (math.distance(current[k], next) >= MinSegmentLength)
-                    {
-                        buffers[k].Add(new RoadSegmentDef(new float3(current[k].x, y, current[k].y), new float3(next.x, y, next.y),
-                            isHorizontal: false, isCulDeSacEnd: false, isRadial: true));
-                    }
-                    current[k] = next;
-
-                    // Recalcule la direction pour le PROCHAIN pas à partir de l'arête locale de
-                    // l'anneau qu'on vient d'atteindre — jamais gardée fixe depuis le périmètre
-                    // d'origine (voir la doc d'EmitRadialConnections). En repli NearestPoint (pas
-                    // d'edgeIndex fiable), garde la direction précédente plutôt que d'en perdre la trace.
-                    if (hit.HasValue)
-                    {
-                        float2 localDirection = LocalInwardNormal(rings[r], hit.Value.edgeIndex, windingSign);
-                        if (math.lengthsq(localDirection) > Epsilon)
-                            direction[k] = localDirection;
-                    }
-                }
-            }
-
-            for (int k = 0; k < radialCount; k++)
-                segments.AddRange(buffers[k]);
-        }
-
-        /// <summary>Somme des longueurs d'arête d'un anneau fermé (voir EmitRadialConnections).</summary>
-        internal static float RingPerimeter(List<float2> ring)
-        {
-            float total = 0f;
-            int count = ring.Count;
-            for (int i = 0; i < count; i++)
-                total += math.distance(ring[i], ring[(i + 1) % count]);
-            return total;
-        }
-
-        /// <summary>
-        /// Sous-ensemble de keepCount éléments de activeIndices, uniformément espacés (indices
-        /// gardés dans leur ordre d'origine, donc dans l'ordre du périmètre extérieur) — préserve
-        /// la répartition angulaire des rayons survivants plutôt que de garder arbitrairement les
-        /// keepCount premiers. Suppose keepCount &lt;= activeIndices.Count (jamais appelé sinon).
-        /// </summary>
-        internal static List<int> SelectEvenlySpacedIndices(List<int> activeIndices, int keepCount)
-        {
-            var result = new List<int>(keepCount);
-            if (keepCount <= 0) return result;
-            int total = activeIndices.Count;
-            for (int i = 0; i < keepCount; i++)
-            {
-                int pos = (int)((long)i * total / keepCount);
-                result.Add(activeIndices[pos]);
-            }
-            return result;
-        }
-
-        /// <summary>
-        /// Direction radiale à un sommet du périmètre d'origine : normale entrante moyenne des
-        /// deux arêtes adjacentes (dirIn/dirOut, non normalisées), même convention que
-        /// InwardNormal/OffsetVertex — mais sans jonction miter à préserver, un rayon n'a besoin
-        /// que d'une direction, pas d'un point de jonction exact. float2.zero (sentinelle,
-        /// testée par l'appelant via lengthsq) si les deux arêtes sont dégénérées.
-        /// </summary>
-        private static float2 ComputeRadialDirection(float2 dirIn, float2 dirOut, float windingSign)
-        {
-            float lenIn = math.length(dirIn);
-            float lenOut = math.length(dirOut);
-            if (lenIn < Epsilon && lenOut < Epsilon) return float2.zero;
-            if (lenIn < Epsilon) return InwardNormal(dirOut / lenOut, windingSign);
-            if (lenOut < Epsilon) return InwardNormal(dirIn / lenIn, windingSign);
-
-            float2 normalIn = InwardNormal(dirIn / lenIn, windingSign);
-            float2 normalOut = InwardNormal(dirOut / lenOut, windingSign);
-            float2 avg = normalIn + normalOut;
-            return math.lengthsq(avg) > Epsilon ? math.normalize(avg) : normalIn;
-        }
-
-        /// <summary>
-        /// Premier point d'intersection de la demi-droite (origin, direction) avec les arêtes de
-        /// ring, en avançant (t > 0 strictement, marge pour ignorer l'arête sur laquelle origin
-        /// repose déjà) ET jusqu'à maxDistance seulement — au-delà, l'intersection n'est pas
-        /// géométriquement plausible pour un simple pas d'un anneau au suivant (voir
-        /// MaxRadialStepFactor/EmitRadialConnections). Retourne null si aucune arête n'est
-        /// traversée dans cette limite : l'appelant se replie alors sur NearestPoint (avec la
-        /// même borne) plutôt que d'abandonner le rayon entier. edgeIndex (l'arête réellement
-        /// traversée) sert à recalculer la direction du pas suivant à partir de la géométrie
-        /// locale de CET anneau — voir LocalInwardNormal/EmitRadialConnections.
-        /// </summary>
-        private static (float2 point, int edgeIndex)? RayPolygonIntersection(float2 origin, float2 direction, List<float2> ring, float maxDistance)
-        {
-            int n = ring.Count;
-            float bestT = maxDistance;
-            (float2 point, int edgeIndex)? best = null;
-            for (int i = 0; i < n; i++)
-            {
-                float2 a = ring[i];
-                float2 b = ring[(i + 1) % n];
-                float2 edge = b - a;
-                float denom = Cross(direction, edge);
-                if (math.abs(denom) < 1e-6f) continue; // rayon parallèle à cette arête
-
-                float2 diff = a - origin;
-                float t = Cross(diff, edge) / denom;
-                float u = Cross(diff, direction) / denom;
-                const float uMargin = 1e-3f;
-                if (t > 1e-3f && u >= -uMargin && u <= 1f + uMargin && t < bestT)
-                {
-                    bestT = t;
-                    best = (origin + direction * t, i);
-                }
-            }
-            return best;
-        }
-
-        /// <summary>Normale entrante de l'arête [ring[edgeIndex], ring[edgeIndex+1]] — direction locale réelle de cet anneau à ce point, voir EmitRadialConnections.</summary>
-        private static float2 LocalInwardNormal(List<float2> ring, int edgeIndex, float windingSign)
-        {
-            int n = ring.Count;
-            float2 edge = ring[(edgeIndex + 1) % n] - ring[edgeIndex];
-            float len = math.length(edge);
-            return len > Epsilon ? InwardNormal(edge / len, windingSign) : float2.zero;
-        }
-
-        /// <summary>Sommet de ring le plus proche de target (recherche linéaire, ring reste petit) — repli de RayPolygonIntersection.</summary>
-        private static float2 NearestPoint(List<float2> ring, float2 target)
-        {
-            float2 best = ring[0];
-            float bestDist = math.distance(ring[0], target);
-            for (int i = 1; i < ring.Count; i++)
-            {
-                float d = math.distance(ring[i], target);
-                if (d < bestDist)
-                {
-                    bestDist = d;
-                    best = ring[i];
-                }
-            }
-            return best;
-        }
     }
 }

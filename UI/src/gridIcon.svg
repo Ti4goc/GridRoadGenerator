@@ -1,10 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Grille de routes : 2 lignes verticales × 2 horizontales, style glyphe du jeu
-       (traits blancs arrondis sur fond transparent). -->
-  <g fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round">
-    <path d="M23 8 V56"/>
-    <path d="M41 8 V56"/>
-    <path d="M8 23 H56"/>
-    <path d="M8 41 H56"/>
+  <!-- Icône du mod : l'ensemble des motifs réunis dans un périmètre choisi — collectrice
+       centrale (trait épais), grille à gauche, laço à droite. Style glyphe du jeu (traits
+       blancs arrondis sur fond transparent). -->
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Périmètre sélectionné -->
+    <rect x="6" y="6" width="52" height="52" rx="9" stroke-width="4"/>
+    <!-- Collectrice -->
+    <path d="M32 6 V58" stroke-width="6"/>
+    <!-- Grille -->
+    <path d="M6 24 H32 M6 40 H32 M19 6 V58" stroke-width="3"/>
+    <!-- Laço raccordé à la collectrice -->
+    <path d="M32 32 H38" stroke-width="3"/>
+    <rect x="38" y="18" width="12" height="28" rx="6" stroke-width="3"/>
   </g>
 </svg>
