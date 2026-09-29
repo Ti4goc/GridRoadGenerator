@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Misto : centre radial (rotonde, avenues, cercle) et rues sinueuses autour. -->
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="5.2" stroke-width="2"/>
+    <circle cx="12" cy="12" r="1.4" stroke-width="1.4"/>
+    <path d="M12 10.6 V6.8 M12 13.4 V17.2 M10.6 12 H6.8 M13.4 12 H17.2" stroke-width="1.6"/>
+    <path d="M17.2 12 C19 11 20 9 21.5 8 M6.8 12 C5 13 4 15 2.5 16 M12 6.8 C11 5 9 4 8 2.5 M12 17.2 C13 19 15 20 16 21.5" stroke-width="1.2"/>
+  </g>
+</svg>

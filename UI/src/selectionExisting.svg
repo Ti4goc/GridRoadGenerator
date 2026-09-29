@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Perímetro existente : anneau de routes déjà construites, nœuds cliqués (points pleins). -->
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 6 L18 4 L21 15 L10 20 L3 15 Z" stroke-width="2.4"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="4" cy="6" r="2.1"/>
+    <circle cx="18" cy="4" r="2.1"/>
+    <circle cx="21" cy="15" r="2.1"/>
+    <circle cx="10" cy="20" r="2.1"/>
+    <circle cx="3" cy="15" r="2.1"/>
+  </g>
+</svg>

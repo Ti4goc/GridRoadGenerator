@@ -11,7 +11,10 @@
     // tsx/Panel) n'a pas de padding-top propre sur sa zone de contenu, contrairement au panneau
     // custom historique (bug rapporté en jeu : "Vista" collée au sommet du panneau).
     padding: 10rem 12rem 10rem;
-    border-bottom: 1rem solid #1e83aa59; // accent (même teinte que le jeu, --selectedColor), atténué
+    // Même séparateur que les sections des panneaux d'info du jeu (voir .foldoutHeader).
+    border-bottom-style: solid;
+    border-bottom-width: var(--stroke2);
+    border-bottom-color: var(--dividerColor);
     margin-bottom: 12rem;
 }
 

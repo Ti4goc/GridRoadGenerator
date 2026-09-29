@@ -1919,5 +1919,37 @@ namespace GridRoadGenerator.Tests
                 $"GenerateLoopGrid a pris {stopwatch.ElapsedMilliseconds}ms pour ~49 pâtés de maison sur 2000x2000m " +
                 $"({segments.Count} segments) — régression probable dans SplitSegmentsAtMidSpanAttachPoints.");
         }
+
+    public class GridAlignToTerrainTests
+    {
+        [Fact]
+        public void AlignedGrid_HasStreetsAlongTheContours()
+        {
+            // Pente de 10 % vers le nord-est (45°) : les courbes de niveau vont nord-ouest ↔ sud-est.
+            var square = new List<float3> { new float3(0, 0, 0), new float3(800, 0, 0), new float3(800, 0, 800), new float3(0, 0, 800) };
+            GridParameters p = GridParameters.Default;
+            p.HeightAt = q => 0.1f * (q.x + q.y) / math.SQRT2;
+            p.AlignToTerrain = true;
+            var segments = GridGenerator.GenerateGrid(square, p);
+            Assert.NotEmpty(segments);
+            float2 contour = math.normalize(new float2(1f, -1f));
+            int along = segments.Count(s => math.abs(math.dot(math.normalizesafe(s.End.xz - s.Start.xz), contour)) > 0.99f);
+            int across = segments.Count(s => math.abs(math.dot(math.normalizesafe(s.End.xz - s.Start.xz), contour)) < 0.01f);
+            Assert.True(along > 0 && along + across == segments.Count, $"{along} le long, {across} en travers sur {segments.Count}");
+        }
+
+        [Fact]
+        public void FlatArea_KeepsTheUsualOrientation()
+        {
+            var square = new List<float3> { new float3(0, 0, 0), new float3(800, 0, 0), new float3(800, 0, 800), new float3(0, 0, 800) };
+            GridParameters p = GridParameters.Default;
+            p.HeightAt = q => 5f;
+            p.AlignToTerrain = true;
+            var aligned = GridGenerator.GenerateGrid(square, p);
+            p.AlignToTerrain = false;
+            var usual = GridGenerator.GenerateGrid(square, p);
+            Assert.Equal(usual.Count, aligned.Count);
+        }
+    }
     }
 }

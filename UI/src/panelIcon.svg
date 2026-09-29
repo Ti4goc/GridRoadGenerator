@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Icône du panneau (en-tête), style des icônes isométriques du jeu (Media/Game/Icons :
+       Landscaping, Roads, ZoneResidential) : terrain en relwa, route du périmètre, grille de
+       rues avec collectrice à ligne jaune, maisons et arbres dans les îlots. Généré par un
+       script (projection isométrique exacte). La barre d'outils garde gridIcon.svg. -->
+  <polygon points="2.00,26.00 32.00,41.00 32.00,48.00 2.00,33.00" fill="#509B55"/>
+  <polygon points="32.00,41.00 62.00,26.00 62.00,33.00 32.00,48.00" fill="#47825E"/>
+  <polygon points="2.00,26.00 32.00,41.00 32.00,43.20 2.00,28.20" fill="#434343"/>
+  <polygon points="32.00,41.00 62.00,26.00 62.00,28.20 32.00,43.20" fill="#434343"/>
+  <polygon points="32.00,11.00 62.00,26.00 32.00,41.00 2.00,26.00" fill="#72BA51"/>
+  <polygon points="32.00,11.00 62.00,26.00 58.25,27.88 28.25,12.88" fill="#808080"/>
+  <polygon points="5.75,24.12 35.75,39.12 32.00,41.00 2.00,26.00" fill="#808080"/>
+  <polygon points="32.00,11.00 35.75,12.88 5.75,27.88 2.00,26.00" fill="#808080"/>
+  <polygon points="58.25,24.12 62.00,26.00 32.00,41.00 28.25,39.12" fill="#808080"/>
+  <polygon points="18.88,17.56 48.88,32.56 45.12,34.44 15.12,19.44" fill="#808080"/>
+  <polygon points="45.12,17.56 48.88,19.44 18.88,34.44 15.12,32.56" fill="#808080"/>
+  <polygon points="41.45,20.98 42.05,21.27 40.25,22.17 39.65,21.88" fill="#E3B400"/>
+  <polygon points="38.45,22.48 39.05,22.77 37.25,23.67 36.65,23.38" fill="#E3B400"/>
+  <polygon points="26.45,28.48 27.05,28.77 25.25,29.67 24.65,29.38" fill="#E3B400"/>
+  <polygon points="23.45,29.98 24.05,30.27 22.25,31.17 21.65,30.88" fill="#E3B400"/>
+  <polygon points="20.45,31.48 21.05,31.77 19.25,32.67 18.65,32.38" fill="#E3B400"/>
+  <polygon points="22.92,21.16 24.57,21.99 23.98,22.29 22.33,21.46" fill="#D4D4D4"/>
+  <polygon points="25.92,22.66 27.57,23.49 26.98,23.79 25.33,22.96" fill="#D4D4D4"/>
+  <polygon points="37.17,28.29 38.82,29.11 38.23,29.41 36.58,28.59" fill="#D4D4D4"/>
+  <polygon points="40.17,29.79 41.83,30.61 41.23,30.91 39.58,30.09" fill="#D4D4D4"/>
+  <polygon points="26.90,19.44 32.00,21.99 32.00,15.49 26.90,12.94" fill="#E9E4D6"/>
+  <polygon points="32.00,21.99 37.10,19.44 37.10,12.94 32.00,15.49" fill="#C4BCA8"/>
+  <polygon points="32.00,10.39 37.10,12.94 32.00,15.49 26.90,12.94" fill="#D9763B"/>
+  <rect x="44.42" y="23.00" width="1.4" height="3" fill="#755330"/>
+  <ellipse cx="45.12" cy="20.50" rx="3.6" ry="3.8" fill="#47825E"/>
+  <ellipse cx="44.52" cy="19.80" rx="2.6" ry="2.8" fill="#7BCA56"/>
+  <rect x="18.18" y="23.00" width="1.4" height="3" fill="#755330"/>
+  <ellipse cx="18.88" cy="20.50" rx="3.6" ry="3.8" fill="#47825E"/>
+  <ellipse cx="18.27" cy="19.80" rx="2.6" ry="2.8" fill="#7BCA56"/>
+  <polygon points="26.90,32.56 32.00,35.11 32.00,28.61 26.90,26.06" fill="#E9E4D6"/>
+  <polygon points="32.00,35.11 37.10,32.56 37.10,26.06 32.00,28.61" fill="#C4BCA8"/>
+  <polygon points="32.00,23.51 37.10,26.06 32.00,28.61 26.90,26.06" fill="#D9763B"/>
+</svg>

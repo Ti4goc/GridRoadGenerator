@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Relevo : rues de niveau concentriques autour d'une colline (courbes de niveau) et une
+       montée (trait épais) qui les relie. -->
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 17 C5 9 19 8 21 16" stroke-width="1.6"/>
+    <path d="M6.5 16.5 C8 11.5 16 11 17.5 16" stroke-width="1.6"/>
+    <path d="M10 16 C10.8 13.8 13.2 13.8 14 16" stroke-width="1.6"/>
+    <path d="M2 20.5 H22" stroke-width="1.6"/>
+    <path d="M12 20.5 V14.3" stroke-width="2.6"/>
+  </g>
+</svg>

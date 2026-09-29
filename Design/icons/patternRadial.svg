@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Radial : rotonde au centre, anneaux circulaires autour d'elle et avenues droites jusqu'au périmètre. -->
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9.5" stroke-width="2"/>
+    <circle cx="12" cy="12" r="2.6" stroke-width="1.8"/>
+    <circle cx="12" cy="12" r="6" stroke-width="1.2"/>
+    <path d="M12 2.5 V9.4 M12 14.6 V21.5 M2.5 12 H9.4 M14.6 12 H21.5 M5.3 5.3 L10.2 10.2 M13.8 13.8 L18.7 18.7 M18.7 5.3 L13.8 10.2 M10.2 13.8 L5.3 18.7" stroke-width="1.6"/>
+  </g>
+</svg>

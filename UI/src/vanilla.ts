@@ -59,9 +59,35 @@ const modulePaths: ModulePath[] = [
         path: "game-ui/game/components/selected-info-panel/shared-components/info-row/info-row.tsx",
         components: ["InfoRow"],
     },
+    {
+        // Slider natif du jeu (menus Options, outils) : même piste, curseur, sons et
+        // comportement de glisser que partout ailleurs dans le jeu (demande utilisateur).
+        path: "game-ui/common/input/slider/slider.tsx",
+        components: ["Slider"],
+    },
+    {
+        // Case à cocher native du jeu (carré des menus Options), à la place de l'interrupteur custom.
+        path: "game-ui/common/input/toggle/checkbox/checkbox.tsx",
+        components: ["Checkbox"],
+    },
+    {
+        // Bulle d'aide native (survol) : même composant que les infobulles des outils du jeu.
+        path: "game-ui/common/tooltip/tooltip.tsx",
+        components: ["Tooltip"],
+    },
 ];
 
 const themePaths: ThemePath[] = [
+    {
+        // Lignes des infoviews : leur case à cocher (18rem, bord atténué) sert de modèle.
+        path: "game-ui/game/components/infoviews/active-infoview-panel/components/infomode-item/infomode-item.module.scss",
+        name: "infomodeItem",
+    },
+    {
+        // Mise en forme titre + description des infobulles d'outils du jeu (DescriptionTooltip).
+        path: "game-ui/common/tooltip/description-tooltip/description-tooltip.module.scss",
+        name: "descriptionTooltip",
+    },
     {
         path: "game-ui/game/components/tool-options/tool-button/tool-button.module.scss",
         name: "toolButton",

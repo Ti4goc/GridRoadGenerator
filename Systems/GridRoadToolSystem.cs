@@ -170,7 +170,11 @@ namespace GridRoadGenerator.Systems
         /// GridRoadUISystem.MarkSettingsDirty() (tout SET_* du panneau) et directement par
         /// SetRoadPrefab/SetSecondaryRoadPrefab/SetAvenueRoadPrefab ci-dessous.
         /// </summary>
-        public void MarkPreviewDirty() => _previewDirty = true;
+        public void MarkPreviewDirty()
+        {
+            _previewDirty = true;
+            _settingsVersion++; // un réglage a changé : pas d'historique (voir UpdateHistory)
+        }
 
         // ------------------------------------------------------------------
         // Aperçu léger par défaut en mode Loop (retour utilisateur en jeu, suite au correctif
@@ -201,6 +205,9 @@ namespace GridRoadGenerator.Systems
         /// sans télémétrie native, donc marge large plutôt que deviner au plus juste.
         /// </summary>
         private const int ConfirmMaterializeFrames = 6;
+
+        /// <summary>Attente maximale (frames) de la validation native quand des erreurs restent affichées — voir _confirming.</summary>
+        private const int ConfirmMaxFrames = 45;
 
         /// <summary>
         /// Vrai entre la 1ʳᵉ pression de "Générer" (en mode Loop, aperçu jusque-là en croquis
@@ -293,12 +300,12 @@ namespace GridRoadGenerator.Systems
         {
             get
             {
-                if (_selectedPositions.Count < 3)
+                if (ActivePositions.Count < 3)
                 {
                     _maxLayersPositions.Clear();
                     return ConcentricGenerator.MaxLayersLimit;
                 }
-                if (!PositionsEqual(_selectedPositions, _maxLayersPositions))
+                if (!PositionsEqual(ActivePositions, _maxLayersPositions))
                 {
                     try
                     {
@@ -310,11 +317,143 @@ namespace GridRoadGenerator.Systems
                         _concentricMaxLayers = ConcentricGenerator.MaxLayersLimit;
                     }
                     _maxLayersPositions.Clear();
-                    _maxLayersPositions.AddRange(_selectedPositions);
+                    _maxLayersPositions.AddRange(ActivePositions);
                 }
                 return _concentricMaxLayers;
             }
         }
+        private readonly List<float3> _radialMaxLayersPositions = new List<float3>();
+        private (int avenues, float radius) _radialMaxLayersSettings;
+        private int _radialMaxLayers = ConcentricGenerator.MaxLayersLimit;
+
+        /// <summary>
+        /// Nombre maximal d'anneaux du motif Radial pour la sélection et les réglages actuels (voir
+        /// ConcentricGenerator.RadialMaxLayers) — borne haute du slider Camadas en Radial. Recalculé
+        /// seulement quand la sélection, le nombre d'avenues ou le rayon de la rotonde change.
+        /// </summary>
+        /// <summary>
+        /// Hauteur du vrai terrain au point (x, z) — pour le motif Relevo (GridParameters.HeightAt).
+        /// Données de hauteur lues une fois par appel : un échantillonneur par génération.
+        /// </summary>
+        public Func<float2, float> MakeTerrainSampler()
+        {
+            TerrainHeightData data = m_TerrainSystem.GetHeightData();
+            return p =>
+            {
+                TerrainHeightData copy = data;
+                return TerrainUtils.SampleHeight(ref copy, new float3(p.x, 0f, p.y));
+            };
+        }
+
+        private object _heightSnapshotKey;
+        private Func<float2, float> _heightSnapshot;
+
+        /// <summary>
+        /// Relief de la zone relevé dans une grille (au plus ~400 x 400 points), lisible depuis un thread
+        /// de fond (croquis pendant un drag) — TerrainHeightData ne se lit que sur le thread principal.
+        /// </summary>
+        public Func<float2, float> HeightSnapshot(List<float3> positions)
+        {
+            float3 sum = float3.zero;
+            float2 min = new float2(float.MaxValue), max = new float2(float.MinValue);
+            foreach (float3 p in positions)
+            {
+                sum += p;
+                min = math.min(min, p.xz);
+                max = math.max(max, p.xz);
+            }
+            object key = (positions.Count, sum);
+            if (_heightSnapshot != null && key.Equals(_heightSnapshotKey)) return _heightSnapshot;
+            min -= 50f;
+            max += 50f;
+            float cell = math.max(8f, math.cmax(max - min) / 400f);
+            int nx = (int)math.ceil((max.x - min.x) / cell) + 1, nz = (int)math.ceil((max.y - min.y) / cell) + 1;
+            var heights = new float[nx * nz];
+            TerrainHeightData data = m_TerrainSystem.GetHeightData();
+            for (int j = 0; j < nz; j++)
+            {
+                for (int i = 0; i < nx; i++)
+                {
+                    heights[j * nx + i] = TerrainUtils.SampleHeight(ref data, new float3(min.x + i * cell, 0f, min.y + j * cell));
+                }
+            }
+            float2 origin = min;
+            _heightSnapshot = q =>
+            {
+                float fx = math.clamp((q.x - origin.x) / cell, 0f, nx - 1.001f), fz = math.clamp((q.y - origin.y) / cell, 0f, nz - 1.001f);
+                int i = (int)fx, j = (int)fz;
+                float tx = fx - i, tz = fz - j;
+                float a = heights[j * nx + i], b = heights[j * nx + i + 1], c = heights[(j + 1) * nx + i], d = heights[(j + 1) * nx + i + 1];
+                return math.lerp(math.lerp(a, b, tx), math.lerp(c, d, tx), tz);
+            };
+            _heightSnapshotKey = key;
+            return _heightSnapshot;
+        }
+
+        private readonly List<float3> _contourFlatPositions = new List<float3>();
+        private bool _contourFlat;
+
+        /// <summary>
+        /// Vrai si le terrain de la sélection est trop plat pour le motif Relevo (rien à suivre) —
+        /// affiché dans le panneau. Recalculé seulement quand la sélection change.
+        /// </summary>
+        public bool ContourTerrainFlat
+        {
+            get
+            {
+                if (!_settings.ContourMode || _settings.LoopMode || ActivePositions.Count < 3)
+                {
+                    _contourFlatPositions.Clear();
+                    return false;
+                }
+                if (!PositionsEqual(ActivePositions, _contourFlatPositions))
+                {
+                    try
+                    {
+                        _contourFlat = GridGenerator.IsTerrainFlat(BuildCurveAwarePerimeterPositions(), MakeTerrainSampler());
+                    }
+                    catch (Exception e)
+                    {
+                        Mod.Log.Warn($"Relief du motif Relevo impossible à lire : {e.Message}");
+                        _contourFlat = false;
+                    }
+                    _contourFlatPositions.Clear();
+                    _contourFlatPositions.AddRange(ActivePositions);
+                }
+                return _contourFlat;
+            }
+        }
+
+
+        public int RadialMaxLayers
+        {
+            get
+            {
+                if (ActivePositions.Count < 3)
+                {
+                    _radialMaxLayersPositions.Clear();
+                    return ConcentricGenerator.MaxLayersLimit;
+                }
+                var settings = (_settings.RadialAvenues, _settings.RadialRoundaboutRadius);
+                if (!PositionsEqual(ActivePositions, _radialMaxLayersPositions) || !_radialMaxLayersSettings.Equals(settings))
+                {
+                    try
+                    {
+                        _radialMaxLayers = ConcentricGenerator.RadialMaxLayers(BuildCurveAwarePerimeterPositions(), settings.Item1, settings.Item2);
+                    }
+                    catch (Exception e)
+                    {
+                        Mod.Log.Warn($"Limite de camadas (Radial) impossible à calculer : {e.Message}");
+                        _radialMaxLayers = ConcentricGenerator.MaxLayersLimit;
+                    }
+                    _radialMaxLayersPositions.Clear();
+                    _radialMaxLayersPositions.AddRange(ActivePositions);
+                    _radialMaxLayersSettings = settings;
+                }
+                return _radialMaxLayers;
+            }
+        }
+
         /// <summary>Nœuds sélectionnés, dans l'ordre de clic (lus par le rendu overlay).</summary>
         public IReadOnlyList<Entity> SelectedNodes => _selectedNodes;
         /// <summary>Positions des nœuds sélectionnés, dans l'ordre de clic (lues par le rendu overlay).</summary>
@@ -365,6 +504,20 @@ namespace GridRoadGenerator.Systems
             SuperblockZone = 11,
             ConcentricLayers = 12,
             ConcentricConnections = 13,
+            RadialAvenues = 14,
+            RadialRoundabout = 15,
+            RadialLayers = 16,
+            // 17 = FishboneRibSpacing, motif retiré — valeur volontairement non réutilisée.
+            TreeBranchSpacing = 18,
+            TreeCulDeSacSpacing = 19,
+            TreeCulDeSacLength = 20,
+            OrganicStreetSpacing = 21,
+            OrganicCurviness = 22,
+            OrganicLoopShare = 23,
+            OrganicSeed = 24,
+            ContourSpacing = 25,
+            ContourConnectorSpacing = 26,
+            MixedCoreRadius = 27,
         }
 
         /// <summary>
@@ -465,6 +618,11 @@ namespace GridRoadGenerator.Systems
         private bool _secondaryOverrideResolved;
         private PrefabBase _avenueOverridePrefab;
         private bool _avenueOverrideResolved;
+        private PrefabBase _roundaboutOverridePrefab;
+        private bool _roundaboutOverrideResolved;
+        private PrefabBase _pathOverridePrefab;
+        private bool _pathOverrideResolved;
+        private Game.City.CityConfigurationSystem m_CityConfigurationSystem;
 
         /// <summary>Arête du périmètre (route existante entre deux nœuds sélectionnés consécutifs).</summary>
         private struct PerimeterEdge
@@ -482,6 +640,7 @@ namespace GridRoadGenerator.Systems
             m_ToolOutputBarrier = World.GetOrCreateSystemManaged<ToolOutputBarrier>();
             m_RenderingSystem = World.GetOrCreateSystemManaged<RenderingSystem>();
             m_NetSearchSystem = World.GetOrCreateSystemManaged<Game.Net.SearchSystem>();
+            m_CityConfigurationSystem = World.GetOrCreateSystemManaged<Game.City.CityConfigurationSystem>();
             m_DefinitionQuery = GetDefinitionQuery();
             m_EligibleRoadNodesQuery = GetEntityQuery(
                 ComponentType.ReadOnly<Node>(),
@@ -492,13 +651,42 @@ namespace GridRoadGenerator.Systems
             _confirmAction = _settings.GetAction(GridRoadGeneratorSettings.ActionConfirmGrid);
         }
 
-        public override PrefabBase GetPrefab() => GetRoadPrefab();
+        /// <summary>
+        /// Aucun prefab annoncé au jeu (retour utilisateur : "porquê que o painel do jogo também se abre
+        /// quando abro o mod?") : avec un prefab de route, le jeu traitait l'outil comme l'outil route et
+        /// ouvrait son menu des routes. Les réseaux se choisissent dans le panneau du mod (GetMainPrefab).
+        /// </summary>
+        public override PrefabBase GetPrefab() => null;
+
+        /// <summary>Réseau principal résolu (voir GetRoadPrefab) — lu par GridRoadUISystem pour le panneau.</summary>
+        public PrefabBase GetMainPrefab() => GetRoadPrefab();
 
         /// <summary>Réseau secondaire résolu (voir GetSecondaryRoadPrefab) — lu par GridRoadUISystem pour la barre de sélection.</summary>
         public PrefabBase GetSecondaryPrefab() => GetSecondaryRoadPrefab();
 
+        /// <summary>Réseau des liaisons piétonnes résolu (voir GetPathRoadPrefab) — lu par GridRoadUISystem.</summary>
+        public PrefabBase GetPathPrefab() => GetPathRoadPrefab();
+
+        /// <summary>Réseau de la rotonde résolu (voir GetRoundaboutRoadPrefab) — lu par GridRoadUISystem.</summary>
+        public PrefabBase GetRoundaboutPrefab() => GetRoundaboutRoadPrefab();
+
         /// <summary>Réseau avenue résolu (voir GetAvenueRoadPrefab) — lu par GridRoadUISystem pour la barre de sélection.</summary>
         public PrefabBase GetAvenuePrefab() => GetAvenueRoadPrefab();
+
+        /// <summary>
+        /// Motif Relevo : courbes de niveau du jeu ("Topografia") affichées d'office (retour
+        /// utilisateur) — même mécanique que l'outil des routes (Snap.ContourLines, que
+        /// UndergroundViewSystem lit sur l'outil actif), sans toucher au réglage global du joueur.
+        /// </summary>
+        public override void GetAvailableSnapMask(out Snap onMask, out Snap offMask)
+        {
+            base.GetAvailableSnapMask(out onMask, out offMask);
+            if (_settings != null && _settings.ContourMode && !_settings.LoopMode)
+            {
+                onMask |= Snap.ContourLines;
+                offMask |= Snap.ContourLines;
+            }
+        }
 
         /// <summary>L'outil ne s'active que par son raccourci ou le panneau, jamais via un prefab.</summary>
         public override bool TrySetPrefab(PrefabBase prefab) => false;
@@ -506,6 +694,13 @@ namespace GridRoadGenerator.Systems
         public override void InitializeRaycast()
         {
             base.InitializeRaycast();
+
+            // Zone libre : les clics visent le terrain, pas les routes.
+            if (_settings.FreeAreaMode)
+            {
+                m_ToolRaycastSystem.typeMask = TypeMask.Terrain;
+                return;
+            }
 
             // Réseaux routiers uniquement, nœuds ciblables via SubElements.
             m_ToolRaycastSystem.typeMask = TypeMask.Net;
@@ -531,6 +726,7 @@ namespace GridRoadGenerator.Systems
         protected override void OnStopRunning()
         {
             ResetState();
+            ClearHistory();
             if (_confirmAction != null)
             {
                 _confirmAction.shouldBeEnabled = false;
@@ -591,12 +787,18 @@ namespace GridRoadGenerator.Systems
 
             try
             {
+                // Zonage automatique après Générer : quelques frames réservées (voir UpdateZoning).
+                if (UpdateZoning(ref inputDeps))
+                {
+                    return inputDeps;
+                }
+
                 // Échap : annule la sélection en cours (1er appui) ; sans sélection,
                 // désactive l'outil — le panneau se ferme et le bouton toolbar se
                 // relâche via TOOL_ACTIVE (même cadence que les outils vanilla).
                 if (cancelAction.WasPressedThisFrame())
                 {
-                    bool hadSelection = _selectedNodes.Count > 0;
+                    bool hadSelection = _selectedNodes.Count > 0 || HasFreeAreaSelection;
                     ResetState();
                     if (!hadSelection)
                     {
@@ -623,9 +825,11 @@ namespace GridRoadGenerator.Systems
                             // reste du pipeline ECS natif) est asynchrone sur les frames
                             // suivantes, pas synchrone dans cet appel — seul le geste lui-même
                             // est loggué.
-                            Mod.Log.Info($"[Perf] gesto=generate nós={_selectedPositions.Count}");
+                            Mod.Log.Info($"[Perf] gesto=generate nós={ActivePositions.Count}");
                             applyMode = ApplyMode.Apply;
+                            StartZoning();
                             ResetState();
+                            ClearHistory();
                             return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                         }
                         Mod.Log.Warn("Grille refusée : l'aperçu contient des erreurs de placement (collisions, pente...). Ajuste le périmètre ou l'espacement.");
@@ -649,6 +853,12 @@ namespace GridRoadGenerator.Systems
                     }
                 }
 
+                if (_settings.FreeAreaMode)
+                {
+                    HandleFreeAreaInput();
+                }
+                else
+                {
                 // Survol : surbrillance du nœud sous le curseur.
                 Entity hovered = ResolveHoveredNode();
                 if (hovered != _hoveredNode)
@@ -692,6 +902,9 @@ namespace GridRoadGenerator.Systems
                         SetHighlight(last, false);
                     }
                 }
+                }
+
+                UpdateHistory();
 
                 // Reconstruction de l'aperçu (chaque frame, comme le NetTool — pas d'empilement,
                 // voir la doc de CreateGridDefinitions pour pourquoi une recréation à chaque
@@ -706,7 +919,7 @@ namespace GridRoadGenerator.Systems
                 inputDeps = DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
                 HasPreview = false;
                 PerimeterInvalid = false;
-                if (_selectedPositions.Count >= 2 && suppressRealPreview)
+                if (ActivePositions.Count >= 2 && suppressRealPreview)
                 {
                     // Croquis (drag ou ShowSketchOnly) : aucune entité ECS créée, juste un calcul
                     // pur (GridGenerator, déjà vérifié rapide même sur de grandes zones — voir
@@ -715,14 +928,14 @@ namespace GridRoadGenerator.Systems
                     HasPreview = ComputePreviewValidityCheap();
                     PerimeterInvalid = !HasPreview;
                 }
-                else if (_selectedPositions.Count >= 2)
+                else if (ActivePositions.Count >= 2)
                 {
                     // Geste "sélection/paramètre changé" (voir _lastGesture*) : ne logge le temps
                     // de CreateGridDefinitions QUE si la configuration a réellement changé depuis
                     // le dernier log — jamais à chaque frame identique (même discipline que le
                     // drag, voir BeginOrContinueDrag/RecordDragFrame). La création elle-même,
                     // contrairement au log, tourne bien à CHAQUE frame (voir ci-dessus).
-                    bool gestureChanged = _previewDirty || !PositionsEqual(_selectedPositions, _lastGesturePositions);
+                    bool gestureChanged = _previewDirty || !PositionsEqual(ActivePositions, _lastGesturePositions);
                     Stopwatch gestureStopwatch = gestureChanged ? Stopwatch.StartNew() : null;
                     if (gestureChanged)
                     {
@@ -735,10 +948,10 @@ namespace GridRoadGenerator.Systems
                     if (gestureChanged)
                     {
                         gestureStopwatch.Stop();
-                        Mod.Log.Info($"[Perf] gesto=seleção/parâmetro nós={_selectedPositions.Count} loop={_settings.LoopMode} criados={created} duraçãoMs={gestureStopwatch.Elapsed.TotalMilliseconds:F2}");
+                        Mod.Log.Info($"[Perf] gesto=seleção/parâmetro nós={ActivePositions.Count} loop={_settings.LoopMode} criados={created} duraçãoMs={gestureStopwatch.Elapsed.TotalMilliseconds:F2}");
                         _previewDirty = false;
                         _lastGesturePositions.Clear();
-                        _lastGesturePositions.AddRange(_selectedPositions);
+                        _lastGesturePositions.AddRange(ActivePositions);
                         // Un vrai changement efface un rejet précédent (voir _showCollisionPreview/
                         // PerimeterCollision) : l'utilisateur vient d'ajuster quelque chose, plus la
                         // peine de garder affiché "Générer" a été refusé pour l'ancienne config.
@@ -772,10 +985,21 @@ namespace GridRoadGenerator.Systems
                         bool queryEmptyNow = m_DefinitionQuery.IsEmptyIgnoreFilter;
                         if (hasPreviewNow && allowApplyNow && !queryEmptyNow)
                         {
-                            Mod.Log.Info($"[Perf] gesto=generate nós={_selectedPositions.Count}");
+                            Mod.Log.Info($"[Perf] gesto=generate nós={ActivePositions.Count}");
                             applyMode = ApplyMode.Apply;
+                            StartZoning();
                             ResetState();
+                            ClearHistory();
                             return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
+                        }
+                        // Erreurs peut-être passagères (retour utilisateur : "Générer" refusé, puis
+                        // accepté tel quel en réappuyant 5 s plus tard) : la validation native d'une
+                        // grande grille s'étale sur plusieurs frames — on attend qu'elle se stabilise,
+                        // jusqu'à ConfirmMaxFrames, avant de conclure au rejet.
+                        if (hasPreviewNow && !queryEmptyNow && _confirmFramesElapsed < ConfirmMaxFrames)
+                        {
+                            CanApply = false;
+                            return inputDeps;
                         }
                         // Résolution automatique (option du menu Options, voir _excludedSegments) :
                         // retire les tronçons générés en erreur et relance la matérialisation, au
@@ -793,12 +1017,7 @@ namespace GridRoadGenerator.Systems
                                 return inputDeps;
                             }
                         }
-                        // Diagnostic temporaire (retour utilisateur : rejet systématique même
-                        // Anarchy activé, donc probablement pas une vraie collision) : montre
-                        // LAQUELLE des 3 conditions a échoué, au lieu de deviner à l'aveugle si
-                        // c'est un timing ECS (m_DefinitionQuery vide = le playback du
-                        // m_ToolOutputBarrier n'a peut-être pas eu lieu à temps) ou autre chose.
-                        Mod.Log.Warn($"Grille refusée : hasPreview={hasPreviewNow} allowApply={allowApplyNow} queryVide={queryEmptyNow} frames={_confirmFramesElapsed}");
+                        Mod.Log.Info("Grille refusée : collision non résolue automatiquement.");
                         LogCollisionDetails();
                         // Voir _showCollisionPreview/PerimeterCollision : garde le vrai aperçu
                         // visible (surbrillance native des collisions) au lieu de retomber sur
@@ -1027,6 +1246,9 @@ namespace GridRoadGenerator.Systems
             HasPreview = false;
             PerimeterInvalid = false;
             CanApply = false;
+            SummarySegments = 0;
+            SummaryLength = 0f;
+            SummaryCost = 0;
             _invalidLogged = false;
             _omittedNodesLogged = false;
             PerimeterDetectionFailed = false;
@@ -1041,22 +1263,21 @@ namespace GridRoadGenerator.Systems
             _excludedSegments.Clear();
             _autoResolveAttempts = 0;
             _lastCreatedCurves.Clear();
+            ClearFreeArea();
         }
 
         /// <summary>
-        /// Diagnostic d'un refus de "Générer" (retour utilisateur : "continua a ter colisões",
-        /// sans que le log dise où) : réglages du motif, puis chaque entité que le jeu marque en
-        /// erreur — position, genre (arête/nœud/objet) et si c'est un tronçon généré (Temp) ou une
-        /// route déjà construite. Permet de rejouer le cas en test avec le même périmètre.
+        /// Refus de Générer : chaque entité que le jeu marque en erreur — position, genre (arête/nœud/
+        /// objet), réseau, généré ou existant, type d'erreur — pour rejouer le cas en test.
         /// </summary>
         private void LogCollisionDetails()
         {
             try
             {
                 var inv = System.Globalization.CultureInfo.InvariantCulture;
-                Mod.Log.Warn($"[Diag colisão] motif loop={_settings.LoopMode} superblock={_settings.SuperblockMode} concentric={_settings.ConcentricMode} camadas={_settings.ConcentricLayers} ligações={_settings.ConcentricConnections} nós={_selectedPositions.Count}");
                 using (NativeArray<Entity> errorEntities = m_ErrorQuery.ToEntityArray(Allocator.Temp))
                 {
+                    Mod.Log.Warn($"[Diag colisão] {errorEntities.Length} entidade(s) com erro ; padrão organic={_settings.OrganicMode} tree={_settings.TreeMode} contour={_settings.ContourMode} mixed={_settings.MixedMode} loop={_settings.LoopMode} áreaLivre={_settings.FreeAreaMode}");
                     int shown = 0;
                     foreach (Entity e in errorEntities)
                     {
@@ -1065,30 +1286,27 @@ namespace GridRoadGenerator.Systems
                             Mod.Log.Warn($"[Diag colisão] ... {errorEntities.Length - 40} erro(s) a mais");
                             break;
                         }
-                        string origin = EntityManager.HasComponent<Temp>(e) ? "gerado" : "existente";
+                        string origin = (EntityManager.HasComponent<Temp>(e) ? "gerado" : "existente") + ErrorTypes(e);
+                        string prefabName = EntityManager.TryGetComponent(e, out PrefabRef prefabRef) && m_PrefabSystem.TryGetPrefab(prefabRef.m_Prefab, out PrefabBase errorPrefab)
+                            ? errorPrefab.name : "?";
                         if (EntityManager.TryGetComponent(e, out Curve curve))
                         {
-                            float3 a = curve.m_Bezier.a;
-                            float3 d = curve.m_Bezier.d;
-                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] aresta {0} de ({1:F1} {2:F1}) a ({3:F1} {4:F1}) comprimento={5:F1}",
-                                origin, a.x, a.z, d.x, d.z, MathUtils.Length(curve.m_Bezier)));
+                            float3 a = curve.m_Bezier.a, d = curve.m_Bezier.d;
+                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] aresta {0} {1} de ({2:F1} {3:F1}) a ({4:F1} {5:F1}) comprimento={6:F1}",
+                                origin, prefabName, a.x, a.z, d.x, d.z, MathUtils.Length(curve.m_Bezier)));
                         }
                         else if (EntityManager.TryGetComponent(e, out Game.Net.Node node))
                         {
-                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] nó {0} em ({1:F1} {2:F1})", origin, node.m_Position.x, node.m_Position.z));
+                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] nó {0} {1} em ({2:F1} {3:F1})", origin, prefabName, node.m_Position.x, node.m_Position.z));
                         }
                         else if (EntityManager.TryGetComponent(e, out Game.Objects.Transform transform))
                         {
-                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] objeto {0} em ({1:F1} {2:F1})", origin, transform.m_Position.x, transform.m_Position.z));
+                            Mod.Log.Warn(string.Format(inv, "[Diag colisão] objeto {0} {1} em ({2:F1} {3:F1})", origin, prefabName, transform.m_Position.x, transform.m_Position.z));
                         }
                         else
                         {
-                            Mod.Log.Warn($"[Diag colisão] entidade {origin} sem posição conhecida ({e})");
+                            Mod.Log.Warn($"[Diag colisão] entidade {origin} {prefabName} sem posição conhecida");
                         }
-                    }
-                    if (errorEntities.Length == 0)
-                    {
-                        Mod.Log.Warn("[Diag colisão] nenhuma entidade marcada com erro nesta frame");
                     }
                 }
             }
@@ -1096,6 +1314,25 @@ namespace GridRoadGenerator.Systems
             {
                 Mod.Log.Error(e, "Diagnóstico de colisão falhou.");
             }
+        }
+
+        /// <summary>Type(s) d'erreur natif(s) d'une entité (icônes de notification portant ToolErrorData).</summary>
+        private string ErrorTypes(Entity e)
+        {
+            if (!EntityManager.TryGetBuffer(e, true, out DynamicBuffer<Game.Notifications.IconElement> icons) || icons.Length == 0)
+            {
+                return "";
+            }
+            var types = new List<string>();
+            for (int k = 0; k < icons.Length; k++)
+            {
+                if (EntityManager.TryGetComponent(icons[k].m_Icon, out PrefabRef iconPrefab)
+                    && EntityManager.TryGetComponent(iconPrefab.m_Prefab, out ToolErrorData errorData))
+                {
+                    types.Add(errorData.m_Error.ToString());
+                }
+            }
+            return types.Count > 0 ? " [" + string.Join(",", types) + "]" : "";
         }
 
         private static (int, int, int, int) SegmentKey(RoadSegmentDef segment)
@@ -1358,6 +1595,109 @@ namespace GridRoadGenerator.Systems
             return _avenueOverridePrefab != null ? _avenueOverridePrefab : GetRoadPrefab();
         }
 
+        /// <summary>Vrai si aucun réseau de liaison piétonne n'a été choisi ("Pedestrian Path" du jeu).</summary>
+        public bool PathRoadPrefabIsAuto => string.IsNullOrEmpty(_settings.PathPrefabName);
+
+        /// <summary>Fixe le réseau des liaisons piétonnes (chemin, piste cyclable…). null = "Pavement Path".</summary>
+        public void SetPathRoadPrefab(PrefabBase prefab)
+        {
+            _pathOverridePrefab = prefab;
+            _pathOverrideResolved = true;
+            _settings.PathPrefabName = prefab != null ? $"{prefab.GetType().Name}:{prefab.name}" : string.Empty;
+            _settings.ApplyAndSave();
+            MarkPreviewDirty();
+        }
+
+        /// <summary>Réseau des liaisons piétonnes : choisi explicitement, sinon le chemin piéton du jeu, sinon les rues.</summary>
+        // Repli propre aux liaisons (distinct de celui du super-quarteirão, qui garde ses rues).
+        private bool _pathFallbackSearched;
+        private PrefabBase _pathFallbackPrefab;
+
+        private PrefabBase GetPathRoadPrefab()
+        {
+            if (!_pathOverrideResolved)
+            {
+                _pathOverrideResolved = true;
+                _pathOverridePrefab = ResolveSavedPrefab(_settings.PathPrefabName);
+            }
+            if (_pathOverridePrefab != null)
+            {
+                return _pathOverridePrefab;
+            }
+            if (!_pathFallbackSearched)
+            {
+                _pathFallbackSearched = true;
+                // Chemin piéton du jeu ("Caminho pavimentado", PathwayPrefab) — retour utilisateur :
+                // l'ancien nom ("Pedestrian Path", RoadPrefab) n'existe pas, les liaisons devenaient des rues.
+                if (!m_PrefabSystem.TryGetPrefab(new PrefabID(nameof(PathwayPrefab), "Pavement Path"), out _pathFallbackPrefab))
+                {
+                    _pathFallbackPrefab = null;
+                }
+            }
+            return _pathFallbackPrefab ?? GetRoadPrefab();
+        }
+
+        /// <summary>Vrai si aucun réseau de rotonde n'a été choisi (suit alors GetRoadPrefab).</summary>
+        public bool RoundaboutRoadPrefabIsAuto => string.IsNullOrEmpty(_settings.RoundaboutRoadPrefabName);
+
+        /// <summary>Fixe le réseau de la rotonde du motif Radial (RoadSegmentDef.IsRoundabout). null = mode auto.</summary>
+        public void SetRoundaboutRoadPrefab(PrefabBase prefab)
+        {
+            _roundaboutOverridePrefab = prefab;
+            _roundaboutOverrideResolved = true;
+            _settings.RoundaboutRoadPrefabName = prefab != null ? $"{prefab.GetType().Name}:{prefab.name}" : string.Empty;
+            _settings.ApplyAndSave();
+            MarkPreviewDirty();
+        }
+
+        /// <summary>Réseau de la rotonde : choisi explicitement, sinon celui des rues (GetRoadPrefab).</summary>
+        private PrefabBase GetRoundaboutRoadPrefab()
+        {
+            if (!_roundaboutOverrideResolved)
+            {
+                _roundaboutOverrideResolved = true;
+                _roundaboutOverridePrefab = ResolveSavedPrefab(_settings.RoundaboutRoadPrefabName);
+            }
+            return _roundaboutOverridePrefab != null ? _roundaboutOverridePrefab : GetRoadPrefab();
+        }
+
+        /// <summary>Résumé de la grille prévisualisée, affiché au-dessus de Générer : tronçons, longueur (m), coût estimé.</summary>
+        public int SummarySegments { get; private set; }
+        public float SummaryLength { get; private set; }
+        public long SummaryCost { get; private set; }
+
+        /// <summary>
+        /// Résumé de `segments` : longueur réelle (courbe du jeu) et coût de construction estimé à partir du
+        /// coût par défaut de chaque réseau (PlaceableNetData, par case de 8 m) — le jeu ajoute les
+        /// ponts/tunnels et les carrefours, d'où "≈" dans le panneau.
+        /// </summary>
+        private void UpdateSummary(List<RoadSegmentDef> segments)
+        {
+            bool singleNetwork = _settings.ContourMode && !_settings.LoopMode;
+            float length = 0f;
+            double cost = 0;
+            foreach (RoadSegmentDef segment in segments)
+            {
+                float segmentLength = segment.IsArc
+                    ? MathUtils.Length(NetUtils.FitCurve(segment.Start, segment.StartTangent, segment.EndTangent, segment.End))
+                    : math.distance(segment.Start, segment.End);
+                length += segmentLength;
+                PrefabBase prefab = segment.IsRoundabout ? GetRoundaboutRoadPrefab()
+                    : segment.IsPedestrian && !(_settings.LoopMode && _settings.SuperblockMode) ? GetPathRoadPrefab()
+                    : segment.IsAvenue && !singleNetwork ? GetAvenueRoadPrefab()
+                    : ((segment.IsCulDeSacEnd && !segment.KeepNetwork) || segment.IsLocal || segment.IsPedestrian) && !_settings.LoopMode ? GetSecondaryRoadPrefab()
+                    : segment.IsPedestrian ? GetSecondaryRoadPrefab()
+                    : GetRoadPrefab();
+                if (prefab != null && EntityManager.TryGetComponent(m_PrefabSystem.GetEntity(prefab), out PlaceableNetData placeable))
+                {
+                    cost += segmentLength / 8f * placeable.m_DefaultConstructionCost;
+                }
+            }
+            SummarySegments = segments.Count;
+            SummaryLength = length;
+            SummaryCost = (long)math.round(cost);
+        }
+
         /// <summary>
         /// Calcule SEULEMENT si le périmètre actuel produit une grille non vide — aucune entité
         /// ECS créée, juste GridGenerator (pure C#, voir GridGeneratorPerformanceTests pour la
@@ -1366,16 +1706,101 @@ namespace GridRoadGenerator.Systems
         /// CreateGridDefinitions — voir sa doc pour pourquoi ce dernier ne peut pas tourner en
         /// continu dans ce cas.
         /// </summary>
+        private int _validityVersion = -1;
+        private int _validitySettingsVersion = -1;
+        private bool _validityResult;
+        private object _sketchKey;
+        private List<RoadSegmentDef> _sketchSegments;
+        private RoundaboutInfo _sketchRoundabout;
+
+        private object _seedKey;
+        private List<RoadSegmentDef> _seedSegments;
+        private RoundaboutInfo _seedRoundabout;
+
+        /// <summary>Dernière grille calculée en fond pendant un drag (même clé que GenerateSketch) : évite de la refaire au relâchement.</summary>
+        public void SeedSketch(object key, List<RoadSegmentDef> segments, RoundaboutInfo roundabout)
+        {
+            _seedKey = key;
+            _seedSegments = new List<RoadSegmentDef>(segments);
+            _seedRoundabout = roundabout;
+        }
+
+        /// <summary>Change à chaque nouvelle grille de croquis (voir GenerateSketch).</summary>
+        public int SketchVersion { get; private set; }
+
+        /// <summary>
+        /// Grille du croquis, recalculée seulement quand le périmètre ou un réglage change : le croquis
+        /// (GridRoadOverlaySystem) et la validité de Générer la redemandaient à chaque frame, soit
+        /// plusieurs centaines de ms par frame sur une grande zone peinte. Copie renvoyée (les
+        /// appelants retirent ou ajoutent des tronçons).
+        /// </summary>
+        public List<RoadSegmentDef> GenerateSketch(List<float3> positions, GridParameters parameters, out RoundaboutInfo roundabout)
+        {
+            GridParameters keyParameters = parameters;
+            keyParameters.HeightAt = null;
+            float3 sum = float3.zero;
+            foreach (float3 p in positions) sum += p;
+            object key = (positions.Count, sum, _settings.LoopMode, keyParameters);
+            if ((_sketchSegments == null || !key.Equals(_sketchKey)) && _seedSegments != null && key.Equals(_seedKey))
+            {
+                // Grille déjà calculée en fond pendant le drag du slider : reprise telle quelle.
+                _sketchSegments = _seedSegments;
+                _sketchRoundabout = _seedRoundabout;
+                _sketchKey = key;
+                _seedSegments = null;
+                SketchVersion++;
+            }
+            if (_sketchSegments == null || !key.Equals(_sketchKey))
+            {
+                parameters.HeightAt = MakeTerrainSampler();
+                _sketchRoundabout = default;
+                try
+                {
+                    _sketchSegments = _settings.LoopMode
+                        ? GridGenerator.GenerateLoopGrid(positions, parameters)
+                        : GridGenerator.GenerateGrid(positions, parameters, out _, out _sketchRoundabout);
+                }
+                catch (Exception e)
+                {
+                    // Grille impossible pour ces réglages : grille vide mémorisée (pas de nouvel essai,
+                    // ni d'erreur, à chaque frame — log en jeu : erreur critique répétée).
+                    Mod.Log.Warn($"Grille impossible pour ce périmètre et ces réglages : {e}");
+                    _sketchSegments = new List<RoadSegmentDef>();
+                    _sketchRoundabout = default;
+                }
+                _sketchKey = key;
+                SketchVersion++;
+            }
+            roundabout = _sketchRoundabout;
+            return new List<RoadSegmentDef>(_sketchSegments);
+        }
+
         private bool ComputePreviewValidityCheap()
         {
             try
             {
                 List<float3> perimeterPositions = BuildCurveAwarePerimeterPositions();
                 GridParameters parameters = _settings.ToGridParameters();
-                List<RoadSegmentDef> segments = _settings.LoopMode
-                    ? GridGenerator.GenerateLoopGrid(perimeterPositions, parameters)
-                    : GridGenerator.GenerateGrid(perimeterPositions, parameters, out _, out _);
-                return segments.Count > 0;
+                List<RoadSegmentDef> segments = GenerateSketch(perimeterPositions, parameters, out _);
+                // Même grille qu'à la frame précédente : même réponse (retour utilisateur : jeu lent
+                // après avoir peint une grande zone — génération et route de périmètre refaites à
+                // chaque frame).
+                // (réglage sans effet sur la grille, ex. type de route : résumé à refaire)
+                if (_validityVersion == SketchVersion && _validitySettingsVersion == _settingsVersion)
+                {
+                    return _validityResult;
+                }
+                _validityVersion = SketchVersion;
+                _validitySettingsVersion = _settingsVersion;
+                _validityResult = false;
+                if (_settings.FreeAreaMode && _freeRing.Count >= 3 && segments.Count > 0)
+                {
+                    segments.AddRange(FreeAreaPerimeter.PerimeterRoad(_freeRing, segments));
+                    RemoveObstacleSegments(segments);
+                }
+                UpdateSummary(segments);
+                _validityResult = segments.Count > 0;
+                return _validityResult;
             }
             catch (Exception e)
             {
@@ -1446,6 +1871,18 @@ namespace GridRoadGenerator.Systems
             // ne pose pas de cercle de retournement).
             PrefabBase avenueRoadPrefab = GetAvenueRoadPrefab();
             Entity avenuePrefabEntity = avenueRoadPrefab != null ? m_PrefabSystem.GetEntity(avenueRoadPrefab) : prefabEntity;
+            PrefabBase roundaboutRoadPrefab = GetRoundaboutRoadPrefab();
+            Entity roundaboutPrefabEntity = roundaboutRoadPrefab != null ? m_PrefabSystem.GetEntity(roundaboutRoadPrefab) : prefabEntity;
+            // Liaisons piétonnes entre impasses (hors super-quarteirão, qui a son propre réseau piéton).
+            bool superblock = _settings.LoopMode && _settings.SuperblockMode;
+            PrefabBase pathPrefab = superblock ? null : GetPathRoadPrefab();
+            Entity pathPrefabEntity = pathPrefab != null ? m_PrefabSystem.GetEntity(pathPrefab) : secondaryPrefabEntity;
+            // Motif Relevo : un seul type de route (retour utilisateur : "quero apenas um tipo de
+            // estrada nesse modo") — les montées (IsAvenue côté Core) prennent le réseau des rues.
+            bool singleNetwork = _settings.ContourMode && !_settings.LoopMode;
+            // Rotonde émise dans le sens trigonométrique (circulation à droite) : retournée si la
+            // ville roule à gauche, sinon une route à sens unique y tournerait à contresens.
+            bool leftHandTraffic = m_CityConfigurationSystem != null && m_CityConfigurationSystem.leftHandTraffic;
 
             TerrainHeightData heightData = m_TerrainSystem.GetHeightData();
 
@@ -1455,6 +1892,7 @@ namespace GridRoadGenerator.Systems
             {
                 List<float3> perimeterPositions = BuildCurveAwarePerimeterPositions();
                 GridParameters parameters = _settings.ToGridParameters();
+                parameters.HeightAt = MakeTerrainSampler();
                 if (_settings.LoopMode)
                 {
                     // Collectrices éparses + laço interne par super-îlot — voir
@@ -1526,13 +1964,33 @@ namespace GridRoadGenerator.Systems
             }
             segments = SplitSegmentsCrossingInteriorEdges(segments, perimeter, trueInteriorEntities);
 
+            // Zone libre : pas de routes existantes autour — la route de périmètre est posée ici,
+            // avec un nœud à chaque rue qui la rejoint (même position exacte) et à chaque route
+            // existante qui traverse le contour (MakeCoursePos s'y raccorde en coupant cette route).
+            if (_settings.FreeAreaMode && _freeRing.Count >= 3)
+            {
+                segments.AddRange(FreeAreaPerimeter.PerimeterRoad(_freeRing, segments, RingCrossings(interiorEdges)));
+            }
+            RemoveObstacleSegments(segments);
+
+            UpdateSummary(segments);
             EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
             Unity.Mathematics.Random random = RandomSeed.Next().GetRandom(0);
             int created = 0;
             _lastCreatedCurves.Clear();
 
-            foreach (RoadSegmentDef segment in segments)
+            foreach (RoadSegmentDef source in segments)
             {
+                RoadSegmentDef segment = source;
+                if (singleNetwork)
+                {
+                    segment.IsAvenue = false;
+                }
+                if (segment.IsRoundabout && leftHandTraffic)
+                {
+                    (segment.Start, segment.End) = (segment.End, segment.Start);
+                    (segment.StartTangent, segment.EndTangent) = (-segment.EndTangent, -segment.StartTangent);
+                }
                 // Tronçon retiré par la résolution automatique des collisions (voir
                 // _excludedSegments/TryExcludeErrorSegments).
                 (int, int, int, int) segmentKey = SegmentKey(segment);
@@ -1584,9 +2042,17 @@ namespace GridRoadGenerator.Systems
                 // devient piéton et réutilise CE MÊME emplacement secondaire — inutilisé par
                 // ailleurs en Loop (l'Arterial qui l'occupait a été retiré) — plutôt qu'un
                 // quatrième emplacement dédié.
-                bool isLocalSegment = segment.IsCulDeSacEnd && !_settings.LoopMode;
+                bool isLocalSegment = ((segment.IsCulDeSacEnd && !segment.KeepNetwork) || segment.IsLocal) && !_settings.LoopMode;
                 Entity segmentPrefabEntity;
-                if (segment.IsAvenue)
+                if (segment.IsRoundabout)
+                {
+                    segmentPrefabEntity = roundaboutPrefabEntity;
+                }
+                else if (segment.IsPedestrian && !superblock)
+                {
+                    segmentPrefabEntity = pathPrefabEntity;
+                }
+                else if (segment.IsAvenue)
                 {
                     segmentPrefabEntity = avenuePrefabEntity;
                 }
@@ -1607,7 +2073,9 @@ namespace GridRoadGenerator.Systems
                 commandBuffer.AddComponent(definition, default(Updated));
                 commandBuffer.AddComponent(definition, course);
 
-                // Melhoramentos automáticos (mode Loop, voir BuildUpgradeFlags) :
+                // Melhoramentos automáticos (tous les motifs, Grelha comprise depuis que la
+                // section Redes y est proposée — retour utilisateur : "adiciona a opção de
+                // networks no modo grid") :
                 // Game.Net.Upgraded est lu par CourseSplitSystem sur CETTE MÊME entité
                 // (CreationDefinition/NetCourse), puis reporté tel quel sur l'Edge réelle créée —
                 // CompositionSelectSystem s'occupe ensuite de résoudre la composition visuelle
@@ -1615,10 +2083,10 @@ namespace GridRoadGenerator.Systems
                 // prefab choisi n'a pas la pièce correspondante (jamais d'erreur). Le beco sem
                 // saída reçoit maintenant lui aussi les melhoramentos du principal (même
                 // réseau désormais, voir plus haut) : plus d'exclusion IsCulDeSacEnd ici.
-                if (_settings.LoopMode)
                 {
                     // Réseau piéton (SuperblockMode) : aucun melhoramento (trees/passeio/ciclovia
-                    // du réseau principal n'ont pas de sens sur un chemin piéton dédié).
+                    // du réseau principal n'ont pas de sens sur un chemin piéton dédié). En
+                    // Grelha, les impasses (réseau secondaire) reçoivent ceux de la rue.
                     CompositionFlags upgradeFlags = segment.IsAvenue ? BuildAvenueUpgradeFlags()
                         : segment.IsPedestrian ? default
                         : BuildPrincipalUpgradeFlags();
@@ -1677,7 +2145,7 @@ namespace GridRoadGenerator.Systems
                 // Générer ("Ligação rodoviária necessária"), même avec Anarchy (pas un simple
                 // avertissement de chevauchement qu'Anarchy supprimerait).
                 float3 roundaboutCenter = roundabout.Center;
-                if (_settings.FollowTerrain)
+                if (_settings.FollowTerrain || _settings.ContourMode || _settings.FreeAreaMode)
                 {
                     roundaboutCenter.y = TerrainUtils.SampleHeight(ref heightData, roundaboutCenter);
                 }
@@ -1721,6 +2189,8 @@ namespace GridRoadGenerator.Systems
             var right = default(CompositionFlags.Side);
             if (_settings.AvenueSideTreesLeft) left |= CompositionFlags.Side.SecondaryBeautification;
             if (_settings.AvenueSideTreesRight) right |= CompositionFlags.Side.SecondaryBeautification;
+            if (_settings.AvenueSideGrassLeft) left |= CompositionFlags.Side.PrimaryBeautification;
+            if (_settings.AvenueSideGrassRight) right |= CompositionFlags.Side.PrimaryBeautification;
             if (_settings.AvenueBikeLaneLeft) left |= CompositionFlags.Side.SecondaryLane;
             if (_settings.AvenueBikeLaneRight) right |= CompositionFlags.Side.SecondaryLane;
 
@@ -1738,6 +2208,10 @@ namespace GridRoadGenerator.Systems
             var right = default(CompositionFlags.Side);
             if (_settings.PrincipalSideTreesLeft) left |= CompositionFlags.Side.SecondaryBeautification;
             if (_settings.PrincipalSideTreesRight) right |= CompositionFlags.Side.SecondaryBeautification;
+            // Relva na berma incompatible avec le passeio largo du même côté (voir GridRoadUISystem) :
+            // si une config sauvegardée a les deux, le passeio largo l'emporte.
+            if (_settings.PrincipalSideGrassLeft && !_settings.PrincipalWideSidewalkLeft) left |= CompositionFlags.Side.PrimaryBeautification;
+            if (_settings.PrincipalSideGrassRight && !_settings.PrincipalWideSidewalkRight) right |= CompositionFlags.Side.PrimaryBeautification;
             if (_settings.PrincipalWideSidewalkLeft) left |= CompositionFlags.Side.WideSidewalk;
             if (_settings.PrincipalWideSidewalkRight) right |= CompositionFlags.Side.WideSidewalk;
             if (_settings.PrincipalBikeLaneLeft) left |= CompositionFlags.Side.SecondaryLane;
@@ -1886,7 +2360,8 @@ namespace GridRoadGenerator.Systems
             // hauteur du terrain si FollowTerrain est activé (défaut). Sinon, position.y garde
             // la hauteur moyenne du périmètre déjà calculée par GridGenerator.GenerateGrid —
             // la grille reste plate à cette altitude.
-            if (_settings.FollowTerrain)
+            // Motif Relevo : les rues de niveau n'ont de sens que posées sur le vrai terrain.
+            if (_settings.FollowTerrain || _settings.ContourMode || _settings.FreeAreaMode)
             {
                 position.y = TerrainUtils.SampleHeight(ref heightData, position);
             }
@@ -1975,17 +2450,19 @@ namespace GridRoadGenerator.Systems
 
             // Mode "2 nœuds = rectangle" (voir BuildCurveAwarePerimeterPositions) : aucun vrai
             // polygone tracé, donc aucune notion d'"intérieur" à interroger.
-            if (_selectedPositions.Count < 3)
+            // Zone libre : le contour dessiné/peint, sinon les nœuds cliqués.
+            List<float3> polygon = ActivePositions;
+            if (polygon.Count < 3)
             {
                 return result;
             }
 
-            float3 min = _selectedPositions[0];
-            float3 max = _selectedPositions[0];
-            for (int i = 1; i < _selectedPositions.Count; i++)
+            float3 min = polygon[0];
+            float3 max = polygon[0];
+            for (int i = 1; i < polygon.Count; i++)
             {
-                min = math.min(min, _selectedPositions[i]);
-                max = math.max(max, _selectedPositions[i]);
+                min = math.min(min, polygon[i]);
+                max = math.max(max, polygon[i]);
             }
             // Marge de sécurité : une arête dont la géométrie déborde légèrement de la boîte
             // stricte des nœuds cliqués (courbe, largeur de chaussée) ne doit pas être ratée
@@ -2020,6 +2497,7 @@ namespace GridRoadGenerator.Systems
             {
                 if (!EntityManager.TryGetComponent(candidate, out Edge _)
                     || !EntityManager.TryGetComponent(candidate, out Curve curve)
+                    || !EntityManager.HasComponent<Road>(candidate) // ni canalisation ni ligne électrique
                     || EntityManager.HasComponent<Deleted>(candidate)
                     || EntityManager.HasComponent<Temp>(candidate))
                 {
@@ -2062,7 +2540,7 @@ namespace GridRoadGenerator.Systems
                 for (int i = 0; i <= sampleCount; i++)
                 {
                     float3 sample = MathUtils.Position(curve.m_Bezier, (float)i / sampleCount);
-                    if (PointInsideSelectedPolygon(sample.xz))
+                    if (PointInsidePolygon(polygon, sample.xz))
                     {
                         anyPointInside = true;
                         break;
@@ -2276,14 +2754,57 @@ namespace GridRoadGenerator.Systems
         /// ici : voir la consigne de ne pas toucher à Core), appliqué directement aux positions
         /// monde puisqu'on teste une arête RÉELLE du réseau, pas un point de la grille générée.
         /// </summary>
-        private bool PointInsideSelectedPolygon(float2 point)
+        /// <summary>
+        /// Points où des routes existantes traversent le contour de la zone libre : nœuds imposés de
+        /// la route de périmètre, pour qu'elle s'y raccorde au lieu de passer par-dessus.
+        /// </summary>
+        private List<float3> RingCrossings(List<PerimeterEdge> edges)
+        {
+            var result = new List<float3>();
+            int n = _freeRing.Count;
+            foreach (PerimeterEdge edge in edges)
+            {
+                int samples = math.max(2, (int)math.ceil(MathUtils.Length(edge.m_Curve.xz) / 4f));
+                float2 previous = edge.m_Curve.a.xz;
+                for (int k = 1; k <= samples; k++)
+                {
+                    float2 next = MathUtils.Position(edge.m_Curve, (float)k / samples).xz;
+                    for (int i = 0; i < n; i++)
+                    {
+                        float2 a = _freeRing[i].xz, b = _freeRing[(i + 1) % n].xz;
+                        if (SegmentsCross(a, b, previous, next, out float t))
+                        {
+                            float2 hit = math.lerp(a, b, t);
+                            result.Add(new float3(hit.x, math.lerp(_freeRing[i].y, _freeRing[(i + 1) % n].y, t), hit.y));
+                        }
+                    }
+                    previous = next;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>Intersection stricte des segments a–b et c–d ; t = position sur a–b.</summary>
+        private static bool SegmentsCross(float2 a, float2 b, float2 c, float2 d, out float t)
+        {
+            t = 0f;
+            float2 r = b - a, q = d - c;
+            float den = r.x * q.y - r.y * q.x;
+            if (math.abs(den) < 1e-6f) return false;
+            float2 w = c - a;
+            t = (w.x * q.y - w.y * q.x) / den;
+            float u = (w.x * r.y - w.y * r.x) / den;
+            return t > 0f && t < 1f && u >= 0f && u < 1f;
+        }
+
+        private static bool PointInsidePolygon(List<float3> polygon, float2 point)
         {
             bool inside = false;
-            int n = _selectedPositions.Count;
+            int n = polygon.Count;
             for (int i = 0, j = n - 1; i < n; j = i++)
             {
-                float2 a = _selectedPositions[i].xz;
-                float2 b = _selectedPositions[j].xz;
+                float2 a = polygon[i].xz;
+                float2 b = polygon[j].xz;
                 bool crosses = (a.y > point.y) != (b.y > point.y);
                 if (crosses)
                 {
@@ -2440,6 +2961,10 @@ namespace GridRoadGenerator.Systems
 
         private List<float3> BuildCurveAwarePerimeterPositions()
         {
+            if (_settings.FreeAreaMode)
+            {
+                return new List<float3>(_freeRing);
+            }
             int count = _selectedNodes.Count;
             var result = new List<float3>(_selectedPositions.Count);
             if (count == 0)

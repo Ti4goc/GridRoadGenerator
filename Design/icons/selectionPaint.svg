@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Pintar área : tache peinte (remplie, translucide) et pinceau. -->
+  <path d="M3 17 C2 12 6 11 8 13 C10 15 12 10 15 12 C18 14 17 20 12 21 C8 22 4 21 3 17 Z" fill="#ffffff" fill-opacity="0.45" stroke="#ffffff" stroke-width="1.3" stroke-linejoin="round"/>
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13.5 10.5 L20.5 3.5" stroke-width="2.4"/>
+    <path d="M11 13 C10.5 11.5 11.5 10 13.5 10.5 C14 12.5 12.5 13.5 11 13 Z" fill="#ffffff" stroke-width="1.2"/>
+  </g>
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Cul-de-sac em árvore : collectrice (trait épais), branches perpendiculaires et impasses
+       terminées par un cercle de retournement. -->
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 12 H22" stroke-width="2.6"/>
+    <path d="M7 12 V4 M17 12 V20" stroke-width="1.6"/>
+    <path d="M7 8 H3.8 M7 8 H10.2 M17 16 H13.8 M17 16 H20.2" stroke-width="1.2"/>
+    <circle cx="3" cy="8" r="1.1" stroke-width="1.2"/>
+    <circle cx="11" cy="8" r="1.1" stroke-width="1.2"/>
+    <circle cx="13" cy="16" r="1.1" stroke-width="1.2"/>
+    <circle cx="21" cy="16" r="1.1" stroke-width="1.2"/>
+  </g>
+</svg>

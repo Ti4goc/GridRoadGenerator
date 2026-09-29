@@ -6,3 +6,8 @@ decompiled/
 Library/
 reference/
 UI/node_modules/
+
+# Fichiers de travail des screenshots (PSD de 128 Mo : au-dessus de la limite de GitHub)
+Design/*.psd
+Design/preview_*.png
+Design/*.log

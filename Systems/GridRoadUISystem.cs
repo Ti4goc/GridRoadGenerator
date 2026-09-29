@@ -56,6 +56,7 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<float> _spacingBinding;
         private ValueBinding<float> _angleOffsetBinding;
         private ValueBinding<bool> _followTerrainBinding;
+        private ValueBinding<bool> _alignTerrainBinding;
         private ValueBinding<bool> _culDeSacModeBinding;
         private ValueBinding<int> _culDeSacAxisBinding;
         private ValueBinding<float> _culDeSacDepthBinding;
@@ -82,6 +83,39 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<bool> _concentricModeBinding;
         private ValueBinding<int> _concentricLayersBinding;
         private ValueBinding<int> _concentricConnectionsBinding;
+        private ValueBinding<bool> _radialModeBinding;
+        private ValueBinding<int> _radialAvenuesBinding;
+        private ValueBinding<float> _radialRoundaboutBinding;
+        private ValueBinding<int> _radialLayersBinding;
+        private ValueBinding<bool> _treeModeBinding;
+        private ValueBinding<float> _treeBranchSpacingBinding;
+        private ValueBinding<float> _treeCulDeSacSpacingBinding;
+        private ValueBinding<float> _treeCulDeSacLengthBinding;
+        private ValueBinding<bool> _organicModeBinding;
+        private ValueBinding<bool> _mixedModeBinding;
+        private ValueBinding<float> _mixedCoreRadiusBinding;
+        private ValueBinding<float> _organicStreetSpacingBinding;
+        private ValueBinding<float> _organicCurvinessBinding;
+        private ValueBinding<float> _organicLoopShareBinding;
+        private ValueBinding<int> _organicSeedBinding;
+        private ValueBinding<bool> _contourModeBinding;
+        private ValueBinding<float> _contourSpacingBinding;
+        private ValueBinding<float> _contourConnectorSpacingBinding;
+        private ValueBinding<bool> _contourFlatBinding;
+        private ValueBinding<int> _selectionModeBinding;
+        private ValueBinding<float> _brushSizeBinding;
+        private ValueBinding<bool> _brushSquareBinding;
+        private ValueBinding<bool> _canUndoBinding;
+        private ValueBinding<string> _zoneOptionsBinding;
+        private ValueBinding<string> _zoningPrefabBinding;
+        private ValueBinding<int> _summarySegmentsBinding;
+        private ValueBinding<float> _summaryLengthBinding;
+        private ValueBinding<double> _summaryCostBinding;
+        private ValueBinding<bool> _canRedoBinding;
+        private ValueBinding<float> _brushAngleBinding;
+        private ValueBinding<bool> _freeAreaClosedBinding;
+        private ValueBinding<bool> _freeAreaInvalidBinding;
+        private ValueBinding<int> _radialMaxLayersBinding;
         private ValueBinding<int> _concentricMaxLayersBinding;
         private ValueBinding<float> _loopCulDeSacRatioBinding;
         private ValueBinding<bool> _avenueMiddleTreesBinding;
@@ -96,8 +130,22 @@ namespace GridRoadGenerator.Systems
         private ValueBinding<bool> _principalWideSidewalkRightBinding;
         private ValueBinding<bool> _principalBikeLaneLeftBinding;
         private ValueBinding<bool> _principalBikeLaneRightBinding;
+        private ValueBinding<bool> _avenueSideGrassLeftBinding;
+        private ValueBinding<bool> _avenueSideGrassRightBinding;
+        private ValueBinding<bool> _principalSideGrassLeftBinding;
+        private ValueBinding<bool> _principalSideGrassRightBinding;
         private ValueBinding<string> _avenueRoadPrefabNameBinding;
         private ValueBinding<string> _avenueRoadPrefabIconBinding;
+        private ValueBinding<int> _primarySupportBinding;
+        private ValueBinding<int> _secondarySupportBinding;
+        private ValueBinding<int> _avenueSupportBinding;
+        private ValueBinding<string> _pathPrefabNameBinding;
+        private ValueBinding<string> _pathPrefabIconBinding;
+        private ValueBinding<bool> _pathPrefabAutoBinding;
+        private ValueBinding<bool> _pedestrianLinksBinding;
+        private ValueBinding<string> _roundaboutRoadPrefabNameBinding;
+        private ValueBinding<string> _roundaboutRoadPrefabIconBinding;
+        private ValueBinding<bool> _roundaboutRoadPrefabAutoBinding;
         private ValueBinding<bool> _avenueRoadPrefabAutoBinding;
         private ValueBinding<bool> _anarchyAvailableBinding;
         private bool _anarchyAvailable;
@@ -145,6 +193,7 @@ namespace GridRoadGenerator.Systems
             AddBinding(_spacingBinding = new ValueBinding<float>(BindingGroup, "SPACING", _settings.SpacingMeters));
             AddBinding(_angleOffsetBinding = new ValueBinding<float>(BindingGroup, "ANGLE_OFFSET", _settings.AngleOffsetDegrees));
             AddBinding(_followTerrainBinding = new ValueBinding<bool>(BindingGroup, "FOLLOW_TERRAIN", _settings.FollowTerrain));
+            AddBinding(_alignTerrainBinding = new ValueBinding<bool>(BindingGroup, "ALIGN_TERRAIN", _settings.AlignToTerrain));
             AddBinding(_culDeSacModeBinding = new ValueBinding<bool>(BindingGroup, "CULDESAC_MODE", _settings.CulDeSacMode));
             AddBinding(_culDeSacAxisBinding = new ValueBinding<int>(BindingGroup, "CULDESAC_AXIS", (int)_settings.CulDeSacAxis));
             // Exposée en pourcentage (50-90) côté UI, comme le slider Options > Mods ;
@@ -171,6 +220,52 @@ namespace GridRoadGenerator.Systems
             AddBinding(_concentricModeBinding = new ValueBinding<bool>(BindingGroup, "CONCENTRIC_MODE", _settings.ConcentricMode));
             AddBinding(_concentricLayersBinding = new ValueBinding<int>(BindingGroup, "CONCENTRIC_LAYERS", initialParameters.ConcentricLayers));
             AddBinding(_concentricConnectionsBinding = new ValueBinding<int>(BindingGroup, "CONCENTRIC_CONNECTIONS", initialParameters.ConcentricConnections));
+            AddBinding(_radialModeBinding = new ValueBinding<bool>(BindingGroup, "RADIAL_MODE", _settings.RadialMode));
+            AddBinding(_radialAvenuesBinding = new ValueBinding<int>(BindingGroup, "RADIAL_AVENUES", initialParameters.RadialAvenues));
+            AddBinding(_radialRoundaboutBinding = new ValueBinding<float>(BindingGroup, "RADIAL_ROUNDABOUT", initialParameters.RadialRoundaboutRadius));
+            AddBinding(_radialLayersBinding = new ValueBinding<int>(BindingGroup, "RADIAL_LAYERS", initialParameters.RadialLayers));
+            AddBinding(_treeModeBinding = new ValueBinding<bool>(BindingGroup, "TREE_MODE", _settings.TreeMode));
+            AddBinding(_treeBranchSpacingBinding = new ValueBinding<float>(BindingGroup, "TREE_BRANCH_SPACING", TreeValue(_settings.TreeBranchSpacing, GridGenerator.TreeBranchSpacingDefault)));
+            AddBinding(_treeCulDeSacSpacingBinding = new ValueBinding<float>(BindingGroup, "TREE_CULDESAC_SPACING", TreeValue(_settings.TreeCulDeSacSpacing, GridGenerator.TreeCulDeSacSpacingDefault)));
+            AddBinding(_treeCulDeSacLengthBinding = new ValueBinding<float>(BindingGroup, "TREE_CULDESAC_LENGTH", TreeValue(_settings.TreeCulDeSacLength, GridGenerator.TreeCulDeSacLengthDefault)));
+            AddBinding(_organicModeBinding = new ValueBinding<bool>(BindingGroup, "ORGANIC_MODE", _settings.OrganicMode));
+            AddBinding(_mixedModeBinding = new ValueBinding<bool>(BindingGroup, "MIXED_MODE", _settings.MixedMode));
+            AddBinding(_mixedCoreRadiusBinding = new ValueBinding<float>(BindingGroup, "MIXED_CORE_RADIUS", TreeValue(_settings.MixedCoreRadius, GridGenerator.MixedCoreRadiusDefault)));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_MIXED_MODE", value =>
+            {
+                _settings.MixedMode = value;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_MIXED_CORE_RADIUS", value =>
+            {
+                _settings.MixedCoreRadius = math.clamp(value, GridGenerator.MinMixedCoreRadius, GridGenerator.MaxMixedCoreRadius);
+                MarkSettingsDirty();
+            }));
+            AddBinding(_organicStreetSpacingBinding = new ValueBinding<float>(BindingGroup, "ORGANIC_STREET_SPACING", TreeValue(_settings.OrganicStreetSpacing, GridGenerator.OrganicStreetSpacingDefault)));
+            AddBinding(_organicCurvinessBinding = new ValueBinding<float>(BindingGroup, "ORGANIC_CURVINESS", _settings.OrganicCurviness));
+            AddBinding(_organicLoopShareBinding = new ValueBinding<float>(BindingGroup, "ORGANIC_LOOP_SHARE", _settings.OrganicLoopShare));
+            AddBinding(_organicSeedBinding = new ValueBinding<int>(BindingGroup, "ORGANIC_SEED", math.max(_settings.OrganicSeed, GridGenerator.MinOrganicSeed)));
+            AddBinding(_contourModeBinding = new ValueBinding<bool>(BindingGroup, "CONTOUR_MODE", _settings.ContourMode));
+            AddBinding(_contourSpacingBinding = new ValueBinding<float>(BindingGroup, "CONTOUR_SPACING", TreeValue(_settings.ContourSpacing, GridGenerator.ContourSpacingDefault)));
+            AddBinding(_contourConnectorSpacingBinding = new ValueBinding<float>(BindingGroup, "CONTOUR_CONNECTOR_SPACING", TreeValue(_settings.ContourConnectorSpacing, GridGenerator.ContourConnectorSpacingDefault)));
+            AddBinding(_contourFlatBinding = new ValueBinding<bool>(BindingGroup, "CONTOUR_FLAT", false));
+            AddBinding(_selectionModeBinding = new ValueBinding<int>(BindingGroup, "SELECTION_MODE", SelectionMode()));
+            AddBinding(_brushSizeBinding = new ValueBinding<float>(BindingGroup, "BRUSH_SIZE", BrushSize()));
+            AddBinding(_brushSquareBinding = new ValueBinding<bool>(BindingGroup, "BRUSH_SQUARE", _settings.BrushSquare));
+            AddBinding(_brushAngleBinding = new ValueBinding<float>(BindingGroup, "BRUSH_ANGLE", _settings.BrushAngle));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_BRUSH_ANGLE", value =>
+            {
+                _settings.BrushAngle = math.clamp(value, 0f, 90f) % 90f;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_BRUSH_SQUARE", value =>
+            {
+                _settings.BrushSquare = value;
+                MarkSettingsDirty();
+            }));
+            AddBinding(_freeAreaClosedBinding = new ValueBinding<bool>(BindingGroup, "FREE_AREA_CLOSED", false));
+            AddBinding(_freeAreaInvalidBinding = new ValueBinding<bool>(BindingGroup, "FREE_AREA_INVALID", false));
+            AddBinding(_radialMaxLayersBinding = new ValueBinding<int>(BindingGroup, "RADIAL_MAX_LAYERS", ConcentricGenerator.MaxLayersLimit));
             AddBinding(_concentricMaxLayersBinding = new ValueBinding<int>(BindingGroup, "CONCENTRIC_MAX_LAYERS", ConcentricGenerator.MaxLayersLimit));            AddBinding(_loopCulDeSacRatioBinding = new ValueBinding<float>(BindingGroup, "LOOP_CULDESAC_RATIO", _settings.LoopCulDeSacRatio));
 
             // Melhoramentos automáticos (mode Loop, voir GridRoadToolSystem.BuildAvenueUpgradeFlags/
@@ -188,6 +283,10 @@ namespace GridRoadGenerator.Systems
             AddBinding(_principalWideSidewalkRightBinding = new ValueBinding<bool>(BindingGroup, "PRINCIPAL_WIDE_SIDEWALK_RIGHT", _settings.PrincipalWideSidewalkRight));
             AddBinding(_principalBikeLaneLeftBinding = new ValueBinding<bool>(BindingGroup, "PRINCIPAL_BIKE_LANE_LEFT", _settings.PrincipalBikeLaneLeft));
             AddBinding(_principalBikeLaneRightBinding = new ValueBinding<bool>(BindingGroup, "PRINCIPAL_BIKE_LANE_RIGHT", _settings.PrincipalBikeLaneRight));
+            AddBinding(_avenueSideGrassLeftBinding = new ValueBinding<bool>(BindingGroup, "AVENUE_SIDE_GRASS_LEFT", _settings.AvenueSideGrassLeft));
+            AddBinding(_avenueSideGrassRightBinding = new ValueBinding<bool>(BindingGroup, "AVENUE_SIDE_GRASS_RIGHT", _settings.AvenueSideGrassRight));
+            AddBinding(_principalSideGrassLeftBinding = new ValueBinding<bool>(BindingGroup, "PRINCIPAL_SIDE_GRASS_LEFT", _settings.PrincipalSideGrassLeft));
+            AddBinding(_principalSideGrassRightBinding = new ValueBinding<bool>(BindingGroup, "PRINCIPAL_SIDE_GRASS_RIGHT", _settings.PrincipalSideGrassRight));
 
             // Vue (Underground/ZoneGrid/InvisibleNetworks), pattern repris de CS2-NetworkTools.
             // AVAILABLE_VIEWS est fixe (un seul outil, qui les supporte toutes) — exposé quand
@@ -207,6 +306,12 @@ namespace GridRoadGenerator.Systems
             AddBinding(_avenueRoadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "AVENUE_ROAD_PREFAB_NAME", string.Empty));
             AddBinding(_avenueRoadPrefabIconBinding = new ValueBinding<string>(BindingGroup, "AVENUE_ROAD_PREFAB_ICON", string.Empty));
             AddBinding(_avenueRoadPrefabAutoBinding = new ValueBinding<bool>(BindingGroup, "AVENUE_ROAD_PREFAB_AUTO", true));
+            AddBinding(_primarySupportBinding = new ValueBinding<int>(BindingGroup, "PRIMARY_UPGRADE_SUPPORT", UpgradeAll));
+            AddBinding(_secondarySupportBinding = new ValueBinding<int>(BindingGroup, "SECONDARY_UPGRADE_SUPPORT", UpgradeAll));
+            AddBinding(_avenueSupportBinding = new ValueBinding<int>(BindingGroup, "AVENUE_UPGRADE_SUPPORT", UpgradeAll));
+            AddBinding(_roundaboutRoadPrefabNameBinding = new ValueBinding<string>(BindingGroup, "ROUNDABOUT_ROAD_PREFAB_NAME", string.Empty));
+            AddBinding(_roundaboutRoadPrefabIconBinding = new ValueBinding<string>(BindingGroup, "ROUNDABOUT_ROAD_PREFAB_ICON", string.Empty));
+            AddBinding(_roundaboutRoadPrefabAutoBinding = new ValueBinding<bool>(BindingGroup, "ROUNDABOUT_ROAD_PREFAB_AUTO", true));
 
             // Sélecteur de réseau : onglet actif, liste des prefabs, récents, choix.
             _prefabSystem = World.GetOrCreateSystemManaged<PrefabSystem>();
@@ -223,6 +328,26 @@ namespace GridRoadGenerator.Systems
             AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO_SECONDARY", () => _toolSystem.SetSecondaryRoadPrefab(null)));
             AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB_AVENUE", HandlePickAvenuePrefab));
             AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO_AVENUE", () => _toolSystem.SetAvenueRoadPrefab(null)));
+            AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB_ROUNDABOUT", HandlePickRoundaboutPrefab));
+            AddBinding(_pathPrefabNameBinding = new ValueBinding<string>(BindingGroup, "PATH_ROAD_PREFAB_NAME", string.Empty));
+            AddBinding(_pathPrefabIconBinding = new ValueBinding<string>(BindingGroup, "PATH_ROAD_PREFAB_ICON", string.Empty));
+            AddBinding(_pathPrefabAutoBinding = new ValueBinding<bool>(BindingGroup, "PATH_ROAD_PREFAB_AUTO", true));
+            AddBinding(new TriggerBinding<Entity>(BindingGroup, "PICK_PREFAB_PATH", entity =>
+            {
+                if (_prefabSystem.TryGetPrefab(entity, out PrefabBase prefab) && prefab != null)
+                {
+                    _toolSystem.SetPathRoadPrefab(prefab);
+                    RememberRecentPrefab(entity);
+                }
+            }));
+            AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO_PATH", () => _toolSystem.SetPathRoadPrefab(null)));
+            AddBinding(_pedestrianLinksBinding = new ValueBinding<bool>(BindingGroup, "PEDESTRIAN_LINKS", _settings.PedestrianLinks));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PEDESTRIAN_LINKS", value =>
+            {
+                _settings.PedestrianLinks = value;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding(BindingGroup, "PICK_AUTO_ROUNDABOUT", () => _toolSystem.SetRoundaboutRoadPrefab(null)));
 
             // Mod Anarchy (tiers, optionnel) : côté TS la rangée lit/déclenche
             // directement les bindings cohtml d'Anarchy lui-même. La détection est
@@ -273,6 +398,11 @@ namespace GridRoadGenerator.Systems
             AddBinding(new TriggerBinding<float>(BindingGroup, "SET_ANGLE_OFFSET", value =>
             {
                 _settings.AngleOffsetDegrees = math.clamp(value, -90f, 90f);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_ALIGN_TERRAIN", value =>
+            {
+                _settings.AlignToTerrain = value;
                 MarkSettingsDirty();
             }));
             AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_FOLLOW_TERRAIN", value =>
@@ -366,8 +496,124 @@ namespace GridRoadGenerator.Systems
                 _settings.ConcentricMode = value;
                 MarkSettingsDirty();
             }));
+            // Motif Radial : famille du Concêntrico (ConcentricMode reste vrai, voir le panneau),
+            // mais sans anneaux : rotonde + avenues (voir ConcentricGenerator.GenerateRadial).
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_RADIAL_MODE", value =>
+            {
+                _settings.RadialMode = value;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_RADIAL_AVENUES", value =>
+            {
+                _settings.RadialAvenues = math.clamp((int)math.round(value), ConcentricGenerator.MinRadialAvenues, ConcentricGenerator.MaxRadialAvenues);
+                MarkSettingsDirty();
+            }));
+            // Motif Cul-de-sac em árvore : famille de la Grelha (LoopMode faux), voir GridGenerator.GenerateTree.
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_TREE_MODE", value =>
+            {
+                _settings.TreeMode = value;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_TREE_BRANCH_SPACING", value =>
+            {
+                _settings.TreeBranchSpacing = math.clamp(value, GridGenerator.MinTreeBranchSpacing, GridGenerator.MaxTreeBranchSpacing);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_TREE_CULDESAC_SPACING", value =>
+            {
+                _settings.TreeCulDeSacSpacing = math.clamp(value, GridGenerator.MinTreeCulDeSacSpacing, GridGenerator.MaxTreeCulDeSacSpacing);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_TREE_CULDESAC_LENGTH", value =>
+            {
+                _settings.TreeCulDeSacLength = math.clamp(value, GridGenerator.MinTreeCulDeSacLength, GridGenerator.MaxTreeCulDeSacLength);
+                MarkSettingsDirty();
+            }));
+            // Motif Orgânico : famille de la Grelha (LoopMode faux), voir GridGenerator.GenerateOrganic.
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_ORGANIC_MODE", value =>
+            {
+                _settings.OrganicMode = value;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_ORGANIC_STREET_SPACING", value =>
+            {
+                _settings.OrganicStreetSpacing = math.clamp(value, GridGenerator.MinOrganicStreetSpacing, GridGenerator.MaxOrganicStreetSpacing);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_ORGANIC_CURVINESS", value =>
+            {
+                _settings.OrganicCurviness = math.clamp(value, 0f, 100f);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_ORGANIC_LOOP_SHARE", value =>
+            {
+                _settings.OrganicLoopShare = math.clamp(value, 0f, 100f);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_ORGANIC_SEED", value =>
+            {
+                _settings.OrganicSeed = math.clamp((int)math.round(value), GridGenerator.MinOrganicSeed, GridGenerator.MaxOrganicSeed);
+                MarkSettingsDirty();
+            }));
+            // Motif Relevo : famille de la Grelha (LoopMode faux), voir GridGenerator.GenerateContour.
+            // Mode de sélection : 0 = routes existantes, 1 = zone libre (points cliqués), 2 = pinceau.
+            AddBinding(new TriggerBinding<int>(BindingGroup, "SET_SELECTION_MODE", value =>
+            {
+                if (value == SelectionMode())
+                {
+                    return;
+                }
+                _settings.FreeAreaMode = value != 0;
+                _settings.FreeAreaBrush = value == 2;
+                _toolSystem.OnSelectionModeChanged();
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_BRUSH_SIZE", value =>
+            {
+                _settings.BrushDiameter = math.clamp(value, BrushMask.MinDiameter, BrushMask.MaxDiameter);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_CONTOUR_MODE", value =>
+            {
+                _settings.ContourMode = value;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_CONTOUR_SPACING", value =>
+            {
+                _settings.ContourSpacing = math.clamp(value, GridGenerator.MinContourSpacing, GridGenerator.MaxContourSpacing);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_CONTOUR_CONNECTOR_SPACING", value =>
+            {
+                _settings.ContourConnectorSpacing = math.clamp(value, GridGenerator.MinContourConnectorSpacing, GridGenerator.MaxContourConnectorSpacing);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_RADIAL_LAYERS", value =>
+            {
+                _settings.RadialLayers = math.clamp((int)math.round(value), 0, ConcentricGenerator.MaxLayersLimit);
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<float>(BindingGroup, "SET_RADIAL_ROUNDABOUT", value =>
+            {
+                _settings.RadialRoundaboutRadius = math.clamp(value, ConcentricGenerator.MinRoundaboutRadius, ConcentricGenerator.MaxRoundaboutRadius);
+                MarkSettingsDirty();
+            }));
             // Bouton "Repor valores" du panneau (voir GridRoadGeneratorSettings.ResetPanelParameters) :
             // les bindings relisent les settings à chaque frame, le panneau suit tout seul.
+            AddBinding(_summarySegmentsBinding = new ValueBinding<int>(BindingGroup, "SUMMARY_SEGMENTS", 0));
+            AddBinding(_summaryLengthBinding = new ValueBinding<float>(BindingGroup, "SUMMARY_LENGTH", 0f));
+            AddBinding(_summaryCostBinding = new ValueBinding<double>(BindingGroup, "SUMMARY_COST", 0));
+            AddBinding(_zoneOptionsBinding = new ValueBinding<string>(BindingGroup, "ZONE_OPTIONS", string.Empty));
+            AddBinding(_zoningPrefabBinding = new ValueBinding<string>(BindingGroup, "ZONING_PREFAB", string.Empty));
+            AddBinding(new TriggerBinding<string>(BindingGroup, "SET_ZONING_PREFAB", name =>
+            {
+                _settings.ZoningPrefabName = name ?? string.Empty;
+                MarkSettingsDirty();
+            }));
+            AddBinding(_canUndoBinding = new ValueBinding<bool>(BindingGroup, "CAN_UNDO", false));
+            AddBinding(_canRedoBinding = new ValueBinding<bool>(BindingGroup, "CAN_REDO", false));
+            AddBinding(new TriggerBinding(BindingGroup, "UNDO", () => _toolSystem.RequestUndo()));
+            AddBinding(new TriggerBinding(BindingGroup, "REDO", () => _toolSystem.RequestRedo()));
             AddBinding(new TriggerBinding(BindingGroup, "RESET_DEFAULTS", () =>
             {
                 _settings.ResetPanelParameters();
@@ -395,10 +641,37 @@ namespace GridRoadGenerator.Systems
             AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_AVENUE_BIKE_LANE_RIGHT", value => { _settings.AvenueBikeLaneRight = value; MarkSettingsDirty(); }));
             AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_SIDE_TREES_LEFT", value => { _settings.PrincipalSideTreesLeft = value; MarkSettingsDirty(); }));
             AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_SIDE_TREES_RIGHT", value => { _settings.PrincipalSideTreesRight = value; MarkSettingsDirty(); }));
-            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_WIDE_SIDEWALK_LEFT", value => { _settings.PrincipalWideSidewalkLeft = value; MarkSettingsDirty(); }));
-            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_WIDE_SIDEWALK_RIGHT", value => { _settings.PrincipalWideSidewalkRight = value; MarkSettingsDirty(); }));
+            // Passeio largo et relva na berma occupent la même bande dans le jeu (retour utilisateur :
+            // "o grass não é compatível com o widesidewalk") : activer l'un désactive l'autre, du
+            // même côté.
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_WIDE_SIDEWALK_LEFT", value =>
+            {
+                _settings.PrincipalWideSidewalkLeft = value;
+                if (value) _settings.PrincipalSideGrassLeft = false;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_WIDE_SIDEWALK_RIGHT", value =>
+            {
+                _settings.PrincipalWideSidewalkRight = value;
+                if (value) _settings.PrincipalSideGrassRight = false;
+                MarkSettingsDirty();
+            }));
             AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_BIKE_LANE_LEFT", value => { _settings.PrincipalBikeLaneLeft = value; MarkSettingsDirty(); }));
             AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_BIKE_LANE_RIGHT", value => { _settings.PrincipalBikeLaneRight = value; MarkSettingsDirty(); }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_AVENUE_SIDE_GRASS_LEFT", value => { _settings.AvenueSideGrassLeft = value; MarkSettingsDirty(); }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_AVENUE_SIDE_GRASS_RIGHT", value => { _settings.AvenueSideGrassRight = value; MarkSettingsDirty(); }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_SIDE_GRASS_LEFT", value =>
+            {
+                _settings.PrincipalSideGrassLeft = value;
+                if (value) _settings.PrincipalWideSidewalkLeft = false;
+                MarkSettingsDirty();
+            }));
+            AddBinding(new TriggerBinding<bool>(BindingGroup, "SET_PRINCIPAL_SIDE_GRASS_RIGHT", value =>
+            {
+                _settings.PrincipalSideGrassRight = value;
+                if (value) _settings.PrincipalWideSidewalkRight = false;
+                MarkSettingsDirty();
+            }));
             AddBinding(new TriggerBinding<int>(BindingGroup, "SET_SELECTED_VIEWS", value =>
             {
                 var views = (ViewOption)value & ViewOption.All;
@@ -458,6 +731,9 @@ namespace GridRoadGenerator.Systems
         /// dernier appel avant la fin d'un drag réarme simplement le délai (comportement voulu :
         /// tant que le joueur bouge le slider, aucune écriture disque n'a lieu).
         /// </summary>
+        /// <summary>Réglage du motif árvore affiché par le panneau : 0 (config antérieure au motif) = défaut.</summary>
+        private static float TreeValue(float value, float fallback) => value > 0f ? value : fallback;
+
         private void MarkSettingsDirty()
         {
             _settings.Apply();
@@ -469,10 +745,34 @@ namespace GridRoadGenerator.Systems
             _toolSystem.MarkPreviewDirty();
         }
 
+        private int SelectionMode() => !_settings.FreeAreaMode ? 0 : _settings.FreeAreaBrush ? 2 : 1;
+
+        private float BrushSize() => _settings.BrushDiameter > 0f
+            ? math.clamp(_settings.BrushDiameter, BrushMask.MinDiameter, BrushMask.MaxDiameter)
+            : BrushMask.DefaultDiameter;
+
         private void OnUpdateBindings()
         {
             _toolActiveBinding.Update(_gameToolSystem.activeTool == _toolSystem);
-            _nodeCountBinding.Update(_toolSystem.NodeCount);
+            _nodeCountBinding.Update(_toolSystem.SelectionCount);
+            _selectionModeBinding.Update(SelectionMode());
+            _brushSizeBinding.Update(BrushSize());
+            _brushSquareBinding.Update(_settings.BrushSquare);
+            _canUndoBinding.Update(_toolSystem.CanUndo);
+            _zoningPrefabBinding.Update(_settings.ZoningPrefabName ?? string.Empty);
+            if (_toolActiveBinding.value)
+            {
+                var zones = new List<string>();
+                foreach ((string name, string icon, string color) in _toolSystem.ZoneOptions()) zones.Add(name + "\t" + icon + "\t" + color);
+                _zoneOptionsBinding.Update(string.Join("\n", zones));
+            }
+            _summarySegmentsBinding.Update(_toolSystem.HasPreview ? _toolSystem.SummarySegments : 0);
+            _summaryLengthBinding.Update(math.round(_toolSystem.SummaryLength / 10f) * 10f);
+            _summaryCostBinding.Update(_toolSystem.SummaryCost);
+            _canRedoBinding.Update(_toolSystem.CanRedo);
+            _brushAngleBinding.Update(math.round(_settings.BrushAngle));
+            _freeAreaClosedBinding.Update(_toolSystem.FreeAreaClosed);
+            _freeAreaInvalidBinding.Update(_toolSystem.FreeAreaInvalid);
             // Limite de camadas selon la forme sélectionnée (voir GridRoadToolSystem.ConcentricMaxLayers) —
             // calculée seulement en mode Concêntrico, et seulement quand la sélection change.
             _concentricMaxLayersBinding.Update(_settings.LoopMode && _settings.ConcentricMode
@@ -487,6 +787,7 @@ namespace GridRoadGenerator.Systems
             _spacingBinding.Update(_settings.SpacingMeters);
             _angleOffsetBinding.Update(_settings.AngleOffsetDegrees);
             _followTerrainBinding.Update(_settings.FollowTerrain);
+            _alignTerrainBinding.Update(_settings.AlignToTerrain);
             _culDeSacModeBinding.Update(_settings.CulDeSacMode);
             _culDeSacAxisBinding.Update((int)_settings.CulDeSacAxis);
             _culDeSacDepthBinding.Update(GridRoadGeneratorSettings.CulDeSacDepthRealToUi(_settings.CulDeSacDepth));
@@ -505,7 +806,30 @@ namespace GridRoadGenerator.Systems
             GridParameters currentParameters = _settings.ToGridParameters();
             _concentricModeBinding.Update(_settings.ConcentricMode);
             _concentricLayersBinding.Update(currentParameters.ConcentricLayers);
-            _concentricConnectionsBinding.Update(currentParameters.ConcentricConnections);            _loopCulDeSacRatioBinding.Update(_settings.LoopCulDeSacRatio);
+            _concentricConnectionsBinding.Update(currentParameters.ConcentricConnections);
+            _radialModeBinding.Update(_settings.RadialMode);
+            _radialAvenuesBinding.Update(currentParameters.RadialAvenues);
+            _radialRoundaboutBinding.Update(currentParameters.RadialRoundaboutRadius);
+            _radialLayersBinding.Update(currentParameters.RadialLayers);
+            _treeModeBinding.Update(_settings.TreeMode);
+            _treeBranchSpacingBinding.Update(TreeValue(_settings.TreeBranchSpacing, GridGenerator.TreeBranchSpacingDefault));
+            _treeCulDeSacSpacingBinding.Update(TreeValue(_settings.TreeCulDeSacSpacing, GridGenerator.TreeCulDeSacSpacingDefault));
+            _treeCulDeSacLengthBinding.Update(TreeValue(_settings.TreeCulDeSacLength, GridGenerator.TreeCulDeSacLengthDefault));
+            _organicModeBinding.Update(_settings.OrganicMode);
+            _mixedModeBinding.Update(_settings.MixedMode);
+            _mixedCoreRadiusBinding.Update(TreeValue(_settings.MixedCoreRadius, GridGenerator.MixedCoreRadiusDefault));
+            _organicStreetSpacingBinding.Update(TreeValue(_settings.OrganicStreetSpacing, GridGenerator.OrganicStreetSpacingDefault));
+            _organicCurvinessBinding.Update(_settings.OrganicCurviness);
+            _organicLoopShareBinding.Update(_settings.OrganicLoopShare);
+            _organicSeedBinding.Update(math.max(_settings.OrganicSeed, GridGenerator.MinOrganicSeed));
+            _contourModeBinding.Update(_settings.ContourMode);
+            _contourSpacingBinding.Update(TreeValue(_settings.ContourSpacing, GridGenerator.ContourSpacingDefault));
+            _contourConnectorSpacingBinding.Update(TreeValue(_settings.ContourConnectorSpacing, GridGenerator.ContourConnectorSpacingDefault));
+            _contourFlatBinding.Update(_toolSystem.ContourTerrainFlat);
+            // Limite d'anneaux du Radial : calculée seulement en Radial (voir GridRoadToolSystem.RadialMaxLayers).
+            _radialMaxLayersBinding.Update(_settings.LoopMode && _settings.ConcentricMode && _settings.RadialMode
+                ? _toolSystem.RadialMaxLayers
+                : ConcentricGenerator.MaxLayersLimit);            _loopCulDeSacRatioBinding.Update(_settings.LoopCulDeSacRatio);
             _avenueMiddleTreesBinding.Update(_settings.AvenueMiddleTrees);
             _avenueMiddleGrassBinding.Update(_settings.AvenueMiddleGrass);
             _avenueSideTreesLeftBinding.Update(_settings.AvenueSideTreesLeft);
@@ -518,6 +842,10 @@ namespace GridRoadGenerator.Systems
             _principalWideSidewalkRightBinding.Update(_settings.PrincipalWideSidewalkRight);
             _principalBikeLaneLeftBinding.Update(_settings.PrincipalBikeLaneLeft);
             _principalBikeLaneRightBinding.Update(_settings.PrincipalBikeLaneRight);
+            _avenueSideGrassLeftBinding.Update(_settings.AvenueSideGrassLeft);
+            _avenueSideGrassRightBinding.Update(_settings.AvenueSideGrassRight);
+            _principalSideGrassLeftBinding.Update(_settings.PrincipalSideGrassLeft);
+            _principalSideGrassRightBinding.Update(_settings.PrincipalSideGrassRight);
             _selectedViewsBinding.Update((int)_settings.SelectedViews);
 
             if (!_anarchyAvailable && IsAnarchyLoaded())
@@ -526,7 +854,7 @@ namespace GridRoadGenerator.Systems
                 _anarchyAvailableBinding.Update(true);
             }
 
-            PrefabBase roadPrefab = _toolSystem.GetPrefab();
+            PrefabBase roadPrefab = _toolSystem.GetMainPrefab();
             _roadPrefabNameBinding.Update(roadPrefab != null ? roadPrefab.name : string.Empty);
             _roadPrefabIconBinding.Update(roadPrefab != null ? ImageSystem.GetThumbnail(roadPrefab) ?? string.Empty : string.Empty);
             _roadPrefabAutoBinding.Update(_toolSystem.RoadPrefabIsAuto);
@@ -536,10 +864,27 @@ namespace GridRoadGenerator.Systems
             _secondaryRoadPrefabIconBinding.Update(secondaryRoadPrefab != null ? ImageSystem.GetThumbnail(secondaryRoadPrefab) ?? string.Empty : string.Empty);
             _secondaryRoadPrefabAutoBinding.Update(_toolSystem.SecondaryRoadPrefabIsAuto);
 
+            // Melhoramentos que chaque réseau choisi sait afficher (voir UpgradeSupport) : le panneau
+            // cache les autres (ex. Travessa, estrada de cascalho : aucun).
+            _primarySupportBinding.Update(UpgradeSupport(_toolSystem.GetMainPrefab()));
+            _secondarySupportBinding.Update(UpgradeSupport(_toolSystem.GetSecondaryPrefab()));
+            _avenueSupportBinding.Update(UpgradeSupport(_toolSystem.GetAvenuePrefab()));
+
             PrefabBase avenueRoadPrefab = _toolSystem.GetAvenuePrefab();
             _avenueRoadPrefabNameBinding.Update(avenueRoadPrefab != null ? avenueRoadPrefab.name : string.Empty);
             _avenueRoadPrefabIconBinding.Update(avenueRoadPrefab != null ? ImageSystem.GetThumbnail(avenueRoadPrefab) ?? string.Empty : string.Empty);
             _avenueRoadPrefabAutoBinding.Update(_toolSystem.AvenueRoadPrefabIsAuto);
+
+            PrefabBase pathPrefab = _toolSystem.GetPathPrefab();
+            _pathPrefabNameBinding.Update(pathPrefab != null ? pathPrefab.name : string.Empty);
+            _pathPrefabIconBinding.Update(pathPrefab != null ? ImageSystem.GetThumbnail(pathPrefab) ?? string.Empty : string.Empty);
+            _pathPrefabAutoBinding.Update(_toolSystem.PathRoadPrefabIsAuto);
+            _pedestrianLinksBinding.Update(_settings.PedestrianLinks);
+
+            PrefabBase roundaboutRoadPrefab = _toolSystem.GetRoundaboutPrefab();
+            _roundaboutRoadPrefabNameBinding.Update(roundaboutRoadPrefab != null ? roundaboutRoadPrefab.name : string.Empty);
+            _roundaboutRoadPrefabIconBinding.Update(roundaboutRoadPrefab != null ? ImageSystem.GetThumbnail(roundaboutRoadPrefab) ?? string.Empty : string.Empty);
+            _roundaboutRoadPrefabAutoBinding.Update(_toolSystem.RoundaboutRoadPrefabIsAuto);
 
             // Reconstruit la liste du sélecteur quand l'onglet change (coûteux, donc jamais par frame).
             if (_lastPickerType != _pickerTypeBinding.value)
@@ -548,6 +893,74 @@ namespace GridRoadGenerator.Systems
                 RebuildPickerEntries((PickerType)_lastPickerType);
                 _pickerDataBinding.Update();
             }
+        }
+
+        // Melhoramentos (masque de bits, même ordre que UpgradeSupport côté bindings.ts).
+        private const int UpgradeMiddleTrees = 1, UpgradeMiddleGrass = 2, UpgradeSideTrees = 4, UpgradeSideGrass = 8,
+            UpgradeWideSidewalk = 16, UpgradeBikeLane = 32, UpgradeAll = 63;
+        private readonly Dictionary<PrefabBase, int> _upgradeSupport = new Dictionary<PrefabBase, int>();
+
+        /// <summary>
+        /// Melhoramentos qu'un réseau sait afficher : un melhoramento n'existe que si une section,
+        /// sous-section ou pièce du prefab réagit à l'exigence correspondante (SideTrees, MiddleGrass…).
+        /// Retour utilisateur : sur la Travessa ou l'estrada de cascalho, les boutons ne servaient à rien.
+        /// Mémorisé par prefab ; prefab non géométrique (inconnu) : tout est proposé.
+        /// </summary>
+        private int UpgradeSupport(PrefabBase prefab)
+        {
+            if (prefab == null) return UpgradeAll;
+            if (_upgradeSupport.TryGetValue(prefab, out int known)) return known;
+            int mask = UpgradeAll;
+            if (prefab is NetGeometryPrefab geometry && geometry.m_Sections != null)
+            {
+                var found = new HashSet<NetPieceRequirements>();
+                var visited = new HashSet<NetSectionPrefab>();
+                void Add(NetPieceRequirements[] requirements)
+                {
+                    if (requirements == null) return;
+                    foreach (NetPieceRequirements r in requirements) found.Add(r);
+                }
+                void Visit(NetSectionPrefab section)
+                {
+                    if (section == null || !visited.Add(section)) return;
+                    if (section.m_SubSections != null)
+                    {
+                        foreach (NetSubSectionInfo sub in section.m_SubSections)
+                        {
+                            Add(sub.m_RequireAll);
+                            Add(sub.m_RequireAny);
+                            Visit(sub.m_Section);
+                        }
+                    }
+                    if (section.m_Pieces != null)
+                    {
+                        foreach (NetPieceInfo piece in section.m_Pieces)
+                        {
+                            Add(piece.m_RequireAll);
+                            Add(piece.m_RequireAny);
+                        }
+                    }
+                }
+                foreach (NetSectionInfo info in geometry.m_Sections)
+                {
+                    Add(info.m_RequireAll);
+                    Add(info.m_RequireAny);
+                    Visit(info.m_Section);
+                }
+                bool Has(params NetPieceRequirements[] any)
+                {
+                    foreach (NetPieceRequirements r in any) if (found.Contains(r)) return true;
+                    return false;
+                }
+                mask = (Has(NetPieceRequirements.MiddleTrees) ? UpgradeMiddleTrees : 0)
+                    | (Has(NetPieceRequirements.MiddleGrass) ? UpgradeMiddleGrass : 0)
+                    | (Has(NetPieceRequirements.SideTrees, NetPieceRequirements.OppositeTrees) ? UpgradeSideTrees : 0)
+                    | (Has(NetPieceRequirements.SideGrass, NetPieceRequirements.OppositeGrass) ? UpgradeSideGrass : 0)
+                    | (Has(NetPieceRequirements.WideSidewalk, NetPieceRequirements.OppositeWideSidewalk) ? UpgradeWideSidewalk : 0)
+                    | (Has(NetPieceRequirements.BicycleLane, NetPieceRequirements.OppositeBicycleLane) ? UpgradeBikeLane : 0);
+            }
+            _upgradeSupport[prefab] = mask;
+            return mask;
         }
 
         /// <summary>
@@ -602,6 +1015,17 @@ namespace GridRoadGenerator.Systems
             RememberRecentPrefab(entity);
         }
 
+        /// <summary>Identique à HandlePickPrefab, pour la rotonde du motif Radial.</summary>
+        private void HandlePickRoundaboutPrefab(Entity entity)
+        {
+            if (!_prefabSystem.TryGetPrefab(entity, out PrefabBase prefab) || prefab == null)
+            {
+                return;
+            }
+            _toolSystem.SetRoundaboutRoadPrefab(prefab);
+            RememberRecentPrefab(entity);
+        }
+
         /// <summary>Tête de liste des récents (partagée entre les trois sélecteurs), sans doublon, plafonnée.</summary>
         private void RememberRecentPrefab(Entity entity)
         {
@@ -648,6 +1072,10 @@ namespace GridRoadGenerator.Systems
                     {
                         continue;
                     }
+                    if (IsBridgeOrDam(entity, prefab))
+                    {
+                        continue; // ouvrages à pièces fixes : sans objet pour une grille de rues
+                    }
                     (int groupPriority, int itemPriority) = GetUIPriority(entity);
                     sortable.Add((groupPriority, itemPriority, entity, prefab.name, ImageSystem.GetThumbnail(prefab) ?? string.Empty));
                 }
@@ -661,6 +1089,22 @@ namespace GridRoadGenerator.Systems
             {
                 _pickerEntries.Add((item.entity, item.name, item.icon));
             }
+        }
+
+        /// <summary>
+        /// Ponts et barrages (retour utilisateur : "retira todas as pontes e barragens das opções") :
+        /// réseaux à pièces fixes (FixedNetElement), ponts (BridgeData), ou, pour les réseaux de mods
+        /// sans ces marqueurs, un nom contenant "Bridge" ou "Dam" (mot entier).
+        /// </summary>
+        private bool IsBridgeOrDam(Entity entity, PrefabBase prefab)
+        {
+            if (EntityManager.HasComponent<BridgeData>(entity) || EntityManager.HasBuffer<FixedNetElement>(entity))
+            {
+                return true;
+            }
+            string name = prefab.name ?? string.Empty;
+            return name.IndexOf("Bridge", StringComparison.OrdinalIgnoreCase) >= 0
+                || System.Text.RegularExpressions.Regex.IsMatch(name, @"(^|[^A-Za-z])Dam([^a-z]|$)");
         }
 
         private (int groupPriority, int itemPriority) GetUIPriority(Entity entity)

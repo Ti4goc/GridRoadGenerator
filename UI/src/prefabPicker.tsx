@@ -14,6 +14,12 @@ import {
     pickPrefab,
     pickSecondaryAuto,
     pickSecondaryPrefab,
+    pickRoundaboutAuto,
+    pickRoundaboutPrefab,
+    roundaboutRoadPrefabAuto$,
+    pickPathAuto,
+    pickPathPrefab,
+    pathRoadPrefabAuto$,
     pickerData$,
     pickerType$,
     recentPrefabs$,
@@ -35,8 +41,11 @@ type PrefabPickerProps = {
     /// Quel réseau ce picker modifie : "primary" (défaut, réseau principal), "secondary"
     /// (impasses/rayons) ou "avenue" (voir roadSelection.tsx). Détermine quels bindings/
     /// déclencheurs lire.
-    slot?: "primary" | "secondary" | "avenue";
+    slot?: PrefabSlot;
 };
+
+/// Réseau modifié par le sélecteur ("roundabout" : rotonde centrale du motif Radial).
+export type PrefabSlot = "primary" | "secondary" | "avenue" | "roundabout" | "path";
 
 export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose, slot = "primary" }) => {
     const { translate } = useLocalization();
@@ -46,10 +55,18 @@ export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose, slot = "pri
     const isAutoPrimary = useValue(roadPrefabAuto$);
     const isAutoSecondary = useValue(secondaryRoadPrefabAuto$);
     const isAutoAvenue = useValue(avenueRoadPrefabAuto$);
-    const isAuto = slot === "secondary" ? isAutoSecondary : slot === "avenue" ? isAutoAvenue : isAutoPrimary;
-    const pick = slot === "secondary" ? pickSecondaryPrefab : slot === "avenue" ? pickAvenuePrefab : pickPrefab;
-    const pickAutoForSlot =
-        slot === "secondary" ? pickSecondaryAuto : slot === "avenue" ? pickAvenueAuto : pickAuto;
+    const isAutoRoundabout = useValue(roundaboutRoadPrefabAuto$);
+    const isAutoPath = useValue(pathRoadPrefabAuto$);
+    const bySlot = {
+        primary: { auto: isAutoPrimary, pick: pickPrefab, pickAuto: pickAuto },
+        secondary: { auto: isAutoSecondary, pick: pickSecondaryPrefab, pickAuto: pickSecondaryAuto },
+        avenue: { auto: isAutoAvenue, pick: pickAvenuePrefab, pickAuto: pickAvenueAuto },
+        roundabout: { auto: isAutoRoundabout, pick: pickRoundaboutPrefab, pickAuto: pickRoundaboutAuto },
+        path: { auto: isAutoPath, pick: pickPathPrefab, pickAuto: pickPathAuto },
+    }[slot];
+    const isAuto = bySlot.auto;
+    const pick = bySlot.pick;
+    const pickAutoForSlot = bySlot.pickAuto;
     const [searchQuery, setSearchQuery] = useState("");
 
     // Bascule à gauche du panneau si le côté droit déborde de l'écran (panneau

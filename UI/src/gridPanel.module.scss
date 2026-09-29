@@ -45,8 +45,45 @@ $accent-medium: #1e83aa80;
     // Estrada/Geometria/Cul-de-sac/Avenida/Redes) — à 400rem tout se touchait ("muito
     // colado", retour en jeu). Élargir plutôt que réduire la taille du texte : un texte
     // plus petit nuit à la lisibilité d'un panneau d'outil déjà dense en contrôles.
+    // Largeur en style inline (redimensionnable par les bords, voir startResize).
     width: 460rem;
     pointer-events: auto;
+}
+
+// Poignées de redimensionnement, à cheval sur les bords gauche et droit.
+.resizeHandle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 10rem;
+    cursor: ew-resize;
+    z-index: 10;
+
+    &:hover {
+        background-color: #ffffff1a;
+    }
+}
+
+.resizeHandleLeft {
+    left: -5rem;
+}
+
+.resizeHandleRight {
+    right: -5rem;
+}
+
+// Panneau étroit (classe globale grg-compact, voir COMPACT_BELOW_REM) : icônes seules, le texte
+// reste en infobulle.
+:global(.grg-compact) {
+    .headerTitle,
+    .rowIconText,
+    .networkPrefabName {
+        display: none;
+    }
+
+    .rowIconGlyph {
+        margin-right: 0;
+    }
 }
 
 .panel {
@@ -120,12 +157,49 @@ $accent-medium: #1e83aa80;
     pointer-events: none;
     text-align: center;
     text-transform: uppercase;
-    font-size: var(--fontSizeL);
+    // Même taille que le titre des panneaux infoview du jeu (active-infoview-panel : title
+    // → var(--fontSizeS)) — demande utilisateur.
+    font-size: var(--fontSizeS);
     line-height: 1.2;
 }
 
 // Bouton de fermeture (même glyphe et taille que la croix des panneaux du jeu) :
 // désactive l'outil, comme le bouton de la barre d'outils.
+// Bouton de repli de la colonne droite, à gauche de la fermeture (même taille).
+.headerSide {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24rem;
+    height: 24rem;
+    margin-right: 4rem;
+    cursor: pointer;
+    opacity: 0.8;
+
+    &:hover {
+        opacity: 1;
+    }
+}
+
+.headerSideIcon,
+.headerSideIconOpen {
+    width: 12rem;
+    height: 12rem;
+    background-color: white;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+}
+
+// Colonne ouverte : flèche vers la droite (la replier) ; fermée : vers la gauche (l'ouvrir).
+.headerSideIconOpen {
+    transform: rotate(-90deg);
+}
+
+.headerSideIcon {
+    transform: rotate(90deg);
+}
+
 .headerClose {
     display: flex;
     align-items: center;
@@ -156,6 +230,14 @@ $accent-medium: #1e83aa80;
 
 // Bouton Anarchy (mod tiers optionnel) dans l'en-tête, à côté du titre : toujours
 // visible, jamais enterré dans une section repliable.
+// Vues dans l'en-tête, juste avant Anarchy.
+.headerViews {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: 10rem;
+}
+
 .headerAnarchy {
     display: flex;
     align-items: center;
@@ -166,9 +248,13 @@ $accent-medium: #1e83aa80;
 // Zone défilante des sections : bornée à une fraction de la hauteur d'écran
 // pour que .actions (bouton Générer), rendu comme frère hors de ce bloc,
 // reste toujours visible même si toutes les sections sont dépliées.
+// Rétrécit (zones défilantes) quand le panneau atteint sa hauteur maximale (style en ligne,
+// voir maxPanelHeight) : en-tête et bouton Générer restent entiers.
 .content {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
     // Pas de padding horizontal ici : il est porté par la zone défilante elle-même (voir
     // .scrollable), pour que la barre de défilement se loge dans la marge droite.
     padding: $panel-padding-y 0 0 0;
@@ -183,6 +269,81 @@ $accent-medium: #1e83aa80;
 // commentaire sur $panel-padding-x-right) : un léger chevauchement de la barre native
 // sur le bord droit du contenu est un compromis plus sûr qu'un vide permanent visible
 // même sans défilement.
+// Colonnes côte à côte, chacune avec sa zone défilante (même hauteur maximale que .content).
+.columns {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-height: 0;
+}
+
+// Colonne gauche à la largeur de l'ancien panneau (460rem), la droite prend le reste (~260rem).
+.columns > .leftColumn {
+    flex: 16 1 0;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+// Colonne droite : largeur restante.
+.columns > .scrollWrapper {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+// Zone défilante de gauche : hauteur de SON contenu (base auto), rétrécie seulement sous la hauteur
+// maximale du panneau — avec une base 0, elle prenait la hauteur de la colonne droite et
+// s'écrasait quand on repliait Redes (retour utilisateur).
+.leftColumn > .scrollWrapper {
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+// Zone défilante à la hauteur de son contenu (base auto, pas 0) dans les deux colonnes : sinon le
+// jeu la mesurait vide et affichait une barre de défilement inutile (retour utilisateur, Relevo :
+// Geometria coupée alors que tout tenait).
+.columns .scrollable {
+    flex: 0 1 auto;
+    min-height: 0;
+}
+
+// Haut fixe de la colonne gauche : même marge horizontale que la zone défilante.
+.fixedTop {
+    flex-shrink: 0;
+    padding: 0 $panel-padding-x;
+}
+
+// Barre compacte sous les motifs : types de zone + compteur à gauche, vues à droite.
+.topBar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8rem 0 10rem;
+    margin-bottom: 10rem;
+    border-bottom-style: solid;
+    border-bottom-width: var(--stroke2);
+    border-bottom-color: var(--dividerColor);
+}
+
+.columns > .sideColumn {
+    flex: 9 1 0;
+}
+
+// Colonne droite : même filet que les séparateurs de section du jeu.
+.sideColumn {
+    border-left-style: solid;
+    border-left-width: var(--stroke2);
+    border-left-color: var(--dividerColor);
+}
+
 .scrollWrapper {
     flex: 1;
     min-height: 0;
@@ -220,7 +381,11 @@ $accent-medium: #1e83aa80;
     align-items: center;
     cursor: pointer;
     padding-bottom: 6rem;
-    border-bottom: 1rem solid #{$accent-soft}; // accent atténué (plusieurs sections par panneau)
+    // Même séparateur que les sections des panneaux d'info du jeu (info-section : var(--stroke2),
+    // var(--dividerColor), variables globales :root du jeu) — demande utilisateur.
+    border-bottom-style: solid;
+    border-bottom-width: var(--stroke2);
+    border-bottom-color: var(--dividerColor);
 }
 
 // Section verrouillée fermée (Cul-de-sac quand le mode est désactivé) : signale
@@ -265,40 +430,38 @@ $accent-medium: #1e83aa80;
 // NetworkTabs dans gridPanel.tsx) : remplace les anciens .networkGroupLabel empilés
 // ("Avenue"/"Main" au-dessus de leurs rangées) par un vrai changement d'onglet, un
 // seul réseau visible à la fois.
-.networkTabs {
-    display: flex;
-    flex-direction: row;
-
-    & > * + * {
-        margin-left: 4rem;
-    }
-}
-
-.networkTab {
-    flex: 1;
-    padding: 5rem 4rem;
+// Sous-groupe d'une section (Forma / Terreno / Ligações) : petit titre bleu du jeu, comme les
+// intertitres des panneaux d'info.
+.subgroup {
     font-size: var(--fontSizeXS);
     font-weight: 600;
-    color: #ffffff80;
-    background-color: #ffffff0f;
-    border: 1rem solid #ffffff1f;
-    border-radius: 6rem;
-    cursor: pointer;
-    coh-font-fit-mode: shrink;
-    white-space: nowrap;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #7fb8e6;
+    margin: 10rem 0 4rem;
 
-    &:hover {
-        border-color: #ffffff40;
+    &:first-child {
+        margin-top: 4rem;
     }
 }
 
-.networkTabActive {
-    color: white;
-    background-image: linear-gradient(to bottom, $accent-gradient-start 0%, $accent 100%);
-    border-color: transparent;
+// Réseaux en liste : un bloc par réseau (nom + route choisie, puis ses melhoramentos),
+// séparés par un filet, comme les sous-parties des panneaux d'info du jeu.
+// Libellés Geral / Esquerda / Direita des melhoramentos : plus petits, pour une colonne droite étroite.
+.upgradeSideLabel {
+    font-size: var(--fontSizeXS);
+    font-weight: 600;
+    white-space: nowrap;
+}
 
-    &:hover {
-        border-color: transparent;
+.networkBlock {
+    padding: 6rem 0 4rem;
+
+    & + .networkBlock {
+        border-top-style: solid;
+        border-top-width: var(--stroke2);
+        border-top-color: var(--dividerColor);
+        margin-top: 4rem;
     }
 }
 
@@ -313,7 +476,7 @@ $accent-medium: #1e83aa80;
     align-items: center;
     flex: 0 1 auto;
     min-width: 0;
-    max-width: 220rem;
+    max-width: 170rem;
     overflow: hidden;
     padding: 2rem 6rem;
     border-radius: 4rem;
@@ -416,6 +579,44 @@ $accent-medium: #1e83aa80;
     }
 }
 
+// Annuler / refaire / valeurs par défaut, alignés à droite du titre Padrão.
+.headerActions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+}
+
+.historyButton {
+    width: 22rem;
+    height: 20rem;
+    margin-left: 4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4rem;
+    background: transparent;
+    border: 1rem solid #ffffff33;
+    color: #ffffffd9;
+    font-size: var(--fontSizeS);
+    cursor: pointer;
+
+    &:hover {
+        background-color: #ffffff1a;
+        border-color: #ffffff66;
+    }
+}
+
+.historyButtonDisabled {
+    opacity: 0.35;
+    cursor: default;
+
+    &:hover {
+        background-color: transparent;
+        border-color: #ffffff33;
+    }
+}
+
 .resetButtonGlyph {
     margin-right: 4rem;
     flex-shrink: 0;
@@ -431,24 +632,51 @@ $accent-medium: #1e83aa80;
     margin-bottom: 10rem;
 }
 
+// Faixa de ícones (proposition B retenue par l'utilisateur) : tous les motifs sur une ligne,
+// icône seule ; nom et description du motif choisi en dessous (.patternInfo). Pas de gap
+// (ignoré par cohtml) : marge à gauche entre boutons.
 .patternButtons {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
+    margin: 0 -5rem -5rem 0;
 
-    & > * + * {
-        margin-left: 8rem;
+    & > * {
+        margin: 0 5rem 5rem 0;
     }
+}
+
+.patternInfo {
+    margin-top: 8rem;
+}
+
+.patternInfoName {
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: white;
+}
+
+// Une seule ligne (haut fixe du panneau) ; texte complet en infobulle.
+.patternInfoDescription {
+    margin-top: 2rem;
+    font-size: var(--fontSizeXS);
+    line-height: 1.3em;
+    color: #ffffffb3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .patternButton {
     position: relative;
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 40rem;
+    height: 36rem;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4rem;
-    padding: 10rem 4rem;
+    padding: 0;
     background-color: #ffffff0f;
     border: 1rem solid #ffffff1f;
     border-radius: 8rem;
@@ -483,9 +711,13 @@ $accent-medium: #1e83aa80;
 }
 
 .patternButtonLabel {
+    max-width: 100%;
     font-size: var(--fontSizeXS);
     color: #ffffffd9;
     line-height: 1.2em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 // Ruban "em breve" en coin, même dégradé que l'état sélectionné — cohérent avec
@@ -565,6 +797,7 @@ $accent-medium: #1e83aa80;
 .sliderControlHeader {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 6rem;
@@ -685,6 +918,7 @@ $accent-medium: #1e83aa80;
 .toggleRow {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
 }
@@ -700,6 +934,7 @@ $accent-medium: #1e83aa80;
 .dropdownRow {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
 }
@@ -710,7 +945,7 @@ $accent-medium: #1e83aa80;
 // restante. Pas d'overflow: hidden, qui rognerait la liste déroulante une fois ouverte.
 .dropdownControl {
     flex: 1 1 auto;
-    min-width: 0;
+    min-width: 150rem;
     max-width: 220rem;
 
     & > * {
@@ -718,6 +953,14 @@ $accent-medium: #1e83aa80;
         min-width: 0;
         max-width: 100%;
     }
+}
+
+// Avertissement du motif Relevo sur terrain plat (même rouge atténué que .collisionHint).
+.contourFlatHint {
+    font-size: var(--fontSizeXS);
+    line-height: 1.3em;
+    color: #ffb080;
+    margin-bottom: 12rem;
 }
 
 .dropdownRowLabel {
@@ -736,12 +979,45 @@ $accent-medium: #1e83aa80;
     // rapport au panneau entier, pas par rapport au bouton, plus étroit, au-dessus.
     align-items: center;
     padding: 10rem $panel-padding-x $panel-padding-y;
+    // Second fond, comme les sections (.foldout) — demande utilisateur. Coins bas arrondis
+    // comme le panneau (12rem), sinon le fond déborderait de ses coins.
+    background-color: #708f9b33; // --commonTransparentGray du jeu, même valeur que .foldout
+    // Écart avec la dernière section au-dessus, même valeur qu'entre deux sections (.foldout + .foldout).
+    margin-top: 10rem;
+    border-bottom-left-radius: 12rem;
+    border-bottom-right-radius: 12rem;
 }
 
 // Indication permanente (pas une tooltip au survol) : discrète, toujours visible.
 // margin-top plutôt que row-gap sur .actions : cohtml (moteur CSS du jeu) ignore
 // silencieusement gap/row-gap sur les conteneurs flex — déjà vu avec d'autres
 // propriétés CSS modernes (hsla(), pseudo-éléments) mal supportées ici.
+// Résumé au-dessus de Générer (tronçons · km · coût estimé).
+.summary {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    font-size: var(--fontSizeXS);
+    color: #ffffffb3;
+    margin-bottom: 8rem;
+}
+
+.summaryFigures {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.summarySeparator {
+    margin: 0 6rem;
+    opacity: 0.5;
+}
+
+.summaryCost {
+    color: #b8e986;
+}
+
 .generateHint {
     font-size: var(--fontSizeXS);
     line-height: 1.3em;

@@ -9,6 +9,7 @@ import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
 import { availableViews$, selectedViews$, setSelectedViews } from "bindings";
 import { VC, VF, VT } from "./vanilla";
+import { TIP_TEXT, TipContent } from "./tips";
 import viewUnderground from "./viewUnderground.svg";
 import viewZoneGrid from "./viewZoneGrid.svg";
 import viewInvisibleNetworks from "./viewInvisibleNetworks.svg";
@@ -39,7 +40,7 @@ const VIEW_FLAGS = [
     },
 ];
 
-export const ViewSelection = () => {
+export const ViewSelection = ({ compact = false }: { compact?: boolean }) => {
     const { translate } = useLocalization();
     const available = useValue(availableViews$);
     const selected = useValue(selectedViews$);
@@ -49,9 +50,7 @@ export const ViewSelection = () => {
         return null;
     }
 
-    return (
-        <div className={styles.viewRow}>
-            <span className={styles.viewLabel}>{translate("GridRoadGenerator.UI.ViewLabel", "View")}</span>
+    const buttons = (
             <div className={styles.viewButtons}>
                 {visibleFlags.map((view) => (
                     <VC.ToolButton
@@ -61,12 +60,29 @@ export const ViewSelection = () => {
                         multiSelect={true}
                         disabled={false}
                         focusKey={VF.FOCUS_DISABLED}
-                        tooltip={translate(view.tooltipKey, view.tooltipFallback)}
+                        tooltip={
+                            <TipContent
+                                title={translate(view.tooltipKey, view.tooltipFallback)}
+                                description={(() => {
+                                    const key = view.tooltipKey.replace("GridRoadGenerator.UI.", "");
+                                    return translate(`GridRoadGenerator.UI.Tip.${key}`, TIP_TEXT[key]) ?? TIP_TEXT[key];
+                                })()}
+                            />
+                        }
                         onSelect={() => setSelectedViews(selected ^ view.flag)}
                         className={VT.toolButton.button}
                     />
                 ))}
             </div>
+    );
+    // Compacte : dans la barre fixe du haut, à côté des types de zone (voir gridPanel.tsx).
+    if (compact) {
+        return buttons;
+    }
+    return (
+        <div className={styles.viewRow}>
+            <span className={styles.viewLabel}>{translate("GridRoadGenerator.UI.ViewLabel", "View")}</span>
+            {buttons}
         </div>
     );
 };

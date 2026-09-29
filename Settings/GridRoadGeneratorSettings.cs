@@ -180,6 +180,96 @@ namespace GridRoadGenerator.Settings
         public const int ConcentricLayersDefault = 3;
         public const int ConcentricConnectionsDefault = 4;
 
+        /// <summary>Motif "Radial" (avec ConcentricMode) : rotonde au centre + avenues droites, voir GridParameters.RadialMode.</summary>
+        [SettingsUIHidden]
+        public bool RadialMode { get; set; }
+
+        /// <summary>Nombre d'avenues droites du motif Radial.</summary>
+        [SettingsUIHidden]
+        public int RadialAvenues { get; set; }
+
+        public const int RadialAvenuesDefault = 8;
+
+        /// <summary>Rayon demandé (m) de la rotonde centrale du motif Radial.</summary>
+        [SettingsUIHidden]
+        public float RadialRoundaboutRadius { get; set; }
+
+        public const float RadialRoundaboutRadiusDefault = 50f;
+
+        /// <summary>Anneaux circulaires autour de la rotonde du motif Radial (0 = aucun), indépendants de ConcentricLayers.</summary>
+        [SettingsUIHidden]
+        public int RadialLayers { get; set; }
+
+        public const int RadialLayersDefault = 2;
+
+        /// <summary>Motif "Cul-de-sac em árvore" (famille de la Grelha) : voir GridParameters.TreeMode.</summary>
+        [SettingsUIHidden]
+        public bool TreeMode { get; set; }
+
+        /// <summary>Distance (m) entre deux branches d'un même côté de la collectrice (motif árvore).</summary>
+        [SettingsUIHidden]
+        public float TreeBranchSpacing { get; set; }
+
+        /// <summary>Distance (m) entre deux paires d'impasses le long d'une branche (motif árvore).</summary>
+        [SettingsUIHidden]
+        public float TreeCulDeSacSpacing { get; set; }
+
+        /// <summary>Longueur (m) visée des impasses (motif árvore).</summary>
+        [SettingsUIHidden]
+        public float TreeCulDeSacLength { get; set; }
+
+        /// <summary>Motif "Orgânico" (famille de la Grelha) : voir GridParameters.OrganicMode.</summary>
+        [SettingsUIHidden]
+        public bool OrganicMode { get; set; }
+
+        /// <summary>Distance (m) visée entre deux rues voisines (motif orgânico).</summary>
+        [SettingsUIHidden]
+        public float OrganicStreetSpacing { get; set; }
+
+        /// <summary>Courbure des rues, 0–100 % (motif orgânico).</summary>
+        [SettingsUIHidden]
+        public float OrganicCurviness { get; set; }
+
+        /// <summary>Part des branches qui se referment en boucle, 0–100 % (motif orgânico).</summary>
+        [SettingsUIHidden]
+        public float OrganicLoopShare { get; set; }
+
+        /// <summary>Variante du tirage aléatoire, 1–100 (motif orgânico).</summary>
+        [SettingsUIHidden]
+        public int OrganicSeed { get; set; }
+
+        /// <summary>Sélection "Área livre" : points cliqués sur le terrain au lieu de nœuds de routes existantes (voir GridRoadToolSystem.FreeArea).</summary>
+        [SettingsUIHidden]
+        public bool FreeAreaMode { get; set; }
+
+        /// <summary>Variante "Pincel" de la zone libre : zone peinte au lieu de points cliqués (voir BrushMask).</summary>
+        [SettingsUIHidden]
+        public bool FreeAreaBrush { get; set; }
+
+        /// <summary>Diamètre (m) du pinceau, BrushMask.MinDiameter–MaxDiameter.</summary>
+        [SettingsUIHidden]
+        public float BrushDiameter { get; set; }
+
+        /// <summary>Pinceau carré (aligné sur les axes du monde) au lieu de rond.</summary>
+        [SettingsUIHidden]
+        public bool BrushSquare { get; set; }
+
+        /// <summary>Rotation (degrés, 0–90) du pinceau carré — Shift + souris en jeu, ou le panneau.</summary>
+        [SettingsUIHidden]
+        public float BrushAngle { get; set; }
+
+        /// <summary>Motif "Relevo" (famille de la Grelha) : voir GridParameters.ContourMode.</summary>
+        [SettingsUIHidden]
+        public bool ContourMode { get; set; }
+
+        /// <summary>Distance (m) entre deux rues de niveau voisines (motif relevo).</summary>
+        [SettingsUIHidden]
+        public float ContourSpacing { get; set; }
+
+        /// <summary>Distance (m) entre deux montées le long d'une rue de niveau (motif relevo).</summary>
+        [SettingsUIHidden]
+        public float ContourConnectorSpacing { get; set; }
+
         /// <summary>Taille visée (m) d'une zone en mode super-quarteirão — voir GridParameters.SuperblockZoneMeters.</summary>
         [SettingsUIHidden]
         public float SuperblockZoneMeters { get; set; }
@@ -224,6 +314,15 @@ namespace GridRoadGenerator.Settings
         public bool PrincipalBikeLaneLeft { get; set; }
         [SettingsUIHidden]
         public bool PrincipalBikeLaneRight { get; set; }
+        /// <summary>Relva na berma (CompositionFlags.Side.PrimaryBeautification, pièce SideGrass/OppositeGrass du jeu).</summary>
+        [SettingsUIHidden]
+        public bool AvenueSideGrassLeft { get; set; }
+        [SettingsUIHidden]
+        public bool AvenueSideGrassRight { get; set; }
+        [SettingsUIHidden]
+        public bool PrincipalSideGrassLeft { get; set; }
+        [SettingsUIHidden]
+        public bool PrincipalSideGrassRight { get; set; }
 
         /// <summary>
         /// Réseau choisi explicitement dans le sélecteur du panneau, au format
@@ -250,6 +349,38 @@ namespace GridRoadGenerator.Settings
         /// </summary>
         [SettingsUIHidden]
         public string AvenueRoadPrefabName { get; set; }
+
+        /// <summary>
+        /// Réseau de la rotonde centrale du motif Radial (RoadSegmentDef.IsRoundabout). Vide = mode
+        /// auto : même réseau que les rues (principal).
+        /// </summary>
+        [SettingsUIHidden]
+        public string RoundaboutRoadPrefabName { get; set; }
+
+
+        /// <summary>Zone posée automatiquement le long des routes générées (nom du prefab ; vide = aucune).</summary>
+        [SettingsUIHidden]
+        public string ZoningPrefabName { get; set; }
+
+        /// <summary>Grelha/Loop : un axe suit les courbes de niveau dominantes (voir GridParameters.AlignToTerrain).</summary>
+        [SettingsUIHidden]
+        public bool AlignToTerrain { get; set; }
+
+        /// <summary>Liaisons piétonnes du bout des impasses (Árvore, Orgânico, Grelha avec impasses).</summary>
+        [SettingsUIHidden]
+        public bool PedestrianLinks { get; set; }
+
+        /// <summary>Motif "Misto" (famille de la Grelha) : voir GridParameters.MixedMode.</summary>
+        [SettingsUIHidden]
+        public bool MixedMode { get; set; }
+
+        /// <summary>Rayon (m) du cercle central du motif Misto.</summary>
+        [SettingsUIHidden]
+        public float MixedCoreRadius { get; set; }
+
+        /// <summary>Réseau des liaisons piétonnes ; vide = "Pedestrian Path" du jeu.</summary>
+        [SettingsUIHidden]
+        public string PathPrefabName { get; set; }
 
         /// <summary>
         /// Vue active (Underground/ZoneGrid/InvisibleNetworks) pendant que l'outil est
@@ -324,6 +455,27 @@ namespace GridRoadGenerator.Settings
             ConcentricMode = false;
             ConcentricLayers = ConcentricLayersDefault;
             ConcentricConnections = ConcentricConnectionsDefault;
+            RadialMode = false;
+            RadialAvenues = RadialAvenuesDefault;
+            RadialRoundaboutRadius = RadialRoundaboutRadiusDefault;
+            RadialLayers = RadialLayersDefault;
+            TreeMode = false;
+            TreeBranchSpacing = GridGenerator.TreeBranchSpacingDefault;
+            TreeCulDeSacSpacing = GridGenerator.TreeCulDeSacSpacingDefault;
+            TreeCulDeSacLength = GridGenerator.TreeCulDeSacLengthDefault;
+            OrganicMode = false;
+            OrganicStreetSpacing = GridGenerator.OrganicStreetSpacingDefault;
+            OrganicCurviness = GridGenerator.OrganicCurvinessDefault;
+            OrganicLoopShare = GridGenerator.OrganicLoopShareDefault;
+            OrganicSeed = GridGenerator.MinOrganicSeed;
+            ContourMode = false;
+            FreeAreaMode = false;
+            FreeAreaBrush = false;
+            BrushDiameter = GridRoadGenerator.Core.BrushMask.DefaultDiameter;
+            BrushSquare = false;
+            BrushAngle = 0f;
+            ContourSpacing = GridGenerator.ContourSpacingDefault;
+            ContourConnectorSpacing = GridGenerator.ContourConnectorSpacingDefault;
             AvenueMiddleTrees = false;
             AvenueMiddleGrass = false;
             AvenueSideTreesLeft = false;
@@ -336,9 +488,20 @@ namespace GridRoadGenerator.Settings
             PrincipalWideSidewalkRight = false;
             PrincipalBikeLaneLeft = false;
             PrincipalBikeLaneRight = false;
+            AvenueSideGrassLeft = false;
+            AvenueSideGrassRight = false;
+            PrincipalSideGrassLeft = false;
+            PrincipalSideGrassRight = false;
             RoadPrefabName = string.Empty;
             SecondaryRoadPrefabName = string.Empty;
             AvenueRoadPrefabName = string.Empty;
+            RoundaboutRoadPrefabName = string.Empty;
+            ZoningPrefabName = string.Empty;
+            AlignToTerrain = false;
+            PedestrianLinks = false;
+            MixedMode = false;
+            MixedCoreRadius = GridRoadGenerator.Core.GridGenerator.MixedCoreRadiusDefault;
+            PathPrefabName = string.Empty;
             // Comme CS2-NetworkTools : tout coché par défaut à la première ouverture.
             SelectedViews = ViewOption.All;
             AutoResolveCollisions = false;
@@ -348,49 +511,55 @@ namespace GridRoadGenerator.Settings
         /// Bouton "Repor valores" du panneau (retour utilisateur : "no painel em si podes colocar
         /// o botão para voltar a pôr os valores padrão, em todos os modos") : remet aux valeurs
         /// d'origine tous les paramètres de forme de tous les motifs (géométrie, cul-de-sac,
-        /// avenue, Loop, Superblock, Concêntrico). Garde ce qui relève d'un choix plutôt que d'un
-        /// réglage : le motif actif, les réseaux choisis, les melhoramentos, la vue et l'option
-        /// anti-collisions du menu Options.
+        /// avenue, Loop, Superblock, Concêntrico, Radial) et désactive tous les melhoramentos
+        /// (retour utilisateur : "desliga qualquer melhoramento por padrão" — des ciclovias
+        /// activées une fois restaient sur toutes les routes, session après session). Garde le
+        /// motif actif, les réseaux choisis, la vue et l'option anti-collisions du menu Options.
         /// </summary>
         public void ResetPanelParameters()
         {
             bool loopMode = LoopMode;
             bool superblockMode = SuperblockMode;
             bool concentricMode = ConcentricMode;
+            bool radialMode = RadialMode;
+            bool treeMode = TreeMode;
+            bool organicMode = OrganicMode;
+            bool mixedMode = MixedMode;
+            bool contourMode = ContourMode;
+            bool freeAreaMode = FreeAreaMode;
+            bool freeAreaBrush = FreeAreaBrush;
+            float brushDiameter = BrushDiameter;
+            bool brushSquare = BrushSquare;
+            float brushAngle = BrushAngle;
             string roadPrefab = RoadPrefabName;
             string secondaryRoadPrefab = SecondaryRoadPrefabName;
             string avenueRoadPrefab = AvenueRoadPrefabName;
+            string roundaboutRoadPrefab = RoundaboutRoadPrefabName;
             ViewOption views = SelectedViews;
             bool autoResolve = AutoResolveCollisions;
-            bool[] upgrades =
-            {
-                AvenueMiddleTrees, AvenueMiddleGrass, AvenueSideTreesLeft, AvenueSideTreesRight,
-                AvenueBikeLaneLeft, AvenueBikeLaneRight, PrincipalSideTreesLeft, PrincipalSideTreesRight,
-                PrincipalWideSidewalkLeft, PrincipalWideSidewalkRight, PrincipalBikeLaneLeft, PrincipalBikeLaneRight,
-            };
 
             SetDefaults();
 
             LoopMode = loopMode;
             SuperblockMode = superblockMode;
             ConcentricMode = concentricMode;
+            RadialMode = radialMode;
+            TreeMode = treeMode;
+            OrganicMode = organicMode;
+            MixedMode = mixedMode;
+            ContourMode = contourMode;
+            FreeAreaMode = freeAreaMode;
+            FreeAreaBrush = freeAreaBrush;
+            BrushDiameter = brushDiameter;
+            BrushSquare = brushSquare;
+            BrushAngle = brushAngle;
             RoadPrefabName = roadPrefab;
             SecondaryRoadPrefabName = secondaryRoadPrefab;
             AvenueRoadPrefabName = avenueRoadPrefab;
+            RoundaboutRoadPrefabName = roundaboutRoadPrefab;
             SelectedViews = views;
             AutoResolveCollisions = autoResolve;
-            AvenueMiddleTrees = upgrades[0];
-            AvenueMiddleGrass = upgrades[1];
-            AvenueSideTreesLeft = upgrades[2];
-            AvenueSideTreesRight = upgrades[3];
-            AvenueBikeLaneLeft = upgrades[4];
-            AvenueBikeLaneRight = upgrades[5];
-            PrincipalSideTreesLeft = upgrades[6];
-            PrincipalSideTreesRight = upgrades[7];
-            PrincipalWideSidewalkLeft = upgrades[8];
-            PrincipalWideSidewalkRight = upgrades[9];
-            PrincipalBikeLaneLeft = upgrades[10];
-            PrincipalBikeLaneRight = upgrades[11];
+            // Melhoramentos : laissés à leur valeur par défaut (tous désactivés, voir SetDefaults).
         }
 
         public GridParameters ToGridParameters() => new GridParameters
@@ -418,6 +587,32 @@ namespace GridRoadGenerator.Settings
             ConcentricMode = ConcentricMode,
             ConcentricLayers = ConcentricLayers > 0 ? ConcentricLayers : ConcentricLayersDefault,
             ConcentricConnections = ConcentricConnections > 0 ? ConcentricConnections : ConcentricConnectionsDefault,
+            RadialMode = RadialMode,
+            // 0 dans une config sauvegardée avant ce motif : défaut plutôt que minimum.
+            RadialAvenues = RadialAvenues > 0 ? RadialAvenues : RadialAvenuesDefault,
+            RadialRoundaboutRadius = RadialRoundaboutRadius > 0f ? RadialRoundaboutRadius : RadialRoundaboutRadiusDefault,
+            // Pas de "0 = défaut" ici : 0 anneau est un choix valable (rotonde + avenues seules).
+            RadialLayers = RadialLayers,
+            TreeMode = TreeMode,
+            // 0 dans une config sauvegardée avant ce motif : GenerateTree retombe sur les défauts.
+            TreeBranchSpacing = TreeBranchSpacing,
+            TreeCulDeSacSpacing = TreeCulDeSacSpacing,
+            TreeCulDeSacLength = TreeCulDeSacLength,
+            OrganicMode = OrganicMode,
+            // 0 dans une config sauvegardée avant ce motif : GenerateOrganic retombe sur les défauts
+            // (courbure et boucles : 0 est un choix valable, voir OrganicValue côté UI).
+            OrganicStreetSpacing = OrganicStreetSpacing,
+            OrganicCurviness = OrganicCurviness,
+            OrganicLoopShare = OrganicLoopShare,
+            OrganicSeed = OrganicSeed,
+            ContourMode = ContourMode,
+            AlignToTerrain = AlignToTerrain,
+            // Liaisons piétonnes retirées (le jeu effaçait les chemins quelques secondes après la pose).
+            PedestrianLinks = false,
+            MixedMode = MixedMode,
+            MixedCoreRadius = MixedCoreRadius > 0f ? MixedCoreRadius : GridRoadGenerator.Core.GridGenerator.MixedCoreRadiusDefault,
+            ContourSpacing = ContourSpacing,
+            ContourConnectorSpacing = ContourConnectorSpacing,
         };
     }
 }

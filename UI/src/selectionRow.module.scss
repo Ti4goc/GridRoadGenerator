@@ -2,12 +2,136 @@
 // pas une section repliable, donc son propre module minimal.
 .selectionRow {
     display: flex;
+    flex-direction: column;
+    padding: 0 12rem 10rem;
+    // Même séparateur que les sections des panneaux d'info du jeu (voir .foldoutHeader).
+    border-bottom-style: solid;
+    border-bottom-width: var(--stroke2);
+    border-bottom-color: var(--dividerColor);
+    margin-bottom: 12rem;
+}
+
+// Sélecteur "Estradas existentes / Área livre" : même langage que les onglets Redes
+// (.networkTab de gridPanel.module.scss) ; cohtml ignore `gap`, d'où les marges.
+.modeButtons {
+    display: flex;
+    flex-direction: row;
+    margin-bottom: 10rem;
+
+    & > * + * {
+        margin-left: 4rem;
+    }
+}
+
+.modeButton {
+    flex: 1;
+    padding: 6rem 4rem 5rem;
+    font-size: var(--fontSizeXS);
+    font-weight: 600;
+    color: #ffffff80;
+    background-color: #ffffff0f;
+    border: 1rem solid #ffffff1f;
+    border-radius: 6rem;
+    cursor: pointer;
+    coh-font-fit-mode: shrink;
+    white-space: nowrap;
+
+    &:hover {
+        border-color: #ffffff40;
+    }
+}
+
+.modeButtonContent {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.modeButtonIcon {
+    width: 22rem;
+    height: 22rem;
+    margin-bottom: 4rem;
+    opacity: 0.6;
+}
+
+.modeButtonActive .modeButtonIcon {
+    opacity: 1;
+}
+
+.modeButtonLabel {
+    coh-font-fit-mode: shrink;
+    white-space: nowrap;
+}
+
+.modeButtonActive {
+    color: white;
+    background-image: linear-gradient(to bottom, var(--gradientHighlightStart) 0%, var(--gradientHighlightEnd) 100%);
+    border-color: transparent;
+
+    &:hover {
+        border-color: transparent;
+    }
+}
+
+// Forme du pinceau : libellé à gauche, deux boutons-icônes à droite (même langage que .modeButton).
+.shapeRow {
+    display: flex;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    padding: 0 12rem 10rem;
-    border-bottom: 1rem solid #1e83aa59; // accent (même teinte que le jeu, --selectedColor), atténué
-    margin-bottom: 12rem;
+    margin-bottom: 10rem;
+}
+
+.shapeLabel {
+    font-size: var(--fontSizeS);
+    color: #ffffffd9;
+}
+
+.shapeButtons {
+    display: flex;
+    flex-direction: row;
+
+    & > * + * {
+        margin-left: 4rem;
+    }
+}
+
+.shapeButton {
+    width: 30rem;
+    height: 26rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #ffffff0f;
+    border: 1rem solid #ffffff1f;
+    border-radius: 6rem;
+    cursor: pointer;
+
+    &:hover {
+        border-color: #ffffff40;
+    }
+}
+
+.shapeButtonActive {
+    background-image: linear-gradient(to bottom, var(--gradientHighlightStart) 0%, var(--gradientHighlightEnd) 100%);
+    border-color: transparent;
+}
+
+.shapeButtonIcon {
+    width: 16rem;
+    height: 16rem;
+    opacity: 0.6;
+}
+
+.shapeButtonActive .shapeButtonIcon {
+    opacity: 1;
+}
+
+.countRow {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
 }
 
 .selectionLabel {
@@ -18,6 +142,102 @@
     color: #ffffffd9;
 }
 
+.nodeCount {
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: white;
+}
+
 .invalid {
     color: #ff8080;
+}
+
+// Barre compacte du haut : types de zone en icônes seules + compteur.
+.areaBar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+}
+
+.areaButton {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 30rem;
+    margin-right: 4rem;
+    padding: 0 6rem;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    background-color: #ffffff0f;
+    border: 1rem solid #ffffff1f;
+    border-radius: 6rem;
+    cursor: pointer;
+
+    &:hover {
+        border-color: #ffffff40;
+    }
+}
+
+.areaButtonActive {
+    background-image: linear-gradient(to bottom, var(--gradientHighlightStart) 0%, var(--gradientHighlightEnd) 100%);
+    border-color: transparent;
+}
+
+.areaButtonIcon {
+    width: 18rem;
+    height: 18rem;
+    margin-right: 5rem;
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+.areaButtonActive .areaButtonIcon {
+    opacity: 1;
+}
+
+.areaButtonLabel {
+    min-width: 0;
+    font-size: var(--fontSizeXS);
+    font-weight: 600;
+    color: #ffffffb3;
+    white-space: nowrap;
+    coh-font-fit-mode: shrink;
+}
+
+// Panneau étroit (grg-compact, voir gridPanel.tsx) : types de zone en icônes seules.
+:global(.grg-compact) .areaButtonLabel {
+    display: none;
+}
+
+:global(.grg-compact) .areaButtonIcon {
+    margin-right: 0;
+}
+
+.areaButtonActive .areaButtonLabel {
+    color: white;
+}
+
+.areaCount {
+    margin-left: 2rem;
+    min-width: 24rem;
+    text-align: right;
+    font-size: var(--fontSizeS);
+    font-weight: 600;
+    color: white;
+}
+
+// Compteur dans le résumé du bas (même taille que le reste du résumé).
+.selectionCount {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.selectionCountIcon {
+    width: 14rem;
+    height: 14rem;
+    margin-right: 4rem;
+    opacity: 0.8;
 }

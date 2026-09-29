@@ -7,6 +7,7 @@ using Colossal.Mathematics;
 using Game;
 using Game.Net;
 using Game.Rendering;
+using Game.Simulation;
 using Game.Tools;
 using GridRoadGenerator.Core;
 using GridRoadGenerator.Settings;
@@ -67,6 +68,15 @@ namespace GridRoadGenerator.Systems
 
         private const float CircleOutlineWidth = 0.35f;
         private const float PerimeterLineWidth = 0.6f;
+        /// <summary>Largeur du contour de zone libre refermée (future route de périmètre).</summary>
+        private const float FreeAreaRoadWidth = 2f;
+        /// <summary>Zone libre, style des outils de zone du jeu (bairros) : remplissage, bord, nœuds, pinceau.</summary>
+        private static readonly Color AreaFill = new Color(0.3f, 0.62f, 1f, 0.22f);
+        private static readonly Color AreaOutline = new Color(0.8f, 0.92f, 1f, 0.95f);
+        private static readonly Color AreaNodeFill = new Color(0.3f, 0.62f, 1f, 0.9f);
+        private static readonly Color BrushFill = new Color(0.3f, 0.62f, 1f, 0.12f);
+        private const float AreaEdgeWidth = 1.2f;
+        private const float AreaNodeDiameter = 9f;
         private const float LiveSketchLineWidth = 0.6f;
         private const float LiveSketchAvenueWidth = 0.85f;
         private const float LiveSketchPedestrianWidth = 0.45f;
@@ -78,6 +88,10 @@ namespace GridRoadGenerator.Systems
         private ToolSystem m_ToolSystem;
         private GridRoadToolSystem m_GridRoadToolSystem;
         private OverlayRenderSystem m_OverlayRenderSystem;
+        private TerrainSystem m_TerrainSystem;
+
+        /// <summary>Longueur (m) des morceaux d'une ligne du croquis posée sur le relief.</summary>
+        private const float SketchTerrainStep = 10f;
 
         protected override void OnCreate()
         {
@@ -85,6 +99,7 @@ namespace GridRoadGenerator.Systems
             m_ToolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
             m_GridRoadToolSystem = World.GetOrCreateSystemManaged<GridRoadToolSystem>();
             m_OverlayRenderSystem = World.GetOrCreateSystemManaged<OverlayRenderSystem>();
+            m_TerrainSystem = World.GetOrCreateSystemManaged<TerrainSystem>();
         }
 
         protected override void OnUpdate()
@@ -100,6 +115,13 @@ namespace GridRoadGenerator.Systems
 
             OverlayRenderSystem.Buffer buffer = m_OverlayRenderSystem.GetBuffer(out JobHandle dependencies);
             dependencies.Complete();
+
+            if (m_GridRoadToolSystem.FreeAreaMode)
+            {
+                DrawFreeArea(buffer);
+                DrawLiveSketch(buffer);
+                return;
+            }
 
             // Point discret sur tous les nœuds routiers sélectionnables, avant même le survol
             // (jamais ceux déjà sélectionnés ou survolés, qui ont déjà leur propre cercle plus
@@ -178,6 +200,214 @@ namespace GridRoadGenerator.Systems
         }
 
         /// <summary>
+        /// Zone libre (voir GridRoadToolSystem.FreeArea), dans le style des outils du jeu (retour
+        /// utilisateur : "segue a estética do jogo", outil des bairros / pinceaux du terrain) : tout est
+        /// projeté sur le relief (StyleFlags.Projected) au lieu de rester à plat.
+        ///  - Pintar área : cercle du pinceau et zone peinte remplie, collés au terrain ;
+        ///  - Desenhar área : zone remplie, côtés, points ronds, côté vers le curseur en pointillés ;
+        ///  - zone refermée : contour lissé épais (future route de périmètre) et zone remplie.
+        /// </summary>
+        private void DrawFreeArea(OverlayRenderSystem.Buffer buffer)
+        {
+            IReadOnlyList<float3> points = m_GridRoadToolSystem.FreeAreaPoints;
+            IReadOnlyList<float3> ring = m_GridRoadToolSystem.FreeAreaRing;
+            float3? cursor = m_GridRoadToolSystem.FreeAreaCursor;
+            TerrainHeightData heightData = m_TerrainSystem.GetHeightData();
+            bool closed = ring.Count >= 3 && !m_GridRoadToolSystem.BrushPainting;
+
+            if (closed)
+            {
+                DrawFill(buffer, ref heightData, RingFill(ring), AreaFill, _ringFillStep);
+                for (int i = 0; i < ring.Count; i++)
+                {
+                    DrawProjected(buffer, ref heightData, AreaOutline, ring[i], ring[(i + 1) % ring.Count], FreeAreaRoadWidth, false);
+                }
+            }
+
+            if (m_GridRoadToolSystem.BrushMode)
+            {
+                if (!closed)
+                {
+                    float fillWidth = m_GridRoadToolSystem.BrushFillWidth;
+                    foreach ((float3 a, float3 b) in m_GridRoadToolSystem.BrushFill)
+                    {
+                        buffer.DrawLine(AreaFill, AreaFill, 0f, OverlayRenderSystem.StyleFlags.Projected, new Line3.Segment(a, b), fillWidth, new float2(0f, 0f));
+                    }
+                    foreach ((float3 a, float3 b) in m_GridRoadToolSystem.BrushBoundary)
+                    {
+                        buffer.DrawLine(AreaOutline, AreaOutline, 0f, OverlayRenderSystem.StyleFlags.Projected, new Line3.Segment(a, b), AreaEdgeWidth, new float2(1f, 1f));
+                    }
+                }
+                if (cursor.HasValue)
+                {
+                    float radius = m_GridRoadToolSystem.BrushRadius;
+                    float outline = math.max(1f, radius * 0.016f);
+                    if (m_GridRoadToolSystem.BrushSquare)
+                    {
+                        // Carré : remplissage en bandes (collé au relief), puis les quatre côtés.
+                        float3 c = cursor.Value;
+                        float angle = math.radians(m_GridRoadToolSystem.BrushAngle);
+                        float3 ax = new float3(math.cos(angle), 0f, math.sin(angle)), az = new float3(-ax.z, 0f, ax.x);
+                        // Au plus ~24 bandes de ~20 morceaux, quelle que soit la taille (pinceau de 1000 m :
+                        // 6000 lignes par frame auparavant).
+                        float band = math.max(BrushMask.Cell * 4f, 2f * radius / 24f);
+                        float piece = math.max(SketchTerrainStep, 2f * radius / 20f);
+                        for (float z = -radius + band * 0.5f; z < radius; z += band)
+                        {
+                            DrawProjected(buffer, ref heightData, BrushFill, c - radius * ax + z * az, c + radius * ax + z * az, band, false, 0f, piece);
+                        }
+                        float3 a = c - radius * ax - radius * az, b = c + radius * ax - radius * az;
+                        float3 d = c - radius * ax + radius * az, e = c + radius * ax + radius * az;
+                        DrawProjected(buffer, ref heightData, AreaOutline, a, b, outline, false);
+                        DrawProjected(buffer, ref heightData, AreaOutline, b, e, outline, false);
+                        DrawProjected(buffer, ref heightData, AreaOutline, e, d, outline, false);
+                        DrawProjected(buffer, ref heightData, AreaOutline, d, a, outline, false);
+                    }
+                    else
+                    {
+                        buffer.DrawCircle(AreaOutline, BrushFill, outline, OverlayRenderSystem.StyleFlags.Projected,
+                            new float2(0f, 1f), cursor.Value, 2f * radius);
+                    }
+                }
+                return;
+            }
+
+            if (closed)
+            {
+                // Points déplaçables : celui sous le curseur grossit (on peut le saisir).
+                foreach (float3 p in points)
+                {
+                    bool hover = m_GridRoadToolSystem.FreeAreaCanGrab && cursor.HasValue && math.distance(p.xz, cursor.Value.xz) < 14f;
+                    DrawNode(buffer, ref heightData, p, hover ? AreaNodeDiameter * 1.3f : AreaNodeDiameter * 0.8f, hover ? AreaOutline : AreaNodeFill);
+                }
+                return;
+            }
+
+            if (m_GridRoadToolSystem.FreeAreaDragging && points.Count >= 3)
+            {
+                var dragged = new List<float3>(points);
+                DrawFill(buffer, ref heightData, FillRuns(dragged, out float draggedStep), AreaFill, draggedStep);
+                for (int i = 0; i < points.Count; i++)
+                {
+                    DrawProjected(buffer, ref heightData, AreaOutline, points[i], points[(i + 1) % points.Count], AreaEdgeWidth, false);
+                    DrawNode(buffer, ref heightData, points[i], AreaNodeDiameter, AreaNodeFill);
+                }
+                return;
+            }
+
+            // Tracé en cours : la zone suit le curseur (comme l'outil des bairros).
+            bool closeHover = cursor.HasValue && points.Count >= 3
+                && math.distance(cursor.Value.xz, points[0].xz) < FreeAreaPerimeter.CloseDistance;
+            var shape = new List<float3>(points);
+            if (cursor.HasValue && !closeHover && points.Count > 0)
+            {
+                shape.Add(cursor.Value);
+            }
+            if (shape.Count >= 3)
+            {
+                DrawFill(buffer, ref heightData, FillRuns(shape, out float shapeStep), AreaFill, shapeStep);
+            }
+            for (int i = 0; i + 1 < points.Count; i++)
+            {
+                DrawProjected(buffer, ref heightData, AreaOutline, points[i], points[i + 1], AreaEdgeWidth, false);
+            }
+            if (cursor.HasValue && points.Count > 0)
+            {
+                DrawProjected(buffer, ref heightData, AreaOutline, points[points.Count - 1], closeHover ? points[0] : cursor.Value, AreaEdgeWidth, !closeHover);
+                if (points.Count >= 2 && !closeHover)
+                {
+                    DrawProjected(buffer, ref heightData, AreaOutline, cursor.Value, points[0], AreaEdgeWidth, true);
+                }
+            }
+            for (int i = 0; i < points.Count; i++)
+            {
+                bool highlight = i == 0 && closeHover;
+                DrawNode(buffer, ref heightData, points[i], highlight ? AreaNodeDiameter * 1.5f : AreaNodeDiameter, highlight ? AreaOutline : AreaNodeFill);
+            }
+            if (cursor.HasValue && !closeHover)
+            {
+                DrawNode(buffer, ref heightData, cursor.Value, AreaNodeDiameter * 0.8f, BrushFill);
+            }
+        }
+
+        /// <summary>Remplissage du contour refermé, recalculé seulement quand il change.</summary>
+        private List<(float2 a, float2 b)> RingFill(IReadOnlyList<float3> ring)
+        {
+            if (_ringFillCount != ring.Count || !_ringFillFirst.Equals(ring[0]) || !_ringFillLast.Equals(ring[ring.Count - 1]))
+            {
+                _ringFillCount = ring.Count;
+                _ringFillFirst = ring[0];
+                _ringFillLast = ring[ring.Count - 1];
+                _ringFill = FillRuns(ring, out _ringFillStep);
+            }
+            return _ringFill;
+        }
+
+        /// <summary>
+        /// Bandes de remplissage d'un polygone, espacées de `step` : 4 m, plus sur une grande zone —
+        /// retour utilisateur : "ao desenhar uma área muito grande, o jogo fica lento" (bandes de 4 m
+        /// coupées tous les 64 m, recalculées et dessinées à chaque frame : ~100 000 lignes pour 25 km²).
+        /// </summary>
+        private static List<(float2 a, float2 b)> FillRuns(IReadOnlyList<float3> polygon, out float step)
+        {
+            float2 min = new float2(float.MaxValue), max = new float2(float.MinValue);
+            foreach (float3 p in polygon)
+            {
+                min = math.min(min, p.xz);
+                max = math.max(max, p.xz);
+            }
+            float2 size = math.max(max - min, 0f);
+            float scale = math.max(1f, math.sqrt(size.x * size.y / (BrushMask.Cell * 64f * GridRoadToolSystem.FillLineBudget)));
+            step = BrushMask.Cell * scale;
+            return FreeAreaPerimeter.FillRuns(polygon, step, 64f * scale);
+        }
+
+        private int _ringFillCount;
+        private float3 _ringFillFirst, _ringFillLast;
+        private float _ringFillStep = BrushMask.Cell;
+        private List<(float2 a, float2 b)> _ringFill = new List<(float2, float2)>();
+
+        /// <summary>Bandes de remplissage (xz) projetées sur le relief, jointives (largeur = pas des bandes).</summary>
+        private static void DrawFill(OverlayRenderSystem.Buffer buffer, ref TerrainHeightData heightData, List<(float2 a, float2 b)> runs, Color color, float width)
+        {
+            foreach ((float2 a, float2 b) in runs)
+            {
+                float3 a3 = OnTerrain(ref heightData, new float3(a.x, 0f, a.y));
+                float3 b3 = OnTerrain(ref heightData, new float3(b.x, 0f, b.y));
+                buffer.DrawLine(color, color, 0f, OverlayRenderSystem.StyleFlags.Projected, new Line3.Segment(a3, b3), width, new float2(0f, 0f));
+            }
+        }
+
+        /// <summary>Côté projeté sur le relief (morceaux de SketchTerrainStep m), plein ou en pointillés.</summary>
+        private static void DrawProjected(OverlayRenderSystem.Buffer buffer, ref TerrainHeightData heightData, Color color, float3 a, float3 b, float width, bool dashed,
+            float roundness = 1f, float step = SketchTerrainStep)
+        {
+            int pieces = math.max(1, (int)math.ceil(math.distance(a.xz, b.xz) / step));
+            float3 previous = OnTerrain(ref heightData, a);
+            for (int k = 1; k <= pieces; k++)
+            {
+                float3 next = OnTerrain(ref heightData, math.lerp(a, b, (float)k / pieces));
+                var segment = new Line3.Segment(previous, next);
+                if (dashed)
+                {
+                    buffer.DrawDashedLine(color, color, 0f, OverlayRenderSystem.StyleFlags.Projected, segment, width, 3f, 2f, new float2(1f, 1f));
+                }
+                else
+                {
+                    buffer.DrawLine(color, color, 0f, OverlayRenderSystem.StyleFlags.Projected, segment, width, new float2(roundness, roundness));
+                }
+                previous = next;
+            }
+        }
+
+        /// <summary>Point de la zone (rond, projeté), comme les nœuds de l'outil des bairros.</summary>
+        private static void DrawNode(OverlayRenderSystem.Buffer buffer, ref TerrainHeightData heightData, float3 p, float diameter, Color fill)
+        {
+            buffer.DrawCircle(AreaOutline, fill, diameter * 0.18f, OverlayRenderSystem.StyleFlags.Projected, new float2(0f, 1f),
+                OnTerrain(ref heightData, p), diameter);
+        }
+
+        /// <summary>
         /// Esquisse légère (lignes seulement, AUCUNE entité créée) de la grille pendant un drag
         /// de N'IMPORTE QUEL slider du panneau — voir GridRoadToolSystem.LivePreviewOverride/
         /// LivePreviewField ("coloca as linhas em todas as opções", généralisé depuis le seul
@@ -204,7 +434,7 @@ namespace GridRoadGenerator.Systems
             // (settings.ToGridParameters(), sans override) sont utilisés tels quels.
             (GridRoadToolSystem.LivePreviewField Field, float Value)? preview = m_GridRoadToolSystem.LivePreviewOverride;
             bool isDragOverride = preview.HasValue;
-            if ((!isDragOverride && !m_GridRoadToolSystem.ShowSketchOnly) || m_GridRoadToolSystem.SelectedPositions.Count < 2)
+            if ((!isDragOverride && !m_GridRoadToolSystem.ShowSketchOnly) || !m_GridRoadToolSystem.HasPerimeter)
             {
                 return;
             }
@@ -273,54 +503,149 @@ namespace GridRoadGenerator.Systems
                     case GridRoadToolSystem.LivePreviewField.ConcentricConnections:
                         parameters.ConcentricConnections = (int)math.round(value);
                         break;
+                    case GridRoadToolSystem.LivePreviewField.RadialAvenues:
+                        parameters.RadialAvenues = (int)math.round(value);
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.RadialRoundabout:
+                        parameters.RadialRoundaboutRadius = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.RadialLayers:
+                        parameters.RadialLayers = (int)math.round(value);
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.TreeBranchSpacing:
+                        parameters.TreeBranchSpacing = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.TreeCulDeSacSpacing:
+                        parameters.TreeCulDeSacSpacing = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.TreeCulDeSacLength:
+                        parameters.TreeCulDeSacLength = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.OrganicStreetSpacing:
+                        parameters.OrganicStreetSpacing = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.OrganicCurviness:
+                        parameters.OrganicCurviness = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.OrganicLoopShare:
+                        parameters.OrganicLoopShare = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.OrganicSeed:
+                        parameters.OrganicSeed = (int)math.round(value);
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.ContourSpacing:
+                        parameters.ContourSpacing = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.ContourConnectorSpacing:
+                        parameters.ContourConnectorSpacing = value;
+                        break;
+                    case GridRoadToolSystem.LivePreviewField.MixedCoreRadius:
+                        parameters.MixedCoreRadius = value;
+                        break;
                 }
             }
 
-            List<RoadSegmentDef> segments;
-            RoundaboutInfo roundabout = default;
-            try
+            // Croquis par défaut (pas de drag) : lignes calculées une fois par grille, puis
+            // seulement redessinées (retour utilisateur : jeu lent après avoir peint une grande zone).
+            if (!isDragOverride)
             {
-                segments = settings.LoopMode
-                    ? GridGenerator.GenerateLoopGrid(positions, parameters)
-                    : GridGenerator.GenerateGrid(positions, parameters, out _, out roundabout);
-            }
-            catch
-            {
-                return; // périmètre dégénéré cette frame : pas de croquis, rien d'autre.
-            }
-
-            // Couleur/largeur par TYPE de réseau (voir RoadSegmentDef.IsAvenue/IsPedestrian) —
-            // retour utilisateur en jeu : "poder destinguir cada tipo de arteria coletor, rotunda
-            // etc" puis, en mode SuperblockMode, "o mod não esta a considerar bem os tipos de
-            // estradas" (le piéton tombait dans la même catégorie blanche que le reste, croquis
-            // illisible) — même hiérarchie visuelle (le plus large = le plus important) que les
-            // vraies routes de l'aperçu réel, même si le croquis reste en lignes pointillées
-            // légères. IsPedestrian testé AVANT IsAvenue par construction (jamais les deux à la
-            // fois, voir RoadSegmentDef), mais l'ordre explicite documente l'intention.
-            foreach (RoadSegmentDef segment in segments)
-            {
-                (Color color, float width) = segment.IsPedestrian ? (LiveSketchPedestrian, LiveSketchPedestrianWidth)
-                    : segment.IsAvenue ? (LiveSketchAvenue, LiveSketchAvenueWidth)
-                    : (LiveSketchLine, LiveSketchLineWidth);
-                if (segment.IsArc)
+                _wasDragging = false;
+                if (_sketchLinesVersion != m_GridRoadToolSystem.SketchVersion || _sketchLinesVersion < 0)
                 {
-                    // Même courbe que celle posée côté ECS (GridRoadToolSystem.CreateGridDefinitions),
-                    // sinon un anneau Concêntrico apparaîtrait en facettes droites dans le croquis.
-                    Bezier4x3 curve = NetUtils.FitCurve(segment.Start, segment.StartTangent, segment.EndTangent, segment.End);
-                    buffer.DrawDashedCurve(color, curve, width, 1.5f, 1f);
+                    List<RoadSegmentDef> cachedSegments;
+                    try
+                    {
+                        cachedSegments = m_GridRoadToolSystem.GenerateSketch(positions, parameters, out RoundaboutInfo cachedRoundabout);
+                        _sketchRoundabout = cachedRoundabout;
+                    }
+                    catch
+                    {
+                        return;
+                    }
+                    m_GridRoadToolSystem.RemoveObstacleSegments(cachedSegments);
+                    BuildSketchLines(cachedSegments, settings, _sketchLines, _sketchRoundabout, out _sketchRoundaboutCentre);
+                    _sketchLinesVersion = m_GridRoadToolSystem.SketchVersion;
                 }
                 else
                 {
-                    buffer.DrawDashedLine(color, new Line3.Segment(segment.Start, segment.End), width, 1.5f, 1f);
+                    // Même grille : GenerateSketch ne recalcule rien, mais garde la clé à jour.
+                    m_GridRoadToolSystem.GenerateSketch(positions, parameters, out _);
+                    if (_sketchLinesVersion != m_GridRoadToolSystem.SketchVersion)
+                    {
+                        return; // la grille vient de changer : lignes refaites à la frame suivante
+                    }
                 }
+                foreach ((Color color, float width, float3 a, float3 b) in _sketchLines)
+                {
+                    buffer.DrawDashedLine(color, new Line3.Segment(a, b), width, 1.5f, 1f);
+                }
+                if (_sketchRoundabout.HasRoundabout)
+                {
+                    buffer.DrawCircle(LiveSketchRoundabout, default, LiveSketchLineWidth, 0, new float2(0f, 1f), _sketchRoundaboutCentre, _sketchRoundabout.Radius * 2f);
+                }
+                return;
             }
 
-            // Rotonde avenue×avenue (Grille classique uniquement, voir ComputeAvenueRoundabout —
-            // GenerateLoopGrid n'a pas cette notion) : simple cercle pointillé à la bonne position/
-            // taille, pas l'îlot décoratif réel (aucune entité pendant le croquis).
-            if (roundabout.HasRoundabout)
+            // Drag : grille calculée sur un thread de fond (retour utilisateur : Misto lent, ~0,5 s par
+            // valeur) ; le dernier résultat reste affiché, l'image du jeu ne se fige plus.
+            if (!_wasDragging)
             {
-                buffer.DrawCircle(LiveSketchRoundabout, default, LiveSketchLineWidth, 0, new float2(0f, 1f), roundabout.Center, roundabout.Radius * 2f);
+                _dragLines.Clear();
+                _dragLines.AddRange(_sketchLines);
+                _dragRoundabout = _sketchRoundabout;
+                _dragRoundaboutCentre = _sketchRoundaboutCentre;
+                _dragResultKey = null;
+                _dragTask = null;
+            }
+            _wasDragging = true;
+            float3 sum = float3.zero;
+            foreach (float3 p in positions) sum += p;
+            GridParameters keyParameters = parameters;
+            keyParameters.HeightAt = null;
+            object key = (positions.Count, sum, settings.LoopMode, keyParameters);
+            if (_dragTask != null && _dragTask.IsCompleted)
+            {
+                if (_dragTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && _dragTask.Result.segments != null)
+                {
+                    List<RoadSegmentDef> segments = _dragTask.Result.segments;
+                    m_GridRoadToolSystem.SeedSketch(_dragTaskKey, segments, _dragTask.Result.roundabout);
+                    m_GridRoadToolSystem.RemoveObstacleSegments(segments);
+                    _dragRoundabout = _dragTask.Result.roundabout;
+                    BuildSketchLines(segments, settings, _dragLines, _dragRoundabout, out _dragRoundaboutCentre);
+                }
+                _dragResultKey = _dragTaskKey;
+                _dragTask = null;
+            }
+            if (_dragTask == null && !key.Equals(_dragResultKey))
+            {
+                var copy = new List<float3>(positions);
+                GridParameters threadParameters = parameters;
+                threadParameters.HeightAt = m_GridRoadToolSystem.HeightSnapshot(positions);
+                bool loop = settings.LoopMode;
+                _dragTaskKey = key;
+                _dragTask = System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
+                    {
+                        RoundaboutInfo rb = default;
+                        List<RoadSegmentDef> result = loop
+                            ? GridGenerator.GenerateLoopGrid(copy, threadParameters)
+                            : GridGenerator.GenerateGrid(copy, threadParameters, out _, out rb);
+                        return (result, rb);
+                    }
+                    catch
+                    {
+                        return ((List<RoadSegmentDef>)null, default(RoundaboutInfo));
+                    }
+                });
+            }
+            foreach ((Color color, float width, float3 a, float3 b) in _dragLines)
+            {
+                buffer.DrawDashedLine(color, new Line3.Segment(a, b), width, 1.5f, 1f);
+            }
+            if (_dragRoundabout.HasRoundabout)
+            {
+                buffer.DrawCircle(LiveSketchRoundabout, default, LiveSketchLineWidth, 0, new float2(0f, 1f), _dragRoundaboutCentre, _dragRoundabout.Radius * 2f);
             }
             }
             finally
@@ -330,6 +655,60 @@ namespace GridRoadGenerator.Systems
                     m_GridRoadToolSystem.RecordDragFrame(sketchStopwatch.Elapsed.TotalMilliseconds);
                 }
             }
+        }
+
+        private int _sketchLinesVersion = -1;
+        private readonly List<(Color color, float width, float3 a, float3 b)> _sketchLines = new List<(Color, float, float3, float3)>();
+        private RoundaboutInfo _sketchRoundabout;
+        private float3 _sketchRoundaboutCentre;
+        /// <summary>Nombre de morceaux de croquis visé : au-delà, morceaux plus longs (grande zone).</summary>
+        private const int SketchLineBudget = 6000;
+
+        private bool _wasDragging;
+        private System.Threading.Tasks.Task<(List<RoadSegmentDef> segments, RoundaboutInfo roundabout)> _dragTask;
+        private object _dragTaskKey, _dragResultKey;
+        private readonly List<(Color color, float width, float3 a, float3 b)> _dragLines = new List<(Color, float, float3, float3)>();
+        private RoundaboutInfo _dragRoundabout;
+        private float3 _dragRoundaboutCentre;
+
+        /// <summary>Lignes du croquis (couleur, largeur, morceau), sur le relief si les routes le suivent.</summary>
+        private void BuildSketchLines(List<RoadSegmentDef> segments, GridRoadGeneratorSettings settings,
+            List<(Color color, float width, float3 a, float3 b)> lines, RoundaboutInfo roundabout, out float3 roundaboutCentre)
+        {
+            lines.Clear();
+            bool onTerrain = settings.FollowTerrain || settings.ContourMode || settings.FreeAreaMode;
+            TerrainHeightData heightData = onTerrain ? m_TerrainSystem.GetHeightData() : default;
+            bool singleNetwork = settings.ContourMode && !settings.LoopMode;
+            float total = 0f;
+            foreach (RoadSegmentDef segment in segments) total += math.distance(segment.Start.xz, segment.End.xz);
+            float step = math.max(SketchTerrainStep, total / SketchLineBudget);
+            foreach (RoadSegmentDef segment in segments)
+            {
+                (Color color, float width) = segment.IsPedestrian ? (LiveSketchPedestrian, LiveSketchPedestrianWidth)
+                    : segment.IsRoundabout ? (LiveSketchRoundabout, LiveSketchAvenueWidth)
+                    : segment.IsAvenue && !singleNetwork ? (LiveSketchAvenue, LiveSketchAvenueWidth)
+                    : (LiveSketchLine, LiveSketchLineWidth);
+                Bezier4x3 path = segment.IsArc
+                    ? NetUtils.FitCurve(segment.Start, segment.StartTangent, segment.EndTangent, segment.End)
+                    : NetUtils.StraightCurve(segment.Start, segment.End);
+                int pieces = onTerrain || segment.IsArc ? math.max(1, (int)math.ceil(math.distance(segment.Start.xz, segment.End.xz) / step)) : 1;
+                float3 previous = MathUtils.Position(path, 0f);
+                if (onTerrain) previous = OnTerrain(ref heightData, previous);
+                for (int k = 1; k <= pieces; k++)
+                {
+                    float3 next = MathUtils.Position(path, (float)k / pieces);
+                    if (onTerrain) next = OnTerrain(ref heightData, next);
+                    lines.Add((color, width, previous, next));
+                    previous = next;
+                }
+            }
+            roundaboutCentre = onTerrain && roundabout.HasRoundabout ? OnTerrain(ref heightData, roundabout.Center) : roundabout.Center;
+        }
+
+        private static float3 OnTerrain(ref TerrainHeightData heightData, float3 p)
+        {
+            p.y = TerrainUtils.SampleHeight(ref heightData, p);
+            return p;
         }
 
         /// <summary>Peu de nœuds sélectionnés (poignée par périmètre) : recherche linéaire suffisante.</summary>

@@ -19,6 +19,11 @@ namespace GridRoadGenerator.Systems
         private StringTooltip _confirmTooltip;
         private StringTooltip _invalidTooltip;
         private StringTooltip _perimeterDetectionFailedTooltip;
+        private StringTooltip _freeAddPointTooltip;
+        private StringTooltip _freeCloseTooltip;
+        private StringTooltip _freeInvalidTooltip;
+        private StringTooltip _brushPaintTooltip;
+        private StringTooltip _freeDragTooltip;
 
         protected override void OnCreate()
         {
@@ -50,6 +55,31 @@ namespace GridRoadGenerator.Systems
                 path = "gridRoadPerimeterDetectionFailed",
                 value = LocalizedString.Id("GridRoadGenerator.Tooltip.PerimeterDetectionFailed")
             };
+            _freeAddPointTooltip = new StringTooltip
+            {
+                path = "gridRoadFreeAddPoint",
+                value = LocalizedString.Id("GridRoadGenerator.Tooltip.FreeAddPoint")
+            };
+            _freeCloseTooltip = new StringTooltip
+            {
+                path = "gridRoadFreeClose",
+                value = LocalizedString.Id("GridRoadGenerator.Tooltip.FreeClose")
+            };
+            _freeDragTooltip = new StringTooltip
+            {
+                path = "gridRoadFreeDrag",
+                value = LocalizedString.Id("GridRoadGenerator.Tooltip.FreeDragPoint")
+            };
+            _brushPaintTooltip = new StringTooltip
+            {
+                path = "gridRoadBrushPaint",
+                value = LocalizedString.Id("GridRoadGenerator.Tooltip.BrushPaint")
+            };
+            _freeInvalidTooltip = new StringTooltip
+            {
+                path = "gridRoadFreeInvalid",
+                value = LocalizedString.Id("GridRoadGenerator.Tooltip.FreeInvalid")
+            };
         }
 
         protected override void OnUpdate()
@@ -59,8 +89,33 @@ namespace GridRoadGenerator.Systems
                 return;
             }
 
-            AddMouseTooltip(_selectNodeTooltip);
-            if (tool.NodeCount > 0)
+            if (tool.FreeAreaMode)
+            {
+                if (tool.BrushMode)
+                {
+                    AddMouseTooltip(_brushPaintTooltip);
+                }
+                else if (tool.FreeAreaClosed || tool.FreeAreaDragging)
+                {
+                    if (tool.FreeAreaCanGrab || tool.FreeAreaDragging)
+                    {
+                        AddMouseTooltip(_freeDragTooltip);
+                    }
+                }
+                else
+                {
+                    AddMouseTooltip(tool.FreeAreaPoints.Count >= 3 ? _freeCloseTooltip : _freeAddPointTooltip);
+                }
+                if (tool.FreeAreaInvalid)
+                {
+                    AddMouseTooltip(_freeInvalidTooltip);
+                }
+            }
+            else
+            {
+                AddMouseTooltip(_selectNodeTooltip);
+            }
+            if (tool.SelectionCount > 0 && !tool.BrushMode)
             {
                 AddMouseTooltip(_removeLastTooltip);
             }

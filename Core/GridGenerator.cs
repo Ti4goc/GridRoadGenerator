@@ -40,6 +40,24 @@ namespace GridRoadGenerator.Core
         /// est vrai.
         /// </summary>
         public bool IsArc;
+        /// <summary>
+        /// Vrai pour un tronçon d'une rue en impasse qui n'en est pas le dernier (motif Orgânico) :
+        /// même réseau cul-de-sac que le bout (IsCulDeSacEnd), sans cercle de retournement — toute
+        /// l'impasse garde ainsi un seul réseau.
+        /// </summary>
+        public bool IsLocal;
+        /// <summary>
+        /// Bout d'impasse (IsCulDeSacEnd, cercle de retournement) qui garde pourtant le réseau de sa
+        /// rue au lieu de passer sur le réseau cul-de-sac (motif Relevo : une rue de niveau qui
+        /// finit en impasse reste une rue de niveau).
+        /// </summary>
+        public bool KeepNetwork;
+        /// <summary>
+        /// Tronçon de l'anneau de la rotonde centrale du motif Radial : réseau propre, choisi dans
+        /// l'onglet Rotunda (voir GridRoadToolSystem.GetRoundaboutRoadPrefab). Toujours émis dans
+        /// le sens trigonométrique (circulation à droite) ; retourné côté ECS en circulation à gauche.
+        /// </summary>
+        public bool IsRoundabout;
         public float3 StartTangent;
         public float3 EndTangent;
 
@@ -52,6 +70,9 @@ namespace GridRoadGenerator.Core
             IsAvenue = isAvenue;
             IsPedestrian = false;
             IsArc = false;
+            IsLocal = false;
+            KeepNetwork = false;
+            IsRoundabout = false;
             StartTangent = default;
             EndTangent = default;
         }
@@ -109,6 +130,17 @@ namespace GridRoadGenerator.Core
         public float SpacingMeters;
         /// <summary>Rotation additionnelle (degrés, -90..+90) de la grille par rapport à l'arête la plus longue du polygone.</summary>
         public float AngleOffsetDegrees;
+        /// <summary>
+        /// Grille alignée sur le relief (Grelha et Loop) : un des axes suit les courbes de niveau
+        /// dominantes de la zone (HeightAt requis), AngleOffsetDegrees s'ajoute par-dessus.
+        /// </summary>
+        public bool AlignToTerrain;
+        /// <summary>Liaisons piétonnes du bout des impasses vers la rue voisine (voir AddPedestrianLinks).</summary>
+        public bool PedestrianLinks;
+        /// <summary>Motif "Misto" : Radial dans un cercle central, Orgânico autour (voir GenerateMixed).</summary>
+        public bool MixedMode;
+        /// <summary>Rayon (m) du cercle central du motif Misto.</summary>
+        public float MixedCoreRadius;
 
         /// <summary>
         /// Mode quartier pavillonnaire : certaines lignes deviennent des impasses au lieu
@@ -169,6 +201,56 @@ namespace GridRoadGenerator.Core
         public int ConcentricLayers;
         /// <summary>Nombre de rayons amorcés sur chaque anneau le plus intérieur (ConcentricMode).</summary>
         public int ConcentricConnections;
+        /// <summary>
+        /// Motif "Radial" (avec ConcentricMode) : une rotonde au centre et RadialAvenues avenues
+        /// droites jusqu'au périmètre, sans anneaux (voir ConcentricGenerator.GenerateRadial).
+        /// </summary>
+        public bool RadialMode;
+        /// <summary>Nombre d'avenues droites du motif Radial.</summary>
+        public int RadialAvenues;
+        /// <summary>Rayon demandé (m) de la rotonde centrale du motif Radial (ajusté à la forme).</summary>
+        public float RadialRoundaboutRadius;
+        /// <summary>Nombre d'anneaux circulaires autour de la rotonde du motif Radial (0 = aucun).</summary>
+        public int RadialLayers;
+        /// <summary>
+        /// Motif "Cul-de-sac em árvore" (famille de la Grelha, LoopMode faux) : collectrice le long du
+        /// grand axe, branches perpendiculaires, impasses par paires — voir GridGenerator.GenerateTree.
+        /// </summary>
+        public bool TreeMode;
+        /// <summary>Distance (m) entre deux branches d'un même côté de la collectrice.</summary>
+        public float TreeBranchSpacing;
+        /// <summary>Distance (m) entre deux paires d'impasses le long d'une branche.</summary>
+        public float TreeCulDeSacSpacing;
+        /// <summary>Longueur (m) visée des impasses (réduite pour tenir entre deux branches et loin du périmètre).</summary>
+        public float TreeCulDeSacLength;
+        /// <summary>
+        /// Motif "Orgânico" (famille de la Grelha, LoopMode faux) : lotissement à rues sinueuses et
+        /// impasses — voir GridGenerator.GenerateOrganic.
+        /// </summary>
+        public bool OrganicMode;
+        /// <summary>Distance visée (m) entre deux rues voisines (des lots des deux côtés).</summary>
+        public float OrganicStreetSpacing;
+        /// <summary>Courbure des rues (0–100 %).</summary>
+        public float OrganicCurviness;
+        /// <summary>Part (0–100 %) des branches qui, arrivées près d'une autre rue, la rejoignent en boucle au lieu de finir en impasse.</summary>
+        public float OrganicLoopShare;
+        /// <summary>Variante du tirage aléatoire (même valeur : même résultat).</summary>
+        public int OrganicSeed;
+        /// <summary>
+        /// Motif "Relevo" (famille de la Grelha, LoopMode faux) : rues le long des courbes de niveau
+        /// du terrain, reliées par des montées à pente limitée — voir GridGenerator.GenerateContour.
+        /// </summary>
+        public bool ContourMode;
+        /// <summary>Distance (m) visée entre deux rues de niveau voisines (en plan).</summary>
+        public float ContourSpacing;
+        /// <summary>Distance (m) visée entre deux montées le long d'une rue de niveau.</summary>
+        public float ContourConnectorSpacing;
+        /// <summary>
+        /// Hauteur du terrain au point (x, z) monde. Fournie par l'appelant (GridRoadToolSystem : le
+        /// vrai terrain ; tests : relief synthétique) — jamais sauvegardée dans les réglages. Sans elle,
+        /// le motif Relevo ne génère rien.
+        /// </summary>
+        public Func<float2, float> HeightAt;
         public static GridParameters Default => new GridParameters
         {
             Mode = SpacingMode.FitToArea,
@@ -217,7 +299,7 @@ namespace GridRoadGenerator.Core
     /// Cas particulier : avec exactement 2 nœuds, ils sont traités comme les coins
     /// opposés d'un rectangle aligné sur les axes (comportement simple et prévisible).
     /// </summary>
-    public static class GridGenerator
+    public static partial class GridGenerator
     {
         /// <summary>Longueur minimale d'un segment généré, en mètres (en dessous, pas une route viable).</summary>
         public const float MinSegmentLength = 8f;
@@ -338,6 +420,21 @@ namespace GridRoadGenerator.Core
         public static List<RoadSegmentDef> GenerateGrid(IReadOnlyList<float3> selectedNodePositions,
             GridParameters parameters, out int omittedNodeCount, out RoundaboutInfo roundabout)
         {
+            lock (Sync)
+            {
+                return GenerateGridUnlocked(selectedNodePositions, parameters, out omittedNodeCount, out roundabout);
+            }
+        }
+
+        /// <summary>
+        /// Verrou des générateurs : ConcentricGenerator garde des caches statiques, et le croquis
+        /// pendant un drag de slider est calculé sur un thread de fond (retour utilisateur : Misto lent).
+        /// </summary>
+        public static readonly object Sync = new object();
+
+        private static List<RoadSegmentDef> GenerateGridUnlocked(IReadOnlyList<float3> selectedNodePositions,
+            GridParameters parameters, out int omittedNodeCount, out RoundaboutInfo roundabout)
+        {
             roundabout = default;
             omittedNodeCount = 0;
             if (selectedNodePositions == null || selectedNodePositions.Count < 2)
@@ -364,8 +461,26 @@ namespace GridRoadGenerator.Core
             if (polygon.Count < 3 || math.abs(SignedArea(polygon)) < 1f)
                 return new List<RoadSegmentDef>(); // polygone dégénéré (points alignés/confondus)
 
+            if (parameters.MixedMode)
+            {
+                return WithPedestrianLinks(GenerateMixed(polygon, y, parameters), polygon, y, parameters);
+            }
+            if (parameters.TreeMode)
+            {
+                return WithPedestrianLinks(GenerateTree(polygon, y, parameters), polygon, y, parameters);
+            }
+            if (parameters.OrganicMode)
+            {
+                return WithPedestrianLinks(GenerateOrganic(polygon, y, parameters), polygon, y, parameters);
+            }
+            if (parameters.ContourMode)
+            {
+                return GenerateContour(polygon, y, parameters);
+            }
+
             // Repère local orienté sur l'arête la plus longue, plus l'angle réglable.
-            (float2 origin, float2 uDir, float2 vDir) = BuildLocalFrame(polygon, parameters.AngleOffsetDegrees);
+            (float2 origin, float2 uDir, float2 vDir) = BuildLocalFrame(polygon, parameters.AngleOffsetDegrees,
+                parameters.AlignToTerrain ? parameters.HeightAt : null);
 
             // Polygone en coordonnées locales + bounding box locale.
             var local = new List<float2>(polygon.Count);
@@ -399,7 +514,10 @@ namespace GridRoadGenerator.Core
             foreach (var v in vPositions)
                 vLines.Add(new GridLine { Position = v, Intervals = ClipLineToPolygon(local, axisIsU: false, position: v) });
 
-            return BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount, out roundabout);
+            List<RoadSegmentDef> grid = BuildSubSegments(uLines, vLines, origin, uDir, vDir, y, parameters, out omittedNodeCount, out roundabout);
+            // Rues qui abordent le périmètre presque parallèles à lui (angle aigu), ou bout très court.
+            CleanPerimeterEnds(grid, selectedNodePositions, s => !s.IsCulDeSacEnd);
+            return WithPedestrianLinks(grid, polygon, y, parameters);
         }
 
         // ------------------------------------------------------------------
@@ -721,7 +839,59 @@ namespace GridRoadGenerator.Core
         /// longue du polygone puis subit une rotation additionnelle d'angleOffsetDegrees
         /// (sens trigonométrique), v lui reste perpendiculaire.
         /// </summary>
-        private static (float2 origin, float2 uDir, float2 vDir) BuildLocalFrame(List<float2> polygon, float angleOffsetDegrees)
+        private static List<RoadSegmentDef> WithPedestrianLinks(List<RoadSegmentDef> segments, List<float2> polygon, float y, GridParameters parameters)
+        {
+            if (parameters.PedestrianLinks && segments.Count > 0)
+            {
+                AddPedestrianLinks(segments, polygon, y);
+            }
+            return segments;
+        }
+
+        /// <summary>
+        /// Direction dominante des courbes de niveau dans le polygone : axe principal du tenseur des
+        /// pentes (somme de g·gᵀ, insensible au signe — sur une colline, les pentes opposées ne
+        /// s'annulent pas), tourné de 90°. Faux si la zone est presque plate (pente moyenne &lt; 1 %).
+        /// </summary>
+        internal static bool TryContourDirection(List<float2> polygon, Func<float2, float> heightAt, out float2 direction)
+        {
+            direction = new float2(1f, 0f);
+            float2 min = new float2(float.MaxValue), max = new float2(float.MinValue);
+            foreach (float2 p in polygon)
+            {
+                min = math.min(min, p);
+                max = math.max(max, p);
+            }
+            const int samples = 16;
+            const float h = 8f;
+            float sxx = 0f, syy = 0f, sxy = 0f, slope = 0f;
+            int count = 0;
+            for (int i = 0; i < samples; i++)
+            {
+                for (int j = 0; j < samples; j++)
+                {
+                    float2 p = math.lerp(min, max, (new float2(i, j) + 0.5f) / samples);
+                    if (!PointInPolygon(p, polygon)) continue;
+                    float2 g = new float2(heightAt(p + new float2(h, 0f)) - heightAt(p - new float2(h, 0f)),
+                        heightAt(p + new float2(0f, h)) - heightAt(p - new float2(0f, h))) / (2f * h);
+                    sxx += g.x * g.x;
+                    syy += g.y * g.y;
+                    sxy += g.x * g.y;
+                    slope += math.length(g);
+                    count++;
+                }
+            }
+            if (count == 0 || slope / count < 0.01f)
+            {
+                return false;
+            }
+            float gradientAngle = 0.5f * math.atan2(2f * sxy, sxx - syy);
+            direction = new float2(-math.sin(gradientAngle), math.cos(gradientAngle)); // perpendiculaire à la pente
+            return true;
+        }
+
+        private static (float2 origin, float2 uDir, float2 vDir) BuildLocalFrame(List<float2> polygon, float angleOffsetDegrees,
+            Func<float2, float> heightAt = null)
         {
             int bestIndex = 0;
             float bestLengthSq = -1f;
@@ -740,6 +910,10 @@ namespace GridRoadGenerator.Core
 
             float2 origin2 = polygon[bestIndex];
             float2 uDir = math.normalize(polygon[(bestIndex + 1) % polygon.Count] - origin2);
+            if (heightAt != null && TryContourDirection(polygon, heightAt, out float2 contour))
+            {
+                uDir = contour;
+            }
 
             if (angleOffsetDegrees != 0f)
             {
@@ -1069,9 +1243,19 @@ namespace GridRoadGenerator.Core
         /// </summary>
         public static List<RoadSegmentDef> GenerateLoopGrid(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
         {
+            lock (Sync)
+            {
+                return GenerateLoopGridUnlocked(selectedNodePositions, parameters);
+            }
+        }
+
+        private static List<RoadSegmentDef> GenerateLoopGridUnlocked(IReadOnlyList<float3> selectedNodePositions, GridParameters parameters)
+        {
             if (parameters.ConcentricMode)
             {
-                return ConcentricGenerator.Generate(selectedNodePositions, parameters.ConcentricLayers, parameters.ConcentricConnections);
+                return parameters.RadialMode
+                    ? ConcentricGenerator.GenerateRadial(selectedNodePositions, parameters.RadialAvenues, parameters.RadialRoundaboutRadius, parameters.RadialLayers)
+                    : ConcentricGenerator.Generate(selectedNodePositions, parameters.ConcentricLayers, parameters.ConcentricConnections);
             }
 
             if (selectedNodePositions == null || selectedNodePositions.Count < 2 || parameters.CollectorSpacingMeters <= 0.5f)
@@ -1107,7 +1291,8 @@ namespace GridRoadGenerator.Core
             if (polygon.Count < 3 || math.abs(SignedArea(polygon)) < 1f)
                 return new List<RoadSegmentDef>();
 
-            (float2 origin, float2 uDir, float2 vDir) = BuildLocalFrame(polygon, parameters.AngleOffsetDegrees);
+            (float2 origin, float2 uDir, float2 vDir) = BuildLocalFrame(polygon, parameters.AngleOffsetDegrees,
+                parameters.AlignToTerrain ? parameters.HeightAt : null);
 
             var local = new List<float2>(polygon.Count);
             float2 lmin = new float2(float.MaxValue), lmax = new float2(float.MinValue);
@@ -1243,6 +1428,10 @@ namespace GridRoadGenerator.Core
             // post-passe n'a pas tourné (retour en jeu : "a estrada principal (laço) não fusiona
             // na coletora").
             segments = SplitSegmentsAtMidSpanAttachPoints(segments, isTarget: s => s.IsAvenue, isAttachSource: s => !s.IsAvenue);
+
+            // Collectrices qui arrivent au périmètre presque parallèles à lui, ou en bout très court
+            // près d'un carrefour : angles aigus et carrefours collés au périmètre (collisions en jeu).
+            CleanPerimeterEnds(segments, selectedNodePositions, s => s.IsAvenue);
 
             // Filet de sécurité final (retour utilisateur en jeu, répété : "Ainda tem os cul de
             // sac... retira por completo") : au-delà du garde-fou uMinReal/uMaxReal/vMinReal/
@@ -1779,6 +1968,123 @@ namespace GridRoadGenerator.Core
         /// est vrai — voir GenerateLoopGrid/GenerateSuperblockInterior, une grille fine remplace
         /// ce laço unique dans ce cas).
         /// </summary>
+        /// <summary>Côté minimal (m) d'un laço rétréci pour tenir dans la forme : plus petit, il n'est pas posé.</summary>
+        private const float MinLoopSide = 70f;
+        /// <summary>Angle minimal (degrés) entre une rue et le périmètre là où elle le rejoint.</summary>
+        private const float MinPerimeterJoinAngle = 35f;
+        /// <summary>Bout de rue plus court (m) que ceci entre un carrefour et le périmètre : retiré.</summary>
+        private const float MinPerimeterStub = 20f;
+
+        /// <summary>
+        /// Nettoie les bouts de rue (filtrés par `eligible`) qui rejoignent le périmètre : retire ceux
+        /// qui l'abordent à moins de MinPerimeterJoinAngle, ou qui font moins de MinPerimeterStub
+        /// depuis un carrefour, puis les rues restées pendantes (bout libre hors périmètre), jusqu'à
+        /// point fixe. Un tronçon n'est retiré que si l'autre bout reste relié (carrefour).
+        /// </summary>
+        internal static void CleanPerimeterEnds(List<RoadSegmentDef> segments, IReadOnlyList<float3> perimeter, Func<RoadSegmentDef, bool> eligible)
+        {
+            int n = perimeter.Count;
+            if (n < 3 || segments.Count == 0)
+            {
+                return;
+            }
+            // Distance au périmètre, mémorisée par extrémité (une grande grille partage ses nœuds).
+            var info = new Dictionary<float3, (bool on, float2 tangent)>();
+            (bool on, float2 tangent) Info(float3 p)
+            {
+                if (info.TryGetValue(p, out var cached)) return cached;
+                float best = float.MaxValue;
+                float2 tangent = new float2(1f, 0f);
+                for (int i = 0; i < n; i++)
+                {
+                    float2 a = perimeter[i].xz, ab = perimeter[(i + 1) % n].xz - a;
+                    float lengthSq = math.lengthsq(ab);
+                    if (lengthSq < 1e-6f) continue;
+                    float t = math.saturate(math.dot(p.xz - a, ab) / lengthSq);
+                    float d = math.distance(p.xz, a + t * ab);
+                    if (d < best)
+                    {
+                        best = d;
+                        tangent = ab / math.sqrt(lengthSq);
+                    }
+                }
+                return info[p] = (best < 0.5f, tangent);
+            }
+
+            var incident = new Dictionary<float3, List<int>>();
+            var degree = new Dictionary<float3, int>();
+            void Link(float3 p, int k)
+            {
+                if (!incident.TryGetValue(p, out var list)) incident[p] = list = new List<int>();
+                list.Add(k);
+                degree[p] = degree.TryGetValue(p, out int d) ? d + 1 : 1;
+            }
+            for (int k = 0; k < segments.Count; k++)
+            {
+                Link(segments[k].Start, k);
+                Link(segments[k].End, k);
+            }
+
+            var alive = new bool[segments.Count];
+            var queue = new List<int>();
+            for (int k = 0; k < segments.Count; k++)
+            {
+                alive[k] = true;
+                if (!eligible(segments[k])) continue;
+                // Seuls comptent les tronçons au périmètre ou pendants : le reste n'est jamais retiré d'emblée.
+                if (Info(segments[k].Start).on || Info(segments[k].End).on || degree[segments[k].Start] == 1 || degree[segments[k].End] == 1)
+                {
+                    queue.Add(k);
+                }
+            }
+            while (queue.Count > 0)
+            {
+                int k = queue[queue.Count - 1];
+                queue.RemoveAt(queue.Count - 1);
+                if (!alive[k]) continue;
+                RoadSegmentDef s = segments[k];
+                (bool startOn, float2 startTangent) = Info(s.Start);
+                (bool endOn, float2 endTangent) = Info(s.End);
+                bool remove = false;
+                if (startOn != endOn)
+                {
+                    float3 on = startOn ? s.Start : s.End, off = startOn ? s.End : s.Start;
+                    float2 tangent = startOn ? startTangent : endTangent;
+                    // Direction de la rue au point d'arrivée (tangente de l'arc s'il y en a une).
+                    float2 direction = math.normalizesafe(off.xz - on.xz);
+                    if (s.IsArc)
+                    {
+                        float3 t = startOn ? s.StartTangent : -s.EndTangent;
+                        direction = math.normalizesafe(t.xz, direction);
+                    }
+                    float angle = math.degrees(math.asin(math.saturate(math.abs(tangent.x * direction.y - tangent.y * direction.x))));
+                    float length = math.distance(s.Start.xz, s.End.xz);
+                    remove = degree[off] >= 3 && (angle < MinPerimeterJoinAngle || length < MinPerimeterStub);
+                }
+                else if (!startOn && !endOn && !s.IsCulDeSacEnd && (degree[s.Start] == 1) != (degree[s.End] == 1))
+                {
+                    // Rue restée pendante après un retrait (bout libre hors périmètre, l'autre bout relié).
+                    remove = true;
+                }
+                if (!remove) continue;
+                alive[k] = false;
+                foreach (float3 p in new[] { s.Start, s.End })
+                {
+                    degree[p]--;
+                    foreach (int other in incident[p])
+                    {
+                        if (alive[other] && eligible(segments[other])) queue.Add(other);
+                    }
+                }
+            }
+            int write = 0;
+            for (int k = 0; k < segments.Count; k++)
+            {
+                if (alive[k]) segments[write++] = segments[k];
+            }
+            segments.RemoveRange(write, segments.Count - write);
+        }
+
         private static bool EmitSimpleLoopBlock(List<RoadSegmentDef> segments, float uMin, float uMax, float vMin, float vMax,
             List<float2> polygon, float2 origin, float2 uDir, float2 vDir, float y, bool withCulDeSac, float culDeSacDepth, bool connectToMin)
         {
@@ -1815,6 +2121,7 @@ namespace GridRoadGenerator.Core
 
             float leftU = 0f, rightU = 0f, nearV = 0f, farV = 0f;
             bool fits = false;
+            bool shrunk = false;
             foreach (float scale in LoopFitScales)
             {
                 float halfW = fullHalfWidth * scale;
@@ -1825,10 +2132,18 @@ namespace GridRoadGenerator.Core
                 {
                     leftU = l; rightU = rr; nearV = n; farV = f;
                     fits = true;
+                    shrunk = scale < 1f;
                     break;
                 }
             }
             if (!fits)
+            {
+                return false;
+            }
+            // Laço rétréci pour tenir dans une forme irrégulière : en dessous de MinLoopSide, ce n'est
+            // plus qu'un petit rond de tronçons de 10 m (rejoué depuis une zone libre en jeu). Un laço
+            // à pleine taille dans un petit quarteirão régulier reste permis.
+            if (shrunk && (rightU - leftU < MinLoopSide || farV - nearV < MinLoopSide))
             {
                 return false;
             }

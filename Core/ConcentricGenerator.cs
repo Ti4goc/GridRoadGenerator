@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Unity.Mathematics;
 
 namespace GridRoadGenerator.Core
@@ -43,11 +44,41 @@ namespace GridRoadGenerator.Core
 
         // Cache : GenerateLoopGrid est appelé à chaque frame par le croquis (overlay) et par
         // la validation — le champ de distance ne dépend que du périmètre, le résultat final
-        // du périmètre + nombre d'anneaux + nombre de rayons.
-        private static float3[] s_CachedPerimeter;
-        private static int s_CachedLayers;
-        private static int s_CachedConnections;
-        private static List<RoadSegmentDef> s_CachedResult;
+        // du périmètre + réglages. Plusieurs entrées (voir ResultCacheSize) : pendant le drag
+        // d'une barre, le croquis demande la valeur en cours et la validation la valeur
+        // enregistrée ; avec une seule entrée, chacun chassait l'autre et la génération complète
+        // tournait deux fois par frame (retour utilisateur : lent en modifiant la géométrie,
+        // log [Perf] : 10-12 FPS pendant le drag des barras Radial/Concêntrico).
+        private const int ResultCacheSize = 12;
+        private static readonly List<(float3[] perimeter, (int kind, int a, float b, int c) key, List<RoadSegmentDef> result)> s_ResultCache =
+            new List<(float3[] perimeter, (int kind, int a, float b, int c) key, List<RoadSegmentDef> result)>();
+
+        private static List<RoadSegmentDef> CachedOrGenerate(IReadOnlyList<float3> positions, (int kind, int a, float b, int c) key, Func<List<RoadSegmentDef>> generate)
+        {
+            for (int i = 0; i < s_ResultCache.Count; i++)
+            {
+                var entry = s_ResultCache[i];
+                if (entry.key.Equals(key) && SamePositions(entry.perimeter, positions))
+                {
+                    // Plus récemment utilisée en tête.
+                    s_ResultCache.RemoveAt(i);
+                    s_ResultCache.Insert(0, entry);
+                    return new List<RoadSegmentDef>(entry.result);
+                }
+            }
+            List<RoadSegmentDef> result = generate();
+            var copy = new float3[positions.Count];
+            for (int i = 0; i < positions.Count; i++)
+            {
+                copy[i] = positions[i];
+            }
+            s_ResultCache.Insert(0, (copy, key, result));
+            if (s_ResultCache.Count > ResultCacheSize)
+            {
+                s_ResultCache.RemoveAt(s_ResultCache.Count - 1);
+            }
+            return new List<RoadSegmentDef>(result);
+        }
         /// <summary>Nombre de circuits de chaque anneau (du plus extérieur au plus intérieur) lors de la dernière génération non mise en cache — diagnostic pour les tests.</summary>
         internal static int[] LastRingLoopCounts;
         /// <summary>Circuits de chaque anneau (du plus extérieur au plus intérieur) lors de la dernière génération non mise en cache — diagnostic pour les tests.</summary>
@@ -65,22 +96,8 @@ namespace GridRoadGenerator.Core
             layers = math.clamp(layers, MinLayers, MaxLayersLimit);
             connections = math.clamp(connections, MinConnections, MaxConnections);
 
-            if (s_CachedResult != null && s_CachedLayers == layers && s_CachedConnections == connections
-                && SamePositions(s_CachedPerimeter, selectedNodePositions))
-            {
-                return new List<RoadSegmentDef>(s_CachedResult);
-            }
-
-            List<RoadSegmentDef> result = GenerateUncached(selectedNodePositions, layers, connections);
-            s_CachedPerimeter = new float3[selectedNodePositions.Count];
-            for (int i = 0; i < selectedNodePositions.Count; i++)
-            {
-                s_CachedPerimeter[i] = selectedNodePositions[i];
-            }
-            s_CachedLayers = layers;
-            s_CachedConnections = connections;
-            s_CachedResult = result;
-            return new List<RoadSegmentDef>(result);
+            return CachedOrGenerate(selectedNodePositions, (0, layers, 0f, connections),
+                () => GenerateUncached(selectedNodePositions, layers, connections));
         }
 
         private static bool SamePositions(float3[] cached, IReadOnlyList<float3> positions)
@@ -148,6 +165,11 @@ namespace GridRoadGenerator.Core
         /// la forme est trop petite pour un seul anneau. Mis en cache avec le champ de distance.
         /// </summary>
         public static int MaxLayers(IReadOnlyList<float3> selectedNodePositions)
+        {
+            lock (GridGenerator.Sync) return MaxLayersUnlocked(selectedNodePositions);
+        }
+
+        private static int MaxLayersUnlocked(IReadOnlyList<float3> selectedNodePositions)
         {
             if (selectedNodePositions == null || selectedNodePositions.Count < 2)
             {
@@ -718,6 +740,914 @@ namespace GridRoadGenerator.Core
                 }
             }
             return true;
+        }
+
+        // ------------------------------------------------------------------
+        // Motif Radial : rotonde au centre + avenues droites
+        // ------------------------------------------------------------------
+
+        public const int MinRadialAvenues = 3;
+        public const int MaxRadialAvenues = 16;
+        public const float MinRoundaboutRadius = 25f;
+        public const float MaxRoundaboutRadius = 150f;
+
+        /// <summary>Écart minimal (m) entre deux raccords d'avenues sur la rotonde : au-dessous, deux carrefours collés (voir MinJunctionSegmentLength).</summary>
+        private const float MinAvenueJointSpacing = MinJunctionSegmentLength + 5f;
+
+        /// <summary>Longueur minimale (m) d'une avenue entre la rotonde et le périmètre.</summary>
+        private const float MinAvenueLength = 40f;
+
+        /// <summary>Longueur maximale (m) d'un tronçon d'avenue : une avenue longue est posée en plusieurs tronçons alignés.</summary>
+        private const float MaxAvenuePieceLength = 200f;
+
+        /// <summary>Pas (degrés) de la rotation de l'ensemble des avenues cherchant des arrivées à angle ouvert sur le périmètre.</summary>
+        private const float AvenuePivotStepDegrees = 2f;
+
+        /// <summary>
+        /// Motif Radial (retour utilisateur : "deixemos apenas as avenidas e não as camadas, e no
+        /// centro geras uma rotunda, não um asset mas um círculo") : une rotonde — un vrai cercle
+        /// de route — centrée sur le point le plus profond de la forme (centre du plus grand
+        /// cercle inscrit, toujours à l'intérieur même d'une forme irrégulière), et `avenues`
+        /// avenues droites (IsAvenue, réseau "Coletor") réparties à angles égaux, de la rotonde
+        /// jusqu'au périmètre. La première vise le point du périmètre le plus éloigné (grand axe).
+        /// Le rayon est agrandi si les avenues seraient trop serrées sur la rotonde, et réduit si
+        /// la forme est trop petite (moins d'avenues alors). Les avenues restent à écart égal sur
+        /// la rotonde : l'ensemble pivote pour que le plus grand nombre arrive sur le périmètre à
+        /// angle ouvert ; une avenue qui reste à angle fermé est omise (les autres gardent leur
+        /// place).
+        /// </summary>
+        /// <summary>
+        /// Rayon effectif de la rotonde et nombre effectif d'avenues : assez grand pour espacer les
+        /// raccords (MinAvenueJointSpacing), assez petit pour laisser des avenues (MinAvenueLength).
+        /// Faux si la forme est trop petite pour une rotonde et des avenues.
+        /// </summary>
+        private static bool RadialLayout(DistanceField field, ref int avenues, ref float radius)
+        {
+            avenues = math.clamp(avenues, MinRadialAvenues, MaxRadialAvenues);
+            radius = math.clamp(radius, MinRoundaboutRadius, MaxRoundaboutRadius);
+            radius = math.max(radius, avenues * MinAvenueJointSpacing / (2f * math.PI));
+            float maxRadius = field.MaxDepth - MinAvenueLength;
+            if (radius > maxRadius)
+            {
+                radius = maxRadius;
+                avenues = math.min(avenues, (int)math.floor(2f * math.PI * radius / MinAvenueJointSpacing));
+            }
+            return radius >= 0.6f * MinRoundaboutRadius && avenues >= 2;
+        }
+
+        /// <summary>Distance (m) du centre au point du périmètre le plus éloigné : les anneaux du Radial vont jusque-là.</summary>
+        private static float FarthestReach(List<float2> polygon, float2 centre)
+        {
+            float best = 0f;
+            foreach (float2 q in polygon)
+            {
+                best = math.max(best, math.distance(q, centre));
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// Nombre maximal d'anneaux autour de la rotonde : écart d'au moins MinLayerSpacing entre
+        /// anneaux, répartis jusqu'au point du périmètre le plus éloigné (voir GenerateRadial).
+        /// </summary>
+        private static int RadialMaxLayersFor(DistanceField field, List<float2> polygon, float radius)
+        {
+            float reach = FarthestReach(polygon, field.DeepestPoint);
+            return math.clamp((int)math.floor((reach - radius) / MinLayerSpacing) - 1, 0, MaxLayersLimit);
+        }
+
+        /// <summary>Nombre maximal d'anneaux du motif Radial pour ce périmètre et ces réglages — borne haute du slider Camadas.</summary>
+        public static int RadialMaxLayers(IReadOnlyList<float3> selectedNodePositions, int avenues, float roundaboutRadius)
+        {
+            lock (GridGenerator.Sync) return RadialMaxLayersUnlocked(selectedNodePositions, avenues, roundaboutRadius);
+        }
+
+        private static int RadialMaxLayersUnlocked(IReadOnlyList<float3> selectedNodePositions, int avenues, float roundaboutRadius)
+        {
+            if (selectedNodePositions == null || selectedNodePositions.Count < 2
+                || !TryGetField(selectedNodePositions, out DistanceField field, out List<float2> polygon, out float _)
+                || !RadialLayout(field, ref avenues, ref roundaboutRadius))
+            {
+                return 0;
+            }
+            return RadialMaxLayersFor(field, polygon, roundaboutRadius);
+        }
+
+        // Motif Radial : même cache que le Concêntrico (voir CachedOrGenerate) — le croquis
+        // (overlay) régénère à chaque frame ("está bastante lento mesmo sem o pré real").
+        public static List<RoadSegmentDef> GenerateRadial(IReadOnlyList<float3> selectedNodePositions, int avenues, float roundaboutRadius, int layers = 0)
+        {
+            if (selectedNodePositions == null)
+            {
+                return GenerateRadialUncached(null, avenues, roundaboutRadius, layers);
+            }
+            return CachedOrGenerate(selectedNodePositions, (1, avenues, roundaboutRadius, layers),
+                () => GenerateRadialUncached(selectedNodePositions, avenues, roundaboutRadius, layers));
+        }
+
+        private static List<RoadSegmentDef> GenerateRadialUncached(IReadOnlyList<float3> selectedNodePositions, int avenues, float roundaboutRadius, int layers)
+        {
+            var segments = new List<RoadSegmentDef>();
+            if (selectedNodePositions == null || selectedNodePositions.Count < 2
+                || !TryGetField(selectedNodePositions, out DistanceField field, out List<float2> polygon, out float y))
+            {
+                return segments;
+            }
+            float radius = roundaboutRadius;
+            if (!RadialLayout(field, ref avenues, ref radius))
+            {
+                return segments; // forme trop petite pour une rotonde et des avenues
+            }
+            float2 centre = field.DeepestPoint;
+
+            // Anneaux : cercles concentriques à la rotonde (retour utilisateur : "de acordo com a
+            // rotunda e não a estrada exterior"), répartis à écart égal jusqu'au point du périmètre
+            // le plus éloigné ("têm de preencher o perímetro todo nem que fique só meio círculo") :
+            // là où le cercle sort de la forme, seules ses parties intérieures sont posées, en arcs
+            // qui rejoignent la route du périmètre.
+            float reach = FarthestReach(polygon, centre);
+            layers = math.clamp(layers, 0, RadialMaxLayersFor(field, polygon, radius));
+            float ringSpacing = layers > 0 ? (reach - radius) / (layers + 1) : 0f;
+
+            // --- Avenues : écart égal sur la rotonde, l'ensemble pivote (voir plus bas).
+            float2 farthest = polygon[0];
+            foreach (float2 q in polygon)
+            {
+                if (math.distancesq(q, centre) > math.distancesq(farthest, centre))
+                {
+                    farthest = q;
+                }
+            }
+            float baseAngle = math.atan2(farthest.y - centre.y, farthest.x - centre.x);
+            float gap = 2f * math.PI / avenues;
+
+            // Toutes les avenues gardent le même écart angulaire sur la rotonde (retour utilisateur :
+            // "as linhas têm que estar à mesma distância uma da outra quando chegam à rotunda") :
+            // c'est l'ENSEMBLE qui pivote, jamais une avenue seule. Parmi les rotations (pas de
+            // AvenuePivotStepDegrees, sur un écart entier), celle qui laisse le plus d'avenues
+            // arriver sur le périmètre à angle ouvert ; à égalité, la plus proche du grand axe.
+            List<(float angle, float length)> AvenuesAt(float rotation)
+            {
+                var result = new List<(float angle, float length)>();
+                for (int k = 0; k < avenues; k++)
+                {
+                    float angle = baseAngle + rotation + k * gap;
+                    float2 direction = new float2(math.cos(angle), math.sin(angle));
+                    if (!FirstPerimeterHit(polygon, centre, direction, out float t) || t - radius < MinAvenueLength)
+                    {
+                        continue;
+                    }
+                    if (MeetsRingAtOpenAngle(polygon, centre + direction * t, -direction))
+                    {
+                        result.Add((angle, t));
+                    }
+                }
+                return result;
+            }
+
+            var accepted = AvenuesAt(0f);
+            float step = math.radians(AvenuePivotStepDegrees);
+            for (float offset = step; offset <= 0.5f * gap + 1e-4f && accepted.Count < avenues; offset += step)
+            {
+                foreach (float sign in new[] { 1f, -1f })
+                {
+                    var candidate = AvenuesAt(sign * offset);
+                    if (candidate.Count > accepted.Count)
+                    {
+                        accepted = candidate;
+                    }
+                }
+            }
+            if (accepted.Count == 0)
+            {
+                return segments;
+            }
+
+            float2 At(float r, float angle) => centre + r * new float2(math.cos(angle), math.sin(angle));
+            var avenueEnds = accepted.Select(av => At(av.length, av.angle)).ToList();
+
+            // --- Anneaux : parties du cercle à l'intérieur de la forme, jamais rasantes.
+            // Retour utilisateur (log [Diag colisão], rotonde 150 m, 10 anneaux) : un anneau passait à
+            // 12-14 m de la route du périmètre sans la couper, et le jeu y collait un nœud (tronçon de
+            // 8 m sur la route existante, chevauchement). Une route générée reste à PerimeterClearance
+            // du périmètre, sauf là où elle le coupe franchement (arrivée à angle ouvert).
+            // keepFrom / keepTo : zone d'approche (m) d'un bout raccordé au périmètre, où l'arc ne doit pas
+            // être coupé (un nœud intermédiaire y serait trop près du périmètre).
+            var ringArcs = new List<(float r, float from, float to, bool full, float keepFrom, float keepTo)>();
+            var ringRadii = new List<float>();
+            // Prolongements d'anneau (voir PerimeterTail) : au-delà de la dernière avenue croisée
+            // (`cross`) jusqu'au bout dégagé de la suite (`runEnd`), `dir` = +1 vers les angles croissants.
+            var tailCandidates = new List<(float r, float cross, float runEnd, float dir)>();
+            // Zone d'approche d'une avenue (droite) vers le périmètre, qu'elle rejoint à angle ouvert.
+            float approach = PerimeterClearance / math.sin(math.radians(MinSpokeRingAngleDegrees));
+            for (int k = 1; k <= layers; k++)
+            {
+                float r = radius + k * ringSpacing;
+                ringRadii.Add(r);
+                foreach ((float from, float to, bool full) in InsideArcs(polygon, centre, r))
+                {
+                    // Échantillons le long de l'arc : "rasant" si trop près du périmètre, sauf dans la
+                    // zone d'approche d'un bout qui coupe le périmètre à angle ouvert.
+                    float startMinRun = 0f, endMinRun = 0f;
+                    float startApproach = full ? 0f : PerimeterApproach(polygon, centre, r, from, avenueEnds, out startMinRun);
+                    float endApproach = full ? 0f : PerimeterApproach(polygon, centre, r, to, avenueEnds, out endMinRun);
+                    bool startOnPerimeter = startApproach > 0f;
+                    bool endOnPerimeter = endApproach > 0f;
+                    int count = math.max(8, (int)math.ceil((to - from) * r / ClearanceSampleStep));
+                    var clear = new bool[count + 1];
+                    for (int i = 0; i <= count; i++)
+                    {
+                        float angle = from + (to - from) * i / count;
+                        float along = (angle - from) * r;
+                        float before = (to - angle) * r;
+                        bool inApproach = (startOnPerimeter && along < startApproach) || (endOnPerimeter && before < endApproach);
+                        clear[i] = inApproach || IsClearOfPerimeter(field, polygon, At(r, angle));
+                    }
+                    bool anyBlocked = Array.IndexOf(clear, false) >= 0;
+                    if (full && !anyBlocked)
+                    {
+                        ringArcs.Add((r, from, to, true, 0f, 0f));
+                        continue;
+                    }
+                    // Cercle entier mais rasant par endroits : on le parcourt à partir d'un point rasant.
+                    float baseFrom = from;
+                    if (full)
+                    {
+                        int firstBlocked = Array.IndexOf(clear, false);
+                        baseFrom = from + (to - from) * firstBlocked / count;
+                        var rotated = new bool[count + 1];
+                        for (int i = 0; i <= count; i++)
+                        {
+                            rotated[i] = clear[(firstBlocked + i) % count];
+                        }
+                        clear = rotated;
+                    }
+                    float span = to - from;
+                    // Suites d'échantillons dégagés : chacune donne un arc, dont les bouts sont sur le
+                    // périmètre (bout d'origine, dégagé) ou ramenés à l'avenue la plus proche.
+                    for (int i = 0; i <= count; i++)
+                    {
+                        if (!clear[i])
+                        {
+                            continue;
+                        }
+                        int j = i;
+                        while (j + 1 <= count && clear[j + 1])
+                        {
+                            j++;
+                        }
+                        float runFrom = baseFrom + span * i / count;
+                        float runTo = baseFrom + span * j / count;
+                        bool keepsStart = !full && i == 0 && startOnPerimeter;
+                        bool keepsEnd = !full && j == count && endOnPerimeter;
+                        var crossing = accepted.Where(av => av.length > r + 1f && AngleWithin(av.angle, runFrom, runTo))
+                            .Select(av => runFrom + Wrap(av.angle - runFrom)).OrderBy(x => x).ToList();
+                        // Les avenues croisées dans la zone d'approche d'un bout sur le périmètre sont trop
+                        // près de celui-ci (échantillons exemptés) : l'arc ne va pas jusqu'au périmètre
+                        // (ce nœud d'avenue serait sur l'arc) et n'est pas non plus ramené à elles.
+                        if (!full && i == 0 && startOnPerimeter
+                            && crossing.RemoveAll(x => (x - runFrom) * r < startApproach) > 0)
+                        {
+                            keepsStart = false;
+                        }
+                        if (!full && j == count && endOnPerimeter
+                            && crossing.RemoveAll(x => (runTo - x) * r < endApproach) > 0)
+                        {
+                            keepsEnd = false;
+                        }
+                        float start = keepsStart ? runFrom : (crossing.Count > 0 ? crossing[0] : float.NaN);
+                        float end = keepsEnd ? runTo : (crossing.Count > 0 ? crossing[crossing.Count - 1] : float.NaN);
+                        // Bout d'arc jusqu'à l'avenue voisine assez long pour la géométrie des deux nœuds
+                        // (recul croissant quand l'angle avec le périmètre se ferme), sinon ramené à l'avenue.
+                        if (keepsStart && crossing.Count > 0 && (crossing[0] - start) * r < startMinRun)
+                        {
+                            start = crossing[0];
+                            keepsStart = false;
+                        }
+                        if (keepsEnd && crossing.Count > 0 && (end - crossing[crossing.Count - 1]) * r < endMinRun)
+                        {
+                            end = crossing[crossing.Count - 1];
+                            keepsEnd = false;
+                        }
+                        // Arc d'un bord du périmètre à l'autre sans avenue : les reculs des deux nœuds
+                        // doivent y tenir.
+                        float minLength = MinJunctionSegmentLength;
+                        if (keepsStart && keepsEnd && crossing.Count == 0)
+                        {
+                            minLength = math.max(startMinRun, endMinRun) + math.min(startMinRun, endMinRun)
+                                - MinJunctionSegmentLength - 2f * NodeCutback(1f, 0f);
+                        }
+                        if (!float.IsNaN(start) && !float.IsNaN(end) && (end - start) * r >= minLength)
+                        {
+                            ringArcs.Add((r, start, end, false, keepsStart ? startApproach : 0f, keepsEnd ? endApproach : 0f));
+                            if (!keepsStart && crossing.Count > 0)
+                            {
+                                tailCandidates.Add((r, crossing[0], runFrom, -1f));
+                            }
+                            if (!keepsEnd && crossing.Count > 0)
+                            {
+                                tailCandidates.Add((r, crossing[crossing.Count - 1], runTo, 1f));
+                            }
+                        }
+                        i = j;
+                    }
+                }
+            }
+
+            bool OnRing(float r, float angle) => ringArcs.Exists(arc => math.abs(arc.r - r) < 1e-3f
+                && (arc.full || AngleWithin(angle, arc.from - 1e-4f, arc.to + 1e-4f)));
+
+            // --- Avenues : rotonde, puis chaque anneau croisé, puis le périmètre — tant qu'elles
+            // restent dégagées du périmètre (une avenue qui le rase avant de l'atteindre s'arrête au
+            // dernier anneau d'avant).
+            foreach ((float angle, float length) in accepted)
+            {
+                float clearUntil = length;
+                for (float t = radius; t < length - approach; t += ClearanceSampleStep)
+                {
+                    if (!IsClearOfPerimeter(field, polygon, At(t, angle)))
+                    {
+                        clearUntil = t;
+                        break;
+                    }
+                }
+                var stops = new List<float> { radius };
+                foreach (float r in ringRadii)
+                {
+                    if (r < clearUntil && r < length && OnRing(r, angle))
+                    {
+                        stops.Add(r);
+                    }
+                }
+                // Jusqu'au périmètre si l'avenue reste dégagée et que le dernier tronçon est assez long.
+                if (clearUntil >= length && length - stops[stops.Count - 1] >= MinAvenueLength)
+                {
+                    stops.Add(length);
+                }
+                for (int st = 0; st + 1 < stops.Count; st++)
+                {
+                    float from = stops[st];
+                    float to = stops[st + 1];
+                    int pieces = math.max(1, (int)math.ceil((to - from) / MaxAvenuePieceLength));
+                    for (int piece = 0; piece < pieces; piece++)
+                    {
+                        float2 a = At(from + (to - from) * piece / pieces, angle);
+                        float2 b = At(piece == pieces - 1 ? to : from + (to - from) * (piece + 1) / pieces, angle);
+                        if (piece == 0) a = At(from, angle);
+                        segments.Add(new RoadSegmentDef(new float3(a.x, y, a.y), new float3(b.x, y, b.y), isHorizontal: false, isAvenue: true));
+                    }
+                }
+            }
+
+            // --- Rotonde et anneaux : arcs exacts entre raccords successifs. Les bouts d'arc sont
+            // recalés sur les points EXACTS des avenues (joints) : recalculés à partir d'un angle
+            // ramené dans [0, 2π), ils différaient d'un arrondi et le nœud n'était plus partagé.
+            var joints = segments.SelectMany(sg => new[] { sg.Start.xz, sg.End.xz }).ToList();
+            var roundaboutStops = accepted.Select(av => av.angle).ToList();
+            EmitCircle(segments, centre, radius, roundaboutStops, y, joints, roundabout: true);
+            // Raccords réels d'avenue sur chaque anneau (une avenue arrêtée plus tôt ne le croise pas).
+            var avenueJointSet = new HashSet<(float, float)>(joints.Select(j => (j.x, j.y)));
+            foreach (var arc in ringArcs)
+            {
+                var stops = accepted.Where(av => (arc.full || AngleWithin(av.angle, arc.from - 1e-4f, arc.to + 1e-4f))
+                        && joints.Exists(j => math.distancesq(j, At(arc.r, av.angle)) < 0.01f))
+                    .Select(av => av.angle).ToList();
+                if (arc.full)
+                {
+                    EmitCircle(segments, centre, arc.r, stops, y, joints);
+                }
+                else
+                {
+                    var angles = new List<float> { arc.from, arc.to };
+                    angles.AddRange(stops.Select(x => arc.from + Wrap(x - arc.from)).Where(x => x > arc.from + 1e-4f && x < arc.to - 1e-4f));
+                    angles.Sort();
+                    // Coupe à 60° imposée à la sortie de la zone d'approche : sans ça, le découpage
+                    // régulier de EmitCircleArc pouvait poser un nœud à 13 m du périmètre (angle fermé).
+                    float maxPiece = math.PI / 3f - 1e-3f;
+                    if (arc.keepFrom > 0f && angles[1] - angles[0] > maxPiece)
+                    {
+                        angles.Insert(1, angles[0] + arc.keepFrom / arc.r);
+                    }
+                    int last = angles.Count - 1;
+                    if (arc.keepTo > 0f && angles[last] - angles[last - 1] > maxPiece)
+                    {
+                        angles.Insert(last, angles[last] - arc.keepTo / arc.r);
+                    }
+                    for (int i = 0; i + 1 < angles.Count; i++)
+                    {
+                        EmitCircleArc(segments, centre, arc.r, angles[i], angles[i + 1], y, joints);
+                    }
+                }
+            }
+
+            // --- Prolongements d'anneau jusqu'au périmètre. Retour utilisateur ("continuam a haver
+            // camadas que não vão até ao fim") : là où l'anneau court presque parallèle au périmètre,
+            // aucun croisement à angle ouvert n'existe et l'anneau s'arrêtait à la dernière avenue.
+            // Il continue maintenant tant qu'il reste dégagé, puis tourne vers le périmètre par une
+            // courbe qui le rejoint à angle ouvert (voir PerimeterTail).
+            var perimeterJoints = new List<float2>(avenueEnds);
+            foreach (var arc in ringArcs)
+            {
+                if (arc.keepFrom > 0f) perimeterJoints.Add(At(arc.r, arc.from));
+                if (arc.keepTo > 0f) perimeterJoints.Add(At(arc.r, arc.to));
+            }
+            var ringSpans = ringArcs.Select(a => (a.r, a.from, a.to, a.full)).ToList();
+            var acceptedTailSamples = new List<float2>();
+            foreach (var tail in tailCandidates.OrderByDescending(tc => math.abs(tc.runEnd - tc.cross) * tc.r))
+            {
+                if (!joints.Exists(jt => math.distancesq(jt, At(tail.r, tail.cross)) < 0.01f))
+                {
+                    continue; // l'avenue n'atteint pas cet anneau : pas de raccord où s'accrocher
+                }
+                if (PerimeterTail(polygon, centre, tail.r, tail.cross, tail.runEnd, tail.dir, accepted, ringSpans,
+                        segments, perimeterJoints, avenueEnds, acceptedTailSamples, out float tailEnd, out float2 q, out float2 qTangent))
+                {
+                    EmitCircleArc(segments, centre, tail.r, math.min(tail.cross, tailEnd), math.max(tail.cross, tailEnd), y, joints);
+                    float2 pt = At(tail.r, tailEnd);
+                    float2 tf = tail.dir * new float2(-math.sin(tailEnd), math.cos(tailEnd));
+                    segments.Add(RoadSegmentDef.Arc(new float3(pt.x, y, pt.y), new float3(q.x, y, q.y), new float3(tf.x, 0f, tf.y), new float3(qTangent.x, 0f, qTangent.y)));
+                    perimeterJoints.Add(q);
+                }
+            }
+
+            LastRadialCentre = centre;
+            LastRadialRadius = radius;
+            LastRadialRingRadii = ringRadii.ToArray();
+            return segments;
+        }
+
+        /// <summary>Vrai si p est à l'intérieur du contour fermé `loop` (règle pair-impair).</summary>
+        private static bool PointInLoop(float2 p, List<float2> loop)
+        {
+            bool inside = false;
+            for (int i = 0, j = loop.Count - 1; i < loop.Count; j = i++)
+            {
+                float2 a = loop[i];
+                float2 b = loop[j];
+                if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
+                {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+
+        /// <summary>Distance minimale (m) entre une route générée et la route du périmètre, hors croisement franc.</summary>
+        private const float PerimeterClearance = 25f;
+
+        /// <summary>Pas (m) des échantillons de contrôle de ce dégagement.</summary>
+        private const float ClearanceSampleStep = 6f;
+
+        /// <summary>
+        /// Vrai si p est à au moins PerimeterClearance du périmètre. Lecture de la grille de distance
+        /// (instantanée) ; distance exacte au contour seulement quand la grille donne une valeur
+        /// proche du seuil (sa précision est d'environ une maille) — sans ça, le contrôle de
+        /// dégagement du Radial coûtait plus d'une demi-seconde par génération.
+        /// </summary>
+        private static bool IsClearOfPerimeter(DistanceField field, List<float2> polygon, float2 p)
+        {
+            float depth = field.DepthAt(p);
+            float margin = 2f * field.CellSize;
+            if (depth >= PerimeterClearance + margin)
+            {
+                return true;
+            }
+            if (depth < PerimeterClearance - margin)
+            {
+                return false;
+            }
+            return DistanceToLoop(polygon, p) >= PerimeterClearance;
+        }
+
+        /// <summary>Distance (m) du point p au contour fermé `loop`.</summary>
+        private static float DistanceToLoop(List<float2> loop, float2 p)
+        {
+            float best = float.MaxValue;
+            for (int i = 0; i < loop.Count; i++)
+            {
+                best = math.min(best, math.distancesq(ClosestOnSegment(loop[i], loop[(i + 1) % loop.Count], p), p));
+            }
+            return math.sqrt(best);
+        }
+
+        /// <summary>
+        /// Angle minimal (degrés), au point de croisement, entre un arc d'anneau du Radial et la route
+        /// du périmètre qu'il rejoint. Le jeu n'a pas d'angle minimal en soi (Game.Net.ValidationHelpers) :
+        /// deux tronçons qui partagent un nœud ne sont jamais testés l'un contre l'autre (pas
+        /// d'OverlapExisting), et les routes n'ont pas de longueur minimale (m_EdgeLengthRange.min = 0).
+        /// Ce qui casse à angle fermé, c'est la géométrie du nœud : son recul le long de chaque route
+        /// (NodeCutback) croît en 1/tan(θ/2), et si un tronçon est plus court que ce recul sa
+        /// géométrie s'inverse (InvalidShape). La vraie contrainte est donc la longueur disponible
+        /// (voir PerimeterApproach) ; ce plancher écarte seulement les raccords quasi tangents
+        /// (recul > 90 m, liaisons de voies dégénérées).
+        /// </summary>
+        private const float MinArcPerimeterAngleDegrees = 15f;
+
+        /// <summary>
+        /// Recul (m) de la géométrie d'un nœud le long d'une route qui en croise une autre à l'angle
+        /// dont le sinus/cosinus sont donnés : le bord de la route croise le bord de l'autre à
+        /// (w₁ + w₂·cos θ) / sin θ du nœud ; avec w₁ + w₂ = PerimeterClearance (largeurs cumulées
+        /// supposées, marge comprise), w₁ = w₂ donne (PerimeterClearance / 2) / tan(θ/2).
+        /// </summary>
+        private static float NodeCutback(float sin, float cos) => 0.5f * PerimeterClearance * (1f + cos) / math.max(sin, 1e-3f);
+
+        /// <summary>
+        /// Bout d'arc du cercle (centre, r) à l'angle `angle`, sur le périmètre : longueur (m) de sa zone
+        /// d'approche — où il est normal d'être près du périmètre — s'il peut s'y raccorder, 0 sinon.
+        /// L'angle est mesuré AU point de croisement, entre la tangente du cercle et l'arête du
+        /// contour (retour utilisateur : "continua a haver sítios onde não existe continuidade" —
+        /// mesuré avant sur 50 m comme pour une route droite, il refusait des arcs qui croisent
+        /// correctement un périmètre courbe). Le reste de l'arc est contrôlé par PerimeterClearance.
+        /// `minRun` : longueur (m) minimale du bout d'arc entre le périmètre et la première avenue —
+        /// recul du nœud du périmètre + tronçon admissible + recul (≈ angle droit) du nœud de l'avenue,
+        /// et au moins la zone d'approche (sinon ce nœud d'avenue serait trop près du périmètre, où le
+        /// jeu le recollerait à la route existante).
+        /// </summary>
+        private static float PerimeterApproach(List<float2> polygon, float2 centre, float r, float angle, List<float2> avenueEnds, out float minRun)
+        {
+            minRun = 0f;
+            float2 point = centre + r * new float2(math.cos(angle), math.sin(angle));
+            if (avenueEnds.Exists(e => math.distance(e, point) < MinAvenueJointSpacing))
+            {
+                return 0f;
+            }
+            float2 tangent = new float2(-math.sin(angle), math.cos(angle));
+            int bestEdge = 0;
+            float best = float.MaxValue;
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                float d = math.distancesq(ClosestOnSegment(polygon[i], polygon[(i + 1) % polygon.Count], point), point);
+                if (d < best)
+                {
+                    best = d;
+                    bestEdge = i;
+                }
+            }
+            float2 edge = math.normalizesafe(polygon[(bestEdge + 1) % polygon.Count] - polygon[bestEdge]);
+            float sin = math.abs(tangent.x * edge.y - tangent.y * edge.x);
+            if (sin < math.sin(math.radians(MinArcPerimeterAngleDegrees)))
+            {
+                return 0f;
+            }
+            float approach = PerimeterClearance / sin + ClearanceSampleStep;
+            if (approach / r > math.PI / 3f - 1e-3f)
+            {
+                return 0f;
+            }
+            float cos = math.abs(math.dot(tangent, edge));
+            minRun = math.max(approach, NodeCutback(sin, cos) + MinJunctionSegmentLength + NodeCutback(1f, 0f));
+            return approach;
+        }
+
+        /// <summary>Distance minimale (m) au périmètre du point où un prolongement d'anneau tourne vers lui.</summary>
+        private const float TailTurnClearance = 32f;
+
+        /// <summary>Écart minimal (m) entre une courbe de prolongement et les autres routes générées.</summary>
+        private const float TailRoadSpacing = 20f;
+
+        /// <summary>
+        /// Prolongement d'un anneau (centre, r) depuis l'avenue à l'angle `cross` dans le sens `dir`,
+        /// au plus jusqu'à `runEnd` : l'anneau continue jusqu'au dernier point à TailTurnClearance du
+        /// périmètre (`tailEnd`), puis une courbe circulaire (tangente à l'anneau) tourne vers le
+        /// périmètre et le rejoint en `q` (tangente d'arrivée `qTangent`). Refusé si le tronçon ou la
+        /// courbe sont trop courts pour la géométrie des nœuds (voir NodeCutback), si l'arrivée est
+        /// sous 40°, trop près d'un autre raccord au périmètre, ou si la courbe passe près d'une autre
+        /// route (avenues, autres anneaux, prolongements déjà acceptés).
+        /// </summary>
+        private static bool PerimeterTail(List<float2> polygon, float2 centre, float r, float cross, float runEnd, float dir,
+            List<(float angle, float length)> avenues, List<(float r, float from, float to, bool full)> rings,
+            List<RoadSegmentDef> segments, List<float2> perimeterJoints, List<float2> avenueEnds, List<float2> acceptedSamples,
+            out float tailEnd, out float2 q, out float2 qTangent)
+        {
+            q = default;
+            qTangent = default;
+            float2 At(float angle) => centre + r * new float2(math.cos(angle), math.sin(angle));
+            float angleStep = ClearanceSampleStep / r;
+            tailEnd = runEnd;
+            while ((tailEnd - cross) * dir > 0f && DistanceToLoop(polygon, At(tailEnd)) < TailTurnClearance)
+            {
+                tailEnd -= dir * angleStep;
+            }
+            float tailLength = (tailEnd - cross) * dir * r;
+            if (tailLength < MinJunctionSegmentLength)
+            {
+                return false;
+            }
+            float lo = math.min(cross, tailEnd), hi = math.max(cross, tailEnd);
+            // Aucune avenue ne doit traverser le prolongement (elle n'y aurait pas de nœud).
+            if (avenues.Exists(av => av.length > r - 1f && AngleWithin(av.angle, lo + 1e-4f, hi - 1e-4f)))
+            {
+                return false;
+            }
+            float2 p = At(tailEnd);
+            float2 tf = dir * new float2(-math.sin(tailEnd), math.cos(tailEnd));
+            float2 n = ClosestOnLoop(polygon, p, out float2 edge);
+            float h = math.distance(n, p);
+            if (math.dot(edge, tf) < 0f)
+            {
+                edge = -edge;
+            }
+            // Courbe circulaire tangente à l'anneau jusqu'au périmètre. L'avance le long du périmètre
+            // fixe le virage : √3·h donne un virage de 60° (rayon 2h) sur un bord droit ; sur un bord
+            // courbe ou près d'un autre raccord, d'autres avances sont essayées.
+            var tailSamples = new List<float2>();
+            int arcCount = math.max(2, (int)math.ceil(tailLength / 4f));
+            for (int i = 0; i <= arcCount; i++)
+            {
+                tailSamples.Add(At(cross + (tailEnd - cross) * i / arcCount));
+            }
+            if (tailSamples.Exists(a => acceptedSamples.Exists(b => math.distancesq(a, b) < TailRoadSpacing * TailRoadSpacing)))
+            {
+                return false;
+            }
+            foreach (float advance in TailAdvanceFactors)
+            {
+                if (TryTailCurve(polygon, centre, r, p, tf, n + edge * (advance * h), rings, segments, perimeterJoints, avenueEnds, acceptedSamples,
+                        out q, out qTangent, out List<float2> curve))
+                {
+                    acceptedSamples.AddRange(tailSamples);
+                    acceptedSamples.AddRange(curve);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>Avances (× distance au périmètre) essayées pour la courbe d'un prolongement d'anneau.</summary>
+        private static readonly float[] TailAdvanceFactors = { 1.732f, 1.3f, 2.3f, 1f, 3f, 0.7f };
+
+        /// <summary>
+        /// Courbe d'un prolongement d'anneau (voir PerimeterTail) de p (tangente tf) vers le point du
+        /// périmètre le plus proche de `target` : arc de cercle, arrivée à au moins 40°, assez long pour
+        /// le recul du nœud, loin des autres raccords au périmètre et des autres routes.
+        /// </summary>
+        private static bool TryTailCurve(List<float2> polygon, float2 centre, float r, float2 p, float2 tf, float2 target,
+            List<(float r, float from, float to, bool full)> rings, List<RoadSegmentDef> segments, List<float2> perimeterJoints,
+            List<float2> avenueEnds, List<float2> acceptedSamples, out float2 q, out float2 qTangent, out List<float2> curve)
+        {
+            qTangent = default;
+            curve = null;
+            q = ClosestOnLoop(polygon, target, out float2 qEdge);
+            // Arrivée trop près d'un autre raccord au périmètre : si c'est l'arrivée d'une avenue, la
+            // courbe la rejoint au même nœud (retour utilisateur : les coins restés vides étaient au
+            // pied d'une avenue, là où l'anneau rejoint le périmètre) ; sinon, refusée.
+            float2 end = q;
+            var near = perimeterJoints.Where(j => math.distance(j, end) < MinAvenueJointSpacing).Distinct().ToList();
+            bool snapped = false;
+            if (near.Count > 0)
+            {
+                if (near.Count > 1 || !avenueEnds.Exists(a => math.distancesq(a, near[0]) < 0.01f))
+                {
+                    return false;
+                }
+                q = near[0];
+                ClosestOnLoop(polygon, q, out qEdge);
+                snapped = true;
+            }
+            float2 chord = q - p;
+            float chordLength = math.length(chord);
+            if (chordLength < 1f)
+            {
+                return false;
+            }
+            chord /= chordLength;
+            float along = math.dot(chord, tf);
+            if (along < math.cos(math.radians(50f)))
+            {
+                return false; // virage de plus de 100° : pas une courbe raisonnable
+            }
+            qTangent = 2f * along * chord - tf;
+            float sin = math.abs(qTangent.x * qEdge.y - qTangent.y * qEdge.x);
+            float cos = math.abs(math.dot(qTangent, qEdge));
+            if (sin < math.sin(math.radians(40f)) || chordLength < NodeCutback(sin, cos) + 10f)
+            {
+                return false;
+            }
+            // Au nœud d'une avenue : angle ouvert avec elle aussi, et les échantillons proches du nœud
+            // sont exemptés de l'écart aux avenues (ils la rejoignent).
+            float avenueExemption = 0f;
+            if (snapped)
+            {
+                float cosAvenue = math.dot(qTangent, math.normalize(q - centre));
+                if (cosAvenue > math.cos(math.radians(35f)))
+                {
+                    return false;
+                }
+                avenueExemption = TailRoadSpacing / math.max(math.sqrt(math.saturate(1f - cosAvenue * cosAvenue)), 0.3f) + 5f;
+            }
+            // Échantillons de la courbe (Bézier quadratique, sommet à l'intersection des tangentes).
+            float2 control = p + tf * (0.5f * chordLength / along);
+            var points = new List<float2>();
+            int curveCount = math.max(4, (int)math.ceil(chordLength / 4f));
+            for (int i = 1; i <= curveCount; i++)
+            {
+                float t = (float)i / curveCount;
+                points.Add((1 - t) * (1 - t) * p + 2 * (1 - t) * t * control + t * t * q);
+            }
+            foreach (float2 c in points)
+            {
+                float toEnd = math.distance(c, q);
+                if (toEnd > 0.5f && (!PointInLoop(c, polygon) || DistanceToLoop(polygon, c) < math.min(PerimeterClearance - 3f, 0.6f * toEnd)))
+                {
+                    return false;
+                }
+                foreach (RoadSegmentDef s in segments)
+                {
+                    if (s.IsAvenue && toEnd >= avenueExemption && math.distance(ClosestOnSegment(s.Start.xz, s.End.xz, c), c) < TailRoadSpacing)
+                    {
+                        return false;
+                    }
+                }
+                float ca = math.atan2(c.y - centre.y, c.x - centre.x);
+                float cr = math.distance(c, centre);
+                foreach (var ring in rings)
+                {
+                    if (math.abs(ring.r - r) > 1e-3f && math.abs(cr - ring.r) < TailRoadSpacing && (ring.full || AngleWithin(ca, ring.from, ring.to)))
+                    {
+                        return false;
+                    }
+                }
+                if (acceptedSamples.Exists(b => math.distancesq(c, b) < TailRoadSpacing * TailRoadSpacing))
+                {
+                    return false;
+                }
+            }
+            curve = points;
+            return true;
+        }
+
+        /// <summary>Point du contour fermé le plus proche de p, et direction (unitaire) de son arête.</summary>
+        private static float2 ClosestOnLoop(List<float2> loop, float2 p, out float2 edgeDirection)
+        {
+            float best = float.MaxValue;
+            float2 result = loop[0];
+            edgeDirection = new float2(1f, 0f);
+            for (int i = 0; i < loop.Count; i++)
+            {
+                float2 a = loop[i];
+                float2 b = loop[(i + 1) % loop.Count];
+                if (math.distancesq(a, b) < 1e-6f)
+                {
+                    continue;
+                }
+                float2 c = ClosestOnSegment(a, b, p);
+                float d = math.distancesq(c, p);
+                if (d < best)
+                {
+                    best = d;
+                    result = c;
+                    edgeDirection = math.normalize(b - a);
+                }
+            }
+            return result;
+        }
+
+        /// <summary>Angle ramené dans [0, 2π).</summary>
+        private static float Wrap(float angle)
+        {
+            float twoPi = 2f * math.PI;
+            angle %= twoPi;
+            return angle < 0f ? angle + twoPi : angle;
+        }
+
+        /// <summary>Vrai si `angle` est dans l'intervalle [from, to] parcouru dans le sens trigonométrique (to - from ≤ 2π).</summary>
+        private static bool AngleWithin(float angle, float from, float to)
+        {
+            return Wrap(angle - from) <= to - from;
+        }
+
+        /// <summary>
+        /// Parties du cercle (centre, r) à l'intérieur du polygone : intervalles d'angle [from, to]
+        /// (to > from, sens trigonométrique) entre deux croisements avec le contour ; full = cercle
+        /// entier à l'intérieur (from = 0, to = 2π).
+        /// </summary>
+        private static List<(float from, float to, bool full)> InsideArcs(List<float2> polygon, float2 centre, float r)
+        {
+            var crossings = new List<float>();
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                float2 a = polygon[i] - centre;
+                float2 d = polygon[(i + 1) % polygon.Count] - polygon[i];
+                // |a + t d|² = r²
+                float qa = math.dot(d, d);
+                float qb = 2f * math.dot(a, d);
+                float qc = math.dot(a, a) - r * r;
+                float discriminant = qb * qb - 4f * qa * qc;
+                if (qa < 1e-8f || discriminant < 0f)
+                {
+                    continue;
+                }
+                float sq = math.sqrt(discriminant);
+                foreach (float t in new[] { (-qb - sq) / (2f * qa), (-qb + sq) / (2f * qa) })
+                {
+                    if (t >= 0f && t < 1f)
+                    {
+                        float2 q = a + t * d;
+                        crossings.Add(Wrap(math.atan2(q.y, q.x)));
+                    }
+                }
+            }
+            var result = new List<(float, float, bool)>();
+            if (crossings.Count == 0)
+            {
+                if (PointInLoop(centre + new float2(r, 0f), polygon))
+                {
+                    result.Add((0f, 2f * math.PI, true));
+                }
+                return result;
+            }
+            crossings.Sort();
+            for (int i = 0; i < crossings.Count; i++)
+            {
+                float from = crossings[i];
+                float to = i + 1 < crossings.Count ? crossings[i + 1] : crossings[0] + 2f * math.PI;
+                if (to - from < 1e-4f)
+                {
+                    continue;
+                }
+                float middle = 0.5f * (from + to);
+                if (PointInLoop(centre + r * new float2(math.cos(middle), math.sin(middle)), polygon))
+                {
+                    result.Add((from, to, false));
+                }
+            }
+            return result;
+        }
+
+        /// <summary>Cercle complet (centre, r) coupé aux angles `stops` (voir EmitCircleArc pour la longueur des tronçons).</summary>
+        private static void EmitCircle(List<RoadSegmentDef> segments, float2 centre, float r, List<float> stops, float y, List<float2> joints, bool roundabout = false)
+        {
+            var angles = stops.Select(Wrap).Distinct().OrderBy(x => x).ToList();
+            if (angles.Count == 0)
+            {
+                angles.Add(0f);
+            }
+            for (int i = 0; i < angles.Count; i++)
+            {
+                float from = angles[i];
+                float to = i + 1 < angles.Count ? angles[i + 1] : angles[0] + 2f * math.PI;
+                EmitCircleArc(segments, centre, r, from, to, y, joints, roundabout);
+            }
+        }
+
+        /// <summary>Arc exact du cercle (centre, r) de `from` à `to` (sens trigonométrique), en tronçons courbes d'au plus 60° aux tangentes exactes.</summary>
+        private static void EmitCircleArc(List<RoadSegmentDef> segments, float2 centre, float r, float from, float to, float y, List<float2> joints, bool roundabout = false)
+        {
+            float2 Snap(float2 q)
+            {
+                foreach (float2 j in joints)
+                {
+                    if (math.distancesq(j, q) < 0.01f)
+                    {
+                        return j;
+                    }
+                }
+                return q;
+            }
+            // Au plus 60° par tronçon (NetUtils.FitCurve suit bien le cercle jusque-là), avec une
+            // marge d'arrondi : un arc de 45° pile ne doit pas être coupé en deux tronçons de 22,5°.
+            int pieces = math.max(1, (int)math.ceil((to - from) / (math.PI / 3f) - 1e-3f));
+            for (int i = 0; i < pieces; i++)
+            {
+                float a0 = from + (to - from) * i / pieces;
+                float a1 = i == pieces - 1 ? to : from + (to - from) * (i + 1) / pieces;
+                float2 p0 = Snap(centre + r * new float2(math.cos(a0), math.sin(a0)));
+                float2 p1 = Snap(centre + r * new float2(math.cos(a1), math.sin(a1)));
+                var t0 = new float3(-math.sin(a0), 0f, math.cos(a0));
+                var t1 = new float3(-math.sin(a1), 0f, math.cos(a1));
+                RoadSegmentDef arc = RoadSegmentDef.Arc(new float3(p0.x, y, p0.y), new float3(p1.x, y, p1.y), t0, t1);
+                arc.IsRoundabout = roundabout;
+                segments.Add(arc);
+            }
+        }
+
+        /// <summary>Centre et rayon effectifs de la dernière rotonde générée (diagnostic pour les tests).</summary>
+        internal static float2 LastRadialCentre;
+        internal static float LastRadialRadius;
+        internal static float[] LastRadialRingRadii;
+
+        /// <summary>Première intersection (t > 0) de la demi-droite origin + t·direction avec le contour.</summary>
+        private static bool FirstPerimeterHit(List<float2> polygon, float2 origin, float2 direction, out float bestT)
+        {
+            bestT = float.MaxValue;
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                float2 a = polygon[i];
+                float2 edge = polygon[(i + 1) % polygon.Count] - a;
+                float denominator = direction.x * edge.y - direction.y * edge.x;
+                if (math.abs(denominator) < 1e-6f)
+                {
+                    continue;
+                }
+                float2 w = a - origin;
+                float t = (w.x * edge.y - w.y * edge.x) / denominator;
+                float u = (w.x * direction.y - w.y * direction.x) / denominator;
+                if (t > 1e-3f && u >= 0f && u < 1f && t < bestT)
+                {
+                    bestT = t;
+                }
+            }
+            return bestT < float.MaxValue;
         }
 
         // ------------------------------------------------------------------
@@ -1604,6 +2534,8 @@ namespace GridRoadGenerator.Core
         {
             public float CellSize;
             public float MaxDepth;
+            /// <summary>Point de grille le plus éloigné du périmètre (centre du plus grand cercle inscrit).</summary>
+            public float2 DeepestPoint;
             /// <summary>Voir ComputeConnectedDepth.</summary>
             public float ConnectedDepth;
             /// <summary>Voir ConcentricGenerator.MaxLayersFor ; -1 = pas encore calculé.</summary>
@@ -1766,7 +2698,11 @@ namespace GridRoadGenerator.Core
                             value = -value;
                         }
                         field._values[j * field._nx + i] = value;
-                        maxDepth = math.max(maxDepth, value);
+                        if (value > maxDepth)
+                        {
+                            maxDepth = value;
+                            field.DeepestPoint = p;
+                        }
                     }
                 }
                 field.MaxDepth = maxDepth;
@@ -1852,6 +2788,21 @@ namespace GridRoadGenerator.Core
                     }
                 }
                 return connectedDepth;
+            }
+
+            /// <summary>Distance signée (m) au périmètre au point p, interpolée sur la grille (> 0 à l'intérieur).</summary>
+            public float DepthAt(float2 p)
+            {
+                float2 g = (p - _origin) / CellSize;
+                int i = math.clamp((int)math.floor(g.x), 0, _nx - 2);
+                int j = math.clamp((int)math.floor(g.y), 0, _nz - 2);
+                float fx = math.saturate(g.x - i);
+                float fz = math.saturate(g.y - j);
+                float v00 = _values[j * _nx + i];
+                float v10 = _values[j * _nx + i + 1];
+                float v01 = _values[(j + 1) * _nx + i];
+                float v11 = _values[(j + 1) * _nx + i + 1];
+                return math.lerp(math.lerp(v00, v10, fx), math.lerp(v01, v11, fx), fz);
             }
 
             /// <summary>Poids de coin net (voir ComputeSharpCornerWeights) au point de grille le plus proche.</summary>
@@ -2100,6 +3051,13 @@ namespace GridRoadGenerator.Core
             private float[] GaussianBlur(float[] source, float sigmaCells)
             {
                 int radius = math.max(1, (int)math.ceil(3f * sigmaCells));
+                // Grand rayon (grande forme, ex. zone peinte au Pincel : noyau de ~300 cases, des
+                // dizaines de millions d'opérations, jusqu'à 0,5 s en jeu à chaque nouvelle forme) :
+                // trois flous en boîte successifs, coût indépendant du rayon, quasi identiques.
+                if (radius > BoxBlurFromRadius)
+                {
+                    return BoxGaussian(source, sigmaCells);
+                }
                 var kernel = new float[2 * radius + 1];
                 float total = 0f;
                 for (int k = -radius; k <= radius; k++)
@@ -2142,6 +3100,53 @@ namespace GridRoadGenerator.Core
                     }
                 }
                 return result;
+            }
+
+            /// <summary>Rayon (cases) du noyau gaussien au-delà duquel GaussianBlur passe aux flous en boîte.</summary>
+            private const int BoxBlurFromRadius = 12;
+
+            /// <summary>
+            /// Approximation d'un flou gaussien par trois flous en boîte (sommes glissantes), bords
+            /// étendus par la valeur du bord comme GaussianBlur. Largeurs des boîtes choisies pour
+            /// que la variance totale soit celle de la gaussienne.
+            /// </summary>
+            private float[] BoxGaussian(float[] source, float sigma)
+            {
+                const int passes = 3;
+                float ideal = math.sqrt(12f * sigma * sigma / passes + 1f);
+                int lower = (int)math.floor(ideal);
+                if (lower % 2 == 0) lower--;
+                int upper = lower + 2;
+                int smaller = (int)math.round((12f * sigma * sigma - passes * lower * lower - 4f * passes * lower - 3f * passes) / (-4f * lower - 4f));
+                float[] a = (float[])source.Clone();
+                float[] b = new float[source.Length];
+                for (int pass = 0; pass < passes; pass++)
+                {
+                    int r = ((pass < smaller ? lower : upper) - 1) / 2;
+                    BoxPass(a, b, r, true);
+                    BoxPass(b, a, r, false);
+                }
+                return a;
+            }
+
+            /// <summary>Moyenne glissante de rayon r le long des rangées (horizontal) ou des colonnes.</summary>
+            private void BoxPass(float[] from, float[] to, int r, bool horizontal)
+            {
+                int lines = horizontal ? _nz : _nx, length = horizontal ? _nx : _nz;
+                int stride = horizontal ? 1 : _nx;
+                float inv = 1f / (2 * r + 1);
+                for (int line = 0; line < lines; line++)
+                {
+                    int start = horizontal ? line * _nx : line;
+                    float At(int k) => from[start + math.clamp(k, 0, length - 1) * stride];
+                    float acc = 0f;
+                    for (int k = -r; k <= r; k++) acc += At(k);
+                    for (int k = 0; k < length; k++)
+                    {
+                        to[start + k * stride] = acc * inv;
+                        acc += At(k + r + 1) - At(k - r);
+                    }
+                }
             }
 
             /// <summary>

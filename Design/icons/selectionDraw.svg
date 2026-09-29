@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Desenhar área : polygone tracé point par point (côté en cours en pointillés vers le curseur). -->
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6">
+    <path d="M5 17 L4 7 L13 4 L20 9"/>
+    <path d="M20 9 L17 19 L5 17" stroke-dasharray="2 2.2"/>
+  </g>
+  <g fill="#ffffff" stroke="#ffffff" stroke-width="0.8">
+    <rect x="2.7" y="15.7" width="2.6" height="2.6"/>
+    <rect x="2.7" y="5.7" width="2.6" height="2.6"/>
+    <rect x="11.7" y="2.7" width="2.6" height="2.6"/>
+    <rect x="18.7" y="7.7" width="2.6" height="2.6"/>
+  </g>
+</svg>

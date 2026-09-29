@@ -15,8 +15,22 @@
 
   <ItemGroup>
     <Compile Include="..\Core\GridGenerator.cs" Link="Core\GridGenerator.cs" />
+    <Compile Include="..\Core\GridGenerator.Tree.cs" Link="Core\GridGenerator.Tree.cs" />
+    <Compile Include="..\Core\GridGenerator.Organic.cs" Link="Core\GridGenerator.Organic.cs" />
+    <Compile Include="..\Core\GridGenerator.Contour.cs" Link="Core\GridGenerator.Contour.cs" />
+    <Compile Include="..\Core\GridGenerator.PedestrianLinks.cs" Link="Core\GridGenerator.PedestrianLinks.cs" />
+    <Compile Include="..\Core\GridGenerator.Mixed.cs" Link="Core\GridGenerator.Mixed.cs" />
     <Compile Include="..\Core\NetworkGraph.cs" Link="Core\NetworkGraph.cs" />
     <Compile Include="..\Core\ConcentricGenerator.cs" Link="Core\ConcentricGenerator.cs" />
+    <Compile Include="..\Core\FreeAreaPerimeter.cs" Link="Core\FreeAreaPerimeter.cs" />
+    <Compile Include="..\Core\BrushMask.cs" Link="Core\BrushMask.cs" />
+    <Compile Include="..\Localization\TipTranslations*.cs" Link="Localization\%(Filename)%(Extension)" />
+    <Compile Include="..\Localization\TreeTranslations.cs" Link="Localization\TreeTranslations.cs" />
+    <Compile Include="..\Localization\OrganicTranslations.cs" Link="Localization\OrganicTranslations.cs" />
+    <Compile Include="..\Localization\ContourTranslations.cs" Link="Localization\ContourTranslations.cs" />
+    <Compile Include="..\Localization\FreeAreaTranslations.cs" Link="Localization\FreeAreaTranslations.cs" />
+    <Compile Include="..\Localization\RoundaboutTranslations.cs" Link="Localization\RoundaboutTranslations.cs" />
+    <Compile Include="..\Localization\ToolsTranslations.cs" Link="Localization\ToolsTranslations.cs" />
   </ItemGroup>
 
   <ItemGroup>

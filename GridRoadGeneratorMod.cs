@@ -112,8 +112,16 @@ namespace GridRoadGenerator
                 // langue qui a déclenché onSupportedLocalesChanged.
                 try
                 {
-                    localizationManager.AddSource(localeCode,
-                        new LocaleSource(Translations.Build(Settings, pair.Value)));
+                    var entries = Translations.Build(Settings, pair.Value);
+                    // Descriptions des infobulles du panneau (voir TipTranslations).
+                    TipTranslations.AddTo(entries, localeCode);
+                    TreeTranslations.AddTo(entries, localeCode);
+                    OrganicTranslations.AddTo(entries, localeCode);
+                    ContourTranslations.AddTo(entries, localeCode);
+                    FreeAreaTranslations.AddTo(entries, localeCode);
+                    RoundaboutTranslations.AddTo(entries, localeCode);
+                    ToolsTranslations.AddTo(entries, localeCode);
+                    localizationManager.AddSource(localeCode, new LocaleSource(entries));
                     _registeredLocales.Add(localeCode);
                     Log.Info($"Localisation enregistrée : {localeCode}");
                 }

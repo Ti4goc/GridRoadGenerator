@@ -69,6 +69,35 @@ namespace GridRoadGenerator.Tests
             return best;
         }
 
+        private static float2 PerimeterEdgeDirection(float2 p, List<float3> polygon)
+        {
+            int best = 0;
+            float bestDistance = float.MaxValue;
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                float2 a = polygon[i].xz;
+                float2 ab = polygon[(i + 1) % polygon.Count].xz - a;
+                float t = math.clamp(math.dot(p - a, ab) / math.lengthsq(ab), 0f, 1f);
+                float d = math.distance(p, a + t * ab);
+                if (d < bestDistance)
+                {
+                    bestDistance = d;
+                    best = i;
+                }
+            }
+            return math.normalize(polygon[(best + 1) % polygon.Count].xz - polygon[best].xz);
+        }
+
+        private static float CurveLength(float2[] curve)
+        {
+            float length = 0f;
+            for (int i = 1; i < curve.Length; i++)
+            {
+                length += math.distance(curve[i - 1], curve[i]);
+            }
+            return length;
+        }
+
         private static bool Cross(float2 a1, float2 a2, float2 b1, float2 b2)
         {
             float d1 = Orient(b1, b2, a1), d2 = Orient(b1, b2, a2), d3 = Orient(a1, a2, b1), d4 = Orient(a1, a2, b2);
@@ -540,9 +569,11 @@ namespace GridRoadGenerator.Tests
         /// Pour chaque carrefour (nœud à 3 routes ou plus) : plus petit angle entre deux routes qui
         /// en partent, mesuré de la position du nœud vers le point situé à `reach` mètres le long
         /// de chaque route (en suivant les tronçons au-delà des nœuds à 2 routes), pour chaque
-        /// `reach` de la liste. Retourne (angle min, nœud, plus court tronçon collé à un carrefour).
+        /// `reach` de la liste. Retourne (angle min, nœud, plus court tronçon qui touche un carrefour,
+        /// plus courte route entre un carrefour et le carrefour ou le bout suivant — un tronçon coupé
+        /// par un simple nœud de forme n'est pas plus court pour le jeu).
         /// </summary>
-        internal static (float minAngle, float2 at, float shortestStub) JunctionDivergence(List<RoadSegmentDef> segs, float[] reaches)
+        internal static (float minAngle, float2 at, float shortestStub, float shortestRoad) JunctionDivergence(List<RoadSegmentDef> segs, float[] reaches)
         {
             var curves = segs.Select(s => GameCurve(s, 48)).ToList();
             var byNode = new Dictionary<(float, float), List<int>>();
@@ -593,13 +624,20 @@ namespace GridRoadGenerator.Tests
             float min = 180f;
             float2 at = default;
             float shortest = float.MaxValue;
+            float shortestRoad = float.MaxValue;
             foreach (var kv in byNode.Where(kv => kv.Value.Count >= 3))
             {
                 float2 n = new float2(kv.Key.Item1, kv.Key.Item2);
                 var roads = kv.Value.Select(i => Walk(kv.Key, i, reaches.Max() + 5f)).ToList();
+                // Longueur de route jusqu'au carrefour (ou bout) suivant, à travers les nœuds à 2 routes :
+                // un tronçon coupé en deux par un simple nœud de forme n'est pas plus court pour le jeu.
                 foreach (int i in kv.Value)
                 {
                     shortest = math.min(shortest, math.distance(segs[i].Start.xz, segs[i].End.xz));
+                    List<float2> road = Walk(kv.Key, i, 1e6f);
+                    float roadLength = 0f;
+                    for (int q = 1; q < road.Count; q++) roadLength += math.distance(road[q - 1], road[q]);
+                    shortestRoad = math.min(shortestRoad, roadLength);
                 }
                 foreach (float reach in reaches)
                 {
@@ -612,7 +650,7 @@ namespace GridRoadGenerator.Tests
                     }
                 }
             }
-            return (min, at, shortest);
+            return (min, at, shortest, shortestRoad);
         }
 
         [Fact]
@@ -717,6 +755,289 @@ namespace GridRoadGenerator.Tests
             }
         }
 
+        private static List<float3> LoadRealPerimeter()
+        {
+            string path = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "Fixtures", "real-perimeter-backtrack.txt");
+            return System.IO.File.ReadAllLines(path).Where(l => l.Trim().Length > 0).Select(l => l.Trim().Split(' '))
+                .Select(q => new float3(float.Parse(q[0], System.Globalization.CultureInfo.InvariantCulture), 0f,
+                    float.Parse(q[1], System.Globalization.CultureInfo.InvariantCulture))).ToList();
+        }
+
+        [Fact]
+        public void Radial_Circle_RoundaboutAndStraightAvenuesToThePerimeter()
+        {
+            // Motif Radial (retour utilisateur : "apenas as avenidas e não as camadas, e no centro
+            // uma rotunda, não um asset mas um círculo").
+            var perimeter = Circle(600f, 400);
+            var segments = ConcentricGenerator.GenerateRadial(perimeter, avenues: 6, roundaboutRadius: 60f);
+            AssertWellFormed(segments, perimeter);
+            float2 centre = ConcentricGenerator.LastRadialCentre;
+            float radius = ConcentricGenerator.LastRadialRadius;
+            Assert.True(math.length(centre) < 10f, $"Rotonde décentrée : {centre}");
+            Assert.True(math.abs(radius - 60f) < 0.5f, $"Rayon {radius:F1} au lieu de 60");
+            // Cercle de route : tronçons non-avenue, tous à ~60 m du centre.
+            var ring = segments.Where(s => !s.IsAvenue).ToList();
+            Assert.NotEmpty(ring);
+            Assert.All(ring, s => Assert.True(math.abs(math.distance(s.Start.xz, centre) - radius) < 1f));
+            // 6 avenues, chacune de la rotonde au périmètre, alignée sur le centre.
+            var avenues = segments.Where(s => s.IsAvenue).ToList();
+            Assert.Equal(6, avenues.Count(s => DistanceToPolygon(s.End.xz, perimeter) < 0.5f));
+            Assert.Equal(6, avenues.Count(s => math.abs(math.distance(s.Start.xz, centre) - radius) < 1f));
+            foreach (RoadSegmentDef s in avenues)
+            {
+                float2 u = s.Start.xz - centre, v = s.End.xz - centre;
+                float offCentre = math.abs(u.x * v.y - u.y * v.x) / math.max(math.distance(u, v), 1e-3f);
+                Assert.True(offCentre < 1f, $"Avenue pas droite depuis le centre ({offCentre:F1} m)");
+            }
+        }
+
+        [Fact]
+        public void Radial_TooManyAvenuesForTheRadius_RoundaboutGrowsToKeepJunctionsApart()
+        {
+            // 16 avenues sur une rotonde de 25 m : raccords à 10 m les uns des autres. Le rayon est
+            // agrandi pour garder au moins MinAvenueJointSpacing entre raccords voisins.
+            var perimeter = Circle(700f, 400);
+            var segments = ConcentricGenerator.GenerateRadial(perimeter, avenues: 16, roundaboutRadius: 25f);
+            AssertWellFormed(segments, perimeter);
+            var joints = segments.Where(s => s.IsAvenue && math.abs(math.distance(s.Start.xz, ConcentricGenerator.LastRadialCentre) - ConcentricGenerator.LastRadialRadius) < 1f)
+                .Select(s => s.Start.xz).ToList();
+            Assert.Equal(16, joints.Count);
+            float closest = joints.SelectMany((p, i) => joints.Skip(i + 1).Select(q => math.distance(p, q))).Min();
+            Assert.True(closest >= 38f, $"Raccords à {closest:F1} m sur la rotonde");
+        }
+
+        [Fact]
+        public void Radial_SmallShape_FewerAvenuesNoCrash()
+        {
+            var perimeter = Square(220f);
+            var segments = ConcentricGenerator.GenerateRadial(perimeter, avenues: 16, roundaboutRadius: 150f);
+            if (segments.Count > 0)
+            {
+                AssertWellFormed(segments, perimeter);
+                Assert.True(ConcentricGenerator.LastRadialRadius <= 110f - 40f + 1f, $"Rotonde de {ConcentricGenerator.LastRadialRadius:F0} m dans un carré de 220 m");
+            }
+        }
+
+        [Fact]
+        public void Radial_AvenuesAreEquallySpacedAroundTheRoundabout()
+        {
+            // Retour utilisateur : "as linhas têm que estar à mesma distância uma da outra quando
+            // chegam à rotunda" — chaque avenue pivotait seule pour trouver un bon angle sur le
+            // périmètre. Les angles des raccords doivent tous être des multiples de 2π/n (à partir
+            // de l'un d'eux), y compris sur la forme irrégulière.
+            foreach ((List<float3> perimeter, int n) in new[] { (LoadRealPerimeter(), 8), (LoadRealPerimeter(), 5), (LoadRealPerimeter(), 12), (Circle(600f, 400), 7) })
+            {
+                var segments = ConcentricGenerator.GenerateRadial(perimeter, n, 50f);
+                float2 centre = ConcentricGenerator.LastRadialCentre;
+                float radius = ConcentricGenerator.LastRadialRadius;
+                var angles = segments.Where(s => s.IsAvenue && math.abs(math.distance(s.Start.xz, centre) - radius) < 1f)
+                    .Select(s => math.atan2(s.Start.z - centre.y, s.Start.x - centre.x)).ToList();
+                Assert.True(angles.Count >= 2);
+                float gap = 2f * math.PI / n;
+                foreach (float angle in angles)
+                {
+                    float steps = (angle - angles[0]) / gap;
+                    float offBy = math.abs(steps - math.round(steps)) * gap * radius;
+                    Assert.True(offBy < 1.5f, $"{n} avenues : raccord décalé de {offBy:F1} m sur la rotonde");
+                }
+            }
+        }
+
+        [Fact]
+        public void Radial_Layers_AreCirclesAroundTheRoundabout()
+        {
+            // Retour utilisateur : "volta a adicionar as camadas, mas de acordo com a rotunda e não a
+            // estrada exterior" — anneaux circulaires concentriques à la rotonde, à écart égal,
+            // entiers dans la forme, traversés à angle droit par chaque avenue.
+            var perimeter = Circle(600f, 400);
+            var segments = ConcentricGenerator.GenerateRadial(perimeter, avenues: 8, roundaboutRadius: 50f, layers: 3);
+            AssertWellFormed(segments, perimeter);
+            float2 centre = ConcentricGenerator.LastRadialCentre;
+            float[] rings = ConcentricGenerator.LastRadialRingRadii;
+            Assert.Equal(3, rings.Length);
+            float spacing = rings[0] - ConcentricGenerator.LastRadialRadius;
+            Assert.True(spacing >= ConcentricGenerator.MinLayerSpacing, $"Anneaux à {spacing:F0} m");
+            for (int k = 1; k < rings.Length; k++)
+            {
+                Assert.True(math.abs(rings[k] - rings[k - 1] - spacing) < 0.5f, "Anneaux pas à écart égal");
+            }
+            Assert.True(rings[rings.Length - 1] <= 600f - 40f + 5f, $"Dernier anneau à {rings[rings.Length - 1]:F0} m du centre");
+            // Chaque anneau : un cercle (tronçons non-avenue à son rayon), croisé par les 8 avenues.
+            foreach (float r in rings)
+            {
+                Assert.Contains(segments, s => !s.IsAvenue && math.abs(math.distance(s.Start.xz, centre) - r) < 1f);
+                int crossings = segments.Count(s => s.IsAvenue && math.abs(math.distance(s.End.xz, centre) - r) < 1f);
+                Assert.Equal(8, crossings);
+            }
+        }
+
+        [Fact]
+        public void Radial_Layers_FillTheWholeShape_OuterRingsAsArcsToThePerimeter()
+        {
+            // Retour utilisateur : "as camadas têm de preencher o perímetro todo nem que fique só
+            // meio círculo". Sur la forme réelle (allongée), les anneaux vont jusqu'au point le plus
+            // éloigné : les plus grands sortent de la forme et ne gardent que des arcs qui
+            // rejoignent la route du périmètre.
+            var perimeter = LoadRealPerimeter();
+            int max = ConcentricGenerator.RadialMaxLayers(perimeter, 8, 50f);
+            Assert.True(max >= 5, $"Seulement {max} anneaux possibles sur le périmètre réel");
+            var segments = ConcentricGenerator.GenerateRadial(perimeter, 8, 50f, layers: 99);
+            Assert.Equal(max, ConcentricGenerator.LastRadialRingRadii.Length);
+            AssertWellFormed(segments, perimeter);
+            float2 centre = ConcentricGenerator.LastRadialCentre;
+            float outer = ConcentricGenerator.LastRadialRingRadii.Last();
+            // Un arc d'anneau (non-avenue) qui touche le périmètre, sur un anneau plus grand que le
+            // plus grand cercle inscrit.
+            Assert.Contains(segments, s => !s.IsAvenue
+                && (DistanceToPolygon(s.Start.xz, perimeter) < 0.5f || DistanceToPolygon(s.End.xz, perimeter) < 0.5f));
+            float inscribed = perimeter.Select(q => math.distance(q.xz, centre)).Min();
+            Assert.True(outer > inscribed + 100f, $"Dernier anneau à {outer:F0} m, cercle inscrit {inscribed:F0} m");
+        }
+
+        [Fact]
+        public void Radial_RealPerimeter_RoadsKeepClearOfThePerimeterRoad()
+        {
+            // Retour utilisateur (log [Diag colisão] : 12 avenues, rotonde 150 m, 10 anneaux) : un
+            // anneau passait à 12-14 m de la route du périmètre et une avenue s'y arrêtait ; le jeu
+            // collait ce nœud à la route existante (tronçon de 8 m) et les routes se chevauchaient.
+            var perimeter = LoadRealPerimeter();
+            foreach ((int avenues, float radius, int layers) in new[] { (12, 150f, 10), (8, 50f, 10), (6, 100f, 6), (16, 30f, 10) })
+            {
+                var segments = ConcentricGenerator.GenerateRadial(perimeter, avenues, radius, layers);
+                AssertWellFormed(segments, perimeter);
+                // Aucun nœud généré dans la bande où le jeu le recollerait au périmètre.
+                foreach (float3 q in segments.SelectMany(s => new[] { s.Start, s.End }))
+                {
+                    float d = DistanceToPolygon(q.xz, perimeter);
+                    Assert.True(d < 0.5f || d >= 24f, $"{avenues}/{radius}/{layers} : nœud à {d:F1} m du périmètre en {q.xz}");
+                }
+                // Aucune route rasante : hors de la zone d'approche de son arrivée sur le périmètre
+                // (25 m / sin θ, θ l'angle de croisement), une route générée reste à au moins 24 m de
+                // celui-ci (courbes réelles, voir GameCurve). Règles du jeu (ValidationHelpers) : pas
+                // d'angle minimal, mais le tronçon doit contenir le recul du nœud, sinon InvalidShape.
+                foreach (RoadSegmentDef s in segments)
+                {
+                    float2[] curve = GameCurve(s, 48);
+                    var ends = new List<(float2 at, float reach)>();
+                    foreach ((float2 e, float2 next) in new[] { (curve[0], curve[1]), (curve[curve.Length - 1], curve[curve.Length - 2]) })
+                    {
+                        if (DistanceToPolygon(e, perimeter) >= 0.5f) continue;
+                        float2 edge = PerimeterEdgeDirection(e, perimeter);
+                        float2 dir = math.normalize(next - e);
+                        float sin = math.abs(dir.x * edge.y - dir.y * edge.x);
+                        float cos = math.abs(math.dot(dir, edge));
+                        Assert.True(sin >= math.sin(math.radians(14.5f)), $"{avenues}/{radius}/{layers} : raccord au périmètre à {math.degrees(math.asin(sin)):F0}° en {e}");
+                        float cutback = 12.5f * (1f + cos) / sin;
+                        float length = CurveLength(curve);
+                        Assert.True(length >= cutback, $"{avenues}/{radius}/{layers} : tronçon de {length:F0} m plus court que le recul du nœud ({cutback:F0} m) en {e}");
+                        ends.Add((e, 25f / sin + 8f));
+                    }
+                    foreach (float2 q in curve)
+                    {
+                        if (ends.Exists(e => math.distance(e.at, q) < e.reach)) continue;
+                        float d = DistanceToPolygon(q, perimeter);
+                        Assert.True(d >= 24f, $"{avenues}/{radius}/{layers} : route à {d:F1} m du périmètre en ({q.x:F0}, {q.y:F0})");
+                    }
+                }
+            }
+        }
+
+        [Fact]
+        public void Radial_RealPerimeter_LayersReachThePerimeterAtShallowAngles()
+        {
+            // Retour utilisateur : des anneaux presque parallèles au périmètre s'arrêtaient à l'avenue
+            // voisine (raccord refusé sous 40°), laissant des coins vides. Le jeu n'impose pas d'angle
+            // minimal (seul le recul du nœud doit tenir dans le tronçon, voir
+            // Radial_RealPerimeter_RoadsKeepClearOfThePerimeterRoad) : ces raccords sont gardés.
+            var perimeter = LoadRealPerimeter();
+            int shallow = 0;
+            foreach ((int avenues, float radius, int layers) in new[] { (12, 150f, 10), (8, 50f, 10), (6, 100f, 6) })
+            {
+                foreach (RoadSegmentDef s in ConcentricGenerator.GenerateRadial(perimeter, avenues, radius, layers))
+                {
+                    float2[] curve = GameCurve(s, 48);
+                    foreach ((float2 e, float2 next) in new[] { (curve[0], curve[1]), (curve[curve.Length - 1], curve[curve.Length - 2]) })
+                    {
+                        if (DistanceToPolygon(e, perimeter) >= 0.5f) continue;
+                        float2 edge = PerimeterEdgeDirection(e, perimeter);
+                        float2 dir = math.normalize(next - e);
+                        if (math.abs(dir.x * edge.y - dir.y * edge.x) < math.sin(math.radians(40f))) shallow++;
+                    }
+                }
+            }
+            Assert.True(shallow >= 3, $"Seulement {shallow} raccords d'anneau au périmètre sous 40°");
+        }
+
+        [Fact]
+        public void Radial_RealPerimeter_LayersLeaveNoEmptyWedges()
+        {
+            // Retour utilisateur ("continuam a haver camadas que não vão até ao fim") : là où l'anneau
+            // court presque parallèle au périmètre, il s'arrêtait à la dernière avenue et laissait un
+            // coin vide entre l'avenue et le périmètre. Il continue maintenant, puis tourne vers le
+            // périmètre. Mesure : surface intérieure (hors rotonde) à plus de 70 m de toute route.
+            var perimeter = LoadRealPerimeter();
+            var segments = ConcentricGenerator.GenerateRadial(perimeter, 12, 150f, 10);
+            float2 centre = ConcentricGenerator.LastRadialCentre;
+            float roundabout = ConcentricGenerator.LastRadialRadius;
+            var roads = segments.Select(s => GameCurve(s, 16)).ToList();
+            roads.Add(perimeter.Select(q => q.xz).Concat(new[] { perimeter[0].xz }).ToArray());
+            float minX = perimeter.Min(q => q.x), maxX = perimeter.Max(q => q.x);
+            float minZ = perimeter.Min(q => q.z), maxZ = perimeter.Max(q => q.z);
+            const float cell = 16f;
+            int empty = 0;
+            for (float x = minX; x <= maxX; x += cell)
+            {
+                for (float z = minZ; z <= maxZ; z += cell)
+                {
+                    var p = new float2(x, z);
+                    if (math.distance(p, centre) < roundabout || !PointInPolygon(p, perimeter)) continue;
+                    bool near = false;
+                    foreach (float2[] road in roads)
+                    {
+                        for (int i = 0; i + 1 < road.Length && !near; i++)
+                        {
+                            float2 ab = road[i + 1] - road[i];
+                            float t = math.lengthsq(ab) < 1e-6f ? 0f : math.saturate(math.dot(p - road[i], ab) / math.lengthsq(ab));
+                            near = math.distancesq(p, road[i] + t * ab) < 70f * 70f;
+                        }
+                        if (near) break;
+                    }
+                    if (!near) empty++;
+                }
+            }
+            // Avant : ~84 000 m² vides (4 coins) ; après : ~30 000 m² (1 coin, arrivée trop fermée sur l'avenue).
+            Assert.True(empty * cell * cell < 50000f, $"{empty * cell * cell:F0} m² à plus de 70 m de toute route");
+        }
+
+        [Fact]
+        public void Radial_RealPerimeter_GeneratesQuickly()
+        {
+            // Régénéré à chaque réglage du panneau : doit rester rapide même au maximum.
+            var perimeter = LoadRealPerimeter();
+            ConcentricGenerator.GenerateRadial(perimeter, 8, 50f, 2);
+            var stopwatch = Stopwatch.StartNew();
+            ConcentricGenerator.GenerateRadial(perimeter, 16, 150f, 10);
+            ConcentricGenerator.GenerateRadial(perimeter, 12, 50f, 10);
+            stopwatch.Stop();
+            Assert.True(stopwatch.ElapsedMilliseconds < 400, $"Deux générations Radial en {stopwatch.ElapsedMilliseconds} ms");
+        }
+
+        [Fact]
+        public void Radial_RealPerimeter_WellFormedWithOpenJunctions()
+        {
+            var perimeter = LoadRealPerimeter();
+            foreach ((int avenues, float radius, int layers) in new[] { (8, 40f, 0), (3, 25f, 0), (12, 60f, 0), (16, 150f, 0), (6, 100f, 0), (8, 50f, 3), (12, 40f, 10), (5, 80f, 2) })
+            {
+                var segments = ConcentricGenerator.GenerateRadial(perimeter, avenues, radius, layers);
+                AssertWellFormed(segments, perimeter);
+                Assert.True(segments.Count(s => s.IsAvenue && DistanceToPolygon(s.End.xz, perimeter) < 0.5f) >= 2,
+                    $"Radial {avenues}/{radius}/{layers} : moins de 2 avenues jusqu'au périmètre");
+                var r = JunctionDivergence(segments, new[] { 10f, 20f, 35f, 50f });
+                Assert.True(r.minAngle >= 40f, $"Radial {avenues}/{radius}/{layers} : deux routes à {r.minAngle:F0}° près du carrefour ({r.at.x:F0}, {r.at.y:F0})");
+                Assert.True(r.shortestRoad >= 30f, $"Radial {avenues}/{radius}/{layers} : route de {r.shortestRoad:F1} m entre deux carrefours");
+            }
+        }
+
         [Fact]
         public void Connections_AreSpreadAroundThePerimeter_NotBunchedInTheMiddle()
         {
@@ -766,6 +1087,27 @@ namespace GridRoadGenerator.Tests
             var segments = GridGenerator.GenerateLoopGrid(Square(600f), parameters);
             Assert.NotEmpty(segments);
             Assert.DoesNotContain(segments, s => s.IsAvenue || s.IsPedestrian || s.IsCulDeSacEnd);
+        }
+
+        [Fact]
+        public void Radial_MarksOnlyTheRoundaboutRing()
+        {
+            var perimeter = new List<float3> { new float3(0, 0, 0), new float3(800, 0, 0), new float3(800, 0, 700), new float3(0, 0, 700) };
+            var segments = ConcentricGenerator.GenerateRadial(perimeter, 6, 40f, 2);
+            var ring = segments.Where(s => s.IsRoundabout).ToList();
+            Assert.NotEmpty(ring);
+            float2 centre = ring.Aggregate(float2.zero, (sum, s) => sum + s.Start.xz) / ring.Count;
+            foreach (RoadSegmentDef s in ring)
+            {
+                Assert.True(s.IsArc);
+                Assert.False(s.IsAvenue);
+                // Sens trigonométrique : la tangente de départ tourne à gauche autour du centre.
+                float2 radial = s.Start.xz - centre, t = s.StartTangent.xz;
+                Assert.True(radial.x * t.y - radial.y * t.x > 0f);
+                Assert.InRange(math.distance(s.Start.xz, centre), 30f, 50f);
+            }
+            // Les anneaux extérieurs ne sont pas la rotonde.
+            Assert.Contains(segments, s => s.IsArc && !s.IsRoundabout);
         }
     }
 }
