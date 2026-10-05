@@ -241,3 +241,22 @@
     margin-right: 4rem;
     opacity: 0.8;
 }
+
+// Lecture de droite à gauche (grg-rtl, voir rtl.ts) : boutons de zone en miroir.
+:global(.grg-rtl) {
+    .areaBar,
+    .areaButton,
+    .modeButtons {
+        flex-direction: row-reverse;
+    }
+
+    .areaButton {
+        margin-right: 0;
+        margin-left: 4rem;
+    }
+
+    .areaButtonIcon {
+        margin-right: 0;
+        margin-left: 5rem;
+    }
+}

@@ -132,3 +132,26 @@
 .baseShade {
     background-color: #00000066;
 }
+
+// Lecture de droite à gauche (grg-rtl, voir rtl.ts) : rangée de zonage en miroir.
+:global(.grg-rtl) {
+    .row,
+    .chip {
+        flex-direction: row-reverse;
+    }
+
+    .label {
+        margin-right: 0;
+        margin-left: 8rem;
+    }
+
+    .chipIcon {
+        margin-right: 0;
+        margin-left: 4rem;
+    }
+
+    .chipChevron {
+        margin-left: 0;
+        margin-right: 4rem;
+    }
+}

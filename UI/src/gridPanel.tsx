@@ -14,6 +14,7 @@ import { ZoningRow } from "./zoningRow";
 import { VC, VF, VT } from "./vanilla";
 import { ViewSelection } from "./viewSelection";
 import { TIP_TEXT, Tip, TipContent } from "./tips";
+import { useRtl } from "./rtl";
 import patternGrid from "./patternGrid.svg";
 import patternLoop from "./patternLoop.svg";
 import patternSuperblock from "./patternSuperblock.svg";
@@ -638,6 +639,8 @@ const NetworkPrefabRow = ({
 /// le chrome InfoView natif n'est pas disponible/sûr — voir gridPanelSwitch.tsx.
 export const LegacyGridPanel = () => {
     const { translate } = useLocalization();
+    // Arabe/persan : classe globale grg-rtl, les feuilles de style miroitent alors le panneau.
+    const rtl = useRtl();
     // Description d'infobulle localisée ("GridRoadGenerator.UI.Tip.<clé>"), anglais par défaut.
     const tip = (key: string) => translate(`GridRoadGenerator.UI.Tip.${key}`, TIP_TEXT[key]) ?? TIP_TEXT[key];
     const toolActive = useValue(toolActive$);
@@ -1207,7 +1210,7 @@ export const LegacyGridPanel = () => {
     return (
         <div
             ref={panelRef}
-            className={compact ? `${styles.panelWrapper} grg-compact` : styles.panelWrapper}
+            className={[styles.panelWrapper, compact && "grg-compact", rtl && "grg-rtl"].filter(Boolean).join(" ")}
             style={{ left: `${panelPosition.x}px`, top: `${panelPosition.y}px`, width: `${panelWidth}rem` }}>
             <div className={`${styles.resizeHandle} ${styles.resizeHandleLeft}`} onMouseDown={startResize("left")} onDoubleClick={resetWidth} />
             <div className={`${styles.resizeHandle} ${styles.resizeHandleRight}`} onMouseDown={startResize("right")} onDoubleClick={resetWidth} />

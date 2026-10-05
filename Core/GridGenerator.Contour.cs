@@ -27,6 +27,12 @@ namespace GridRoadGenerator.Core
         private const float ContourTipGap = 48f;
         private const float ContourStep = 8f;
         private const float ContourMinPiece = 80f;
+        /// <summary>Portée (x l'espacement) d'une liaison entre un bout d'impasse et la rue devant lui (voir JoinDeadEnds).</summary>
+        private const float ContourJoinReach = 1.6f;
+        /// <summary>Distance minimale (x l'espacement) à une autre rue le long d'un passage proche (voir AcceptContour).</summary>
+        private const float ContourLooseGap = 0.4f;
+        /// <summary>Longueur maximale (x l'espacement) d'un passage proche gardé sans couper la rue.</summary>
+        private const float ContourMaxBridge = 1.5f;
         private const float ContourJunctionGap = 45f;
         /// <summary>Nombre maximal de vagues de rues parallèles pour combler les trous (voir FillGaps).</summary>
         private const int ContourFillPasses = 8;
@@ -297,6 +303,7 @@ namespace GridRoadGenerator.Core
                 FillGaps();
                 ResolveEnds();
                 RebuildIndex();
+                JoinDeadEnds();
                 AddConnectors();
                 AddPerimeterLinks();
                 ConnectIslands();
@@ -571,17 +578,23 @@ namespace GridRoadGenerator.Core
             {
                 List<float2> points = Resample(line, loop);
                 if (points.Count < 3) return;
-                bool Ok(float2 p) => PointInPolygon(p, _polygon)
-                    && _perimeter.Distance(p, ContourClearance) >= ContourClearance
-                    && !Near(p, 0.7f * _spacing, null);
-                var ok = new bool[points.Count];
-                bool allOk = true;
+                // Deux seuils (retour utilisateur, capture : "as estradas perdem continuidade") : une rue ne
+                // commence et ne finit que loin des autres (0,7 x l'espacement), mais le long d'une rue
+                // déjà commencée un passage plus proche (jusqu'à 0,4 x) est gardé s'il est court
+                // (ContourMaxBridge x l'espacement) — la courbe n'est plus coupée en tronçons isolés à
+                // chaque endroit où elle frôle sa voisine.
+                bool Inside(float2 p) => PointInPolygon(p, _polygon) && _perimeter.Distance(p, ContourClearance) >= ContourClearance;
+                var strict = new bool[points.Count];
+                var loose = new bool[points.Count];
+                bool allStrict = true;
                 for (int k = 0; k < points.Count; k++)
                 {
-                    ok[k] = Ok(points[k]);
-                    allOk &= ok[k];
+                    bool inside = Inside(points[k]);
+                    loose[k] = inside && !Near(points[k], ContourLooseGap * _spacing, null);
+                    strict[k] = loose[k] && !Near(points[k], 0.7f * _spacing, null);
+                    allStrict &= strict[k];
                 }
-                if (loop && allOk)
+                if (loop && allStrict)
                 {
                     var ring = new ContourStreet { Level = level, Closed = true };
                     ring.Points.AddRange(points);
@@ -596,30 +609,62 @@ namespace GridRoadGenerator.Core
                 int start = 0;
                 if (loop)
                 {
-                    start = Array.IndexOf(ok, false);
+                    start = Array.IndexOf(loose, false);
+                    if (start < 0) start = Array.IndexOf(strict, false);
                 }
+                int maxBridge = (int)math.ceil(ContourMaxBridge * _spacing / ContourStep);
                 var run = new List<float2>();
+                var runStrict = new List<bool>();
                 void Flush()
                 {
-                    if (run.Count >= 2)
+                    // Bouts pas assez loin des autres rues retirés ; passages proches trop longs : coupure.
+                    int a = 0, b = run.Count - 1;
+                    while (a <= b && !runStrict[a]) a++;
+                    while (b >= a && !runStrict[b]) b--;
+                    var piece = new List<float2>();
+                    int soft = 0;
+                    for (int k = a; k <= b; k++)
                     {
-                        float length = 0f;
-                        for (int k = 1; k < run.Count; k++) length += math.distance(run[k - 1], run[k]);
-                        if (length >= ContourMinPiece)
+                        if (runStrict[k])
                         {
-                            var street = new ContourStreet { Level = level };
-                            street.Points.AddRange(run);
-                            _streets.Add(street);
-                            IndexStreet(_streets.Count - 1);
+                            soft = 0;
                         }
+                        else if (++soft > maxBridge)
+                        {
+                            // Passage trop long : fin de la pièce avant lui, reprise au prochain point strict.
+                            piece.RemoveRange(piece.Count - (soft - 1), soft - 1);
+                            Keep(piece);
+                            piece = new List<float2>();
+                            while (k <= b && !runStrict[k]) k++;
+                            soft = 0;
+                            if (k > b) break;
+                        }
+                        piece.Add(run[k]);
                     }
+                    Keep(piece);
                     run = new List<float2>();
+                    runStrict = new List<bool>();
+                }
+                void Keep(List<float2> piece)
+                {
+                    if (piece.Count < 2) return;
+                    float length = 0f;
+                    for (int k = 1; k < piece.Count; k++) length += math.distance(piece[k - 1], piece[k]);
+                    if (length < ContourMinPiece) return;
+                    var street = new ContourStreet { Level = level };
+                    street.Points.AddRange(piece);
+                    _streets.Add(street);
+                    IndexStreet(_streets.Count - 1);
                 }
                 int total = points.Count + (loop ? 1 : 0);
                 for (int step = 0; step < total; step++)
                 {
                     int k = (start + step) % points.Count;
-                    if (ok[k]) run.Add(points[k]);
+                    if (loose[k])
+                    {
+                        run.Add(points[k]);
+                        runStrict.Add(strict[k]);
+                    }
                     else Flush();
                 }
                 Flush();
@@ -1192,6 +1237,100 @@ namespace GridRoadGenerator.Core
                     return math.dot(outward, -dir) >= -0.77f;
                 }
                 return math.abs(dir.x * tq.y - dir.y * tq.x) >= minSin && other.FreeAt(j, ContourJunctionGap);
+            }
+
+            /// <summary>
+            /// Bouts d'impasse reliés à la rue la plus proche devant eux (retour utilisateur, capture :
+            /// "as estradas perdem continuidade") : au bout d'une autre impasse (la rue continue) ou au
+            /// milieu d'une rue (carrefour en T), à moins de ContourJoinReach x l'espacement, dans la
+            /// direction de la rue (±50°), pente ≤ 15 %, angles ouverts et passage dégagé.
+            /// </summary>
+            private void JoinDeadEnds()
+            {
+                float reach = ContourJoinReach * _spacing;
+                float minSin = math.sin(math.radians(ContourMinJunctionAngle));
+                float aheadCos = math.cos(math.radians(50f));
+                int count = _streets.Count;
+                for (int s = 0; s < count; s++)
+                {
+                    foreach (bool atEnd in new[] { false, true })
+                    {
+                        ContourStreet street = _streets[s];
+                        if (street.Removed || street.Connector || street.Closed || street.Points.Count < 3) break;
+                        if (!(atEnd ? street.EndDead : street.StartDead)) continue;
+                        int n = street.Points.Count;
+                        int tipIndex = atEnd ? n - 1 : 0;
+                        float2 p = street.Points[tipIndex];
+                        float2 outward = atEnd ? math.normalizesafe(p - street.Points[n - 3]) : math.normalizesafe(p - street.Points[2]);
+                        float hp = _height(p);
+                        float bestScore = float.MaxValue, bestD = 0f;
+                        int bestB = -1, bestJ = -1;
+                        bool bestTip = false;
+                        int2 cell = CellOf(p);
+                        int r = (int)math.ceil(reach / IndexCell);
+                        for (int cx = cell.x - r; cx <= cell.x + r; cx++)
+                        for (int cz = cell.y - r; cz <= cell.y + r; cz++)
+                        {
+                            if (!_index.TryGetValue(Key(cx, cz), out var cellPoints)) continue;
+                            foreach ((int b, int j) in cellPoints)
+                            {
+                                if (b == s) continue;
+                                ContourStreet other = _streets[b];
+                                if (other.Removed || other.Connector || j >= other.Points.Count) continue;
+                                float2 q = other.Points[j];
+                                float d = math.distance(p, q);
+                                if (d > reach || d < 15f) continue;
+                                float2 dir = (q - p) / d;
+                                if (math.dot(dir, outward) < aheadCos) continue;
+                                if (math.abs(_height(q) - hp) / d > ContourMaxGrade) continue;
+                                int last = other.Points.Count - 1;
+                                bool tip = !other.Closed && ((j == 0 && other.StartDead) || (j == last && other.EndDead));
+                                if (tip)
+                                {
+                                    // Les deux bouts se font face : la rue continue.
+                                    float2 otherOut = j == 0 ? math.normalizesafe(q - other.Points[math.min(2, last)])
+                                        : math.normalizesafe(q - other.Points[math.max(0, last - 2)]);
+                                    if (math.dot(otherOut, -dir) < aheadCos) continue;
+                                }
+                                else
+                                {
+                                    float2 tq = other.Tangent(j);
+                                    if (math.abs(dir.x * tq.y - dir.y * tq.x) < minSin) continue;
+                                    if (!other.FreeAt(j, ContourJunctionGap)) continue;
+                                }
+                                // Continuité d'abord : un bout d'impasse en face compte pour plus proche.
+                                float score = tip ? 0.7f * d : d;
+                                if (score >= bestScore) continue;
+                                if (!ConnectorClear(p, q, s, b)) continue;
+                                bestScore = score;
+                                bestD = d;
+                                bestB = b; bestJ = j; bestTip = tip;
+                            }
+                        }
+                        if (bestB < 0) continue;
+                        float2 to = _streets[bestB].Points[bestJ];
+                        var connector = new ContourStreet { Connector = true, Level = street.Level };
+                        int steps = math.max(1, (int)math.ceil(bestD / ContourStep));
+                        for (int k = 0; k <= steps; k++) connector.Points.Add(k == 0 ? p : k == steps ? to : math.lerp(p, to, (float)k / steps));
+                        _streets.Add(connector);
+                        int id = _streets.Count - 1;
+                        IndexStreet(id);
+                        if (atEnd) street.EndDead = false; else street.StartDead = false;
+                        ContourStreet target = _streets[bestB];
+                        if (bestTip)
+                        {
+                            if (bestJ == 0) target.StartDead = false; else target.EndDead = false;
+                        }
+                        else
+                        {
+                            target.Junctions.Add(bestJ);
+                        }
+                        connector.Links.Add(s);
+                        connector.Links.Add(bestB);
+                        street.Links.Add(id);
+                        target.Links.Add(id);
+                    }
+                }
             }
 
             /// <summary>Ne garde que ce qui est relié au périmètre (sinon inaccessible). Faux si rien ne l'est.</summary>

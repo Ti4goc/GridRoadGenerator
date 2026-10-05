@@ -163,3 +163,22 @@
     color: #ffffff80;
     font-size: var(--fontSizeS);
 }
+
+// Lecture de droite à gauche (grg-rtl, voir rtl.ts) : en-tête, onglets et lignes en miroir.
+// Le côté d'ouverture est choisi dans prefabPicker.tsx (panelFlipped).
+:global(.grg-rtl) {
+    .header,
+    .tabs,
+    .listItem {
+        flex-direction: row-reverse;
+    }
+
+    .listItemIcon {
+        margin-right: 0;
+        margin-left: 8rem;
+    }
+
+    .searchBar input {
+        text-align: right;
+    }
+}

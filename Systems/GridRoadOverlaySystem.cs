@@ -594,50 +594,24 @@ namespace GridRoadGenerator.Systems
                 _dragLines.AddRange(_sketchLines);
                 _dragRoundabout = _sketchRoundabout;
                 _dragRoundaboutCentre = _sketchRoundaboutCentre;
-                _dragResultKey = null;
-                _dragTask = null;
+                _dragLinesKey = null;
             }
             _wasDragging = true;
-            float3 sum = float3.zero;
-            foreach (float3 p in positions) sum += p;
-            GridParameters keyParameters = parameters;
-            keyParameters.HeightAt = null;
-            object key = (positions.Count, sum, settings.LoopMode, keyParameters);
-            if (_dragTask != null && _dragTask.IsCompleted)
+            object key = GridRoadToolSystem.SketchKey(positions, parameters, settings.LoopMode);
+            if (m_GridRoadToolSystem.TryReadySketch(key, out List<RoadSegmentDef> ready, out RoundaboutInfo readyRoundabout))
             {
-                if (_dragTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && _dragTask.Result.segments != null)
+                if (!key.Equals(_dragLinesKey))
                 {
-                    List<RoadSegmentDef> segments = _dragTask.Result.segments;
-                    m_GridRoadToolSystem.SeedSketch(_dragTaskKey, segments, _dragTask.Result.roundabout);
+                    var segments = new List<RoadSegmentDef>(ready);
                     m_GridRoadToolSystem.RemoveObstacleSegments(segments);
-                    _dragRoundabout = _dragTask.Result.roundabout;
+                    _dragRoundabout = readyRoundabout;
                     BuildSketchLines(segments, settings, _dragLines, _dragRoundabout, out _dragRoundaboutCentre);
+                    _dragLinesKey = key;
                 }
-                _dragResultKey = _dragTaskKey;
-                _dragTask = null;
             }
-            if (_dragTask == null && !key.Equals(_dragResultKey))
+            else
             {
-                var copy = new List<float3>(positions);
-                GridParameters threadParameters = parameters;
-                threadParameters.HeightAt = m_GridRoadToolSystem.HeightSnapshot(positions);
-                bool loop = settings.LoopMode;
-                _dragTaskKey = key;
-                _dragTask = System.Threading.Tasks.Task.Run(() =>
-                {
-                    try
-                    {
-                        RoundaboutInfo rb = default;
-                        List<RoadSegmentDef> result = loop
-                            ? GridGenerator.GenerateLoopGrid(copy, threadParameters)
-                            : GridGenerator.GenerateGrid(copy, threadParameters, out _, out rb);
-                        return (result, rb);
-                    }
-                    catch
-                    {
-                        return ((List<RoadSegmentDef>)null, default(RoundaboutInfo));
-                    }
-                });
+                m_GridRoadToolSystem.RequestSketch(key, positions, parameters, settings.LoopMode);
             }
             foreach ((Color color, float width, float3 a, float3 b) in _dragLines)
             {
@@ -665,8 +639,7 @@ namespace GridRoadGenerator.Systems
         private const int SketchLineBudget = 6000;
 
         private bool _wasDragging;
-        private System.Threading.Tasks.Task<(List<RoadSegmentDef> segments, RoundaboutInfo roundabout)> _dragTask;
-        private object _dragTaskKey, _dragResultKey;
+        private object _dragLinesKey;
         private readonly List<(Color color, float width, float3 a, float3 b)> _dragLines = new List<(Color, float, float3, float3)>();
         private RoundaboutInfo _dragRoundabout;
         private float3 _dragRoundaboutCentre;

@@ -784,6 +784,7 @@ namespace GridRoadGenerator.Systems
             // Cadence vanilla du NetTool : par défaut on repart de zéro chaque frame
             // (Temp détruits + régénérés depuis les définitions recréées ci-dessous).
             applyMode = ApplyMode.Clear;
+            PumpSketchWorker();
 
             try
             {
@@ -810,7 +811,11 @@ namespace GridRoadGenerator.Systems
                 // Entrée ou bouton "Générer".
                 bool confirm = _applyRequested || (_confirmAction != null && _confirmAction.WasPressedThisFrame());
                 _applyRequested = false;
-                if (confirm && HasPreview && !_confirming)
+                if (confirm && SketchPending && !_confirming)
+                {
+                    _applyRequested = true; // grille encore en calcul : Générer reprend à l'image suivante
+                }
+                else if (confirm && HasPreview && !_confirming)
                 {
                     if (!ShowSketchOnly)
                     {
@@ -926,7 +931,7 @@ namespace GridRoadGenerator.Systems
                     // GridGeneratorPerformanceTests) pour savoir si le périmètre produit une
                     // grille valide, et activer/désactiver Générer en conséquence.
                     HasPreview = ComputePreviewValidityCheap();
-                    PerimeterInvalid = !HasPreview;
+                    PerimeterInvalid = !HasPreview && !SketchPending; // grille encore en calcul : pas un périmètre invalide
                 }
                 else if (ActivePositions.Count >= 2)
                 {
@@ -1713,66 +1718,37 @@ namespace GridRoadGenerator.Systems
         private List<RoadSegmentDef> _sketchSegments;
         private RoundaboutInfo _sketchRoundabout;
 
-        private object _seedKey;
-        private List<RoadSegmentDef> _seedSegments;
-        private RoundaboutInfo _seedRoundabout;
-
-        /// <summary>Dernière grille calculée en fond pendant un drag (même clé que GenerateSketch) : évite de la refaire au relâchement.</summary>
-        public void SeedSketch(object key, List<RoadSegmentDef> segments, RoundaboutInfo roundabout)
-        {
-            _seedKey = key;
-            _seedSegments = new List<RoadSegmentDef>(segments);
-            _seedRoundabout = roundabout;
-        }
-
         /// <summary>Change à chaque nouvelle grille de croquis (voir GenerateSketch).</summary>
         public int SketchVersion { get; private set; }
 
         /// <summary>
-        /// Grille du croquis, recalculée seulement quand le périmètre ou un réglage change : le croquis
-        /// (GridRoadOverlaySystem) et la validité de Générer la redemandaient à chaque frame, soit
-        /// plusieurs centaines de ms par frame sur une grande zone peinte. Copie renvoyée (les
-        /// appelants retirent ou ajoutent des tronçons).
+        /// Grille du croquis pour ces réglages : prête (calcul en fond terminé, voir SketchWorker), ou
+        /// la précédente en attendant (SketchPending). Copie renvoyée (les appelants retirent ou
+        /// ajoutent des tronçons).
         /// </summary>
+        private List<RoadSegmentDef> _sketchRoad;
+
         public List<RoadSegmentDef> GenerateSketch(List<float3> positions, GridParameters parameters, out RoundaboutInfo roundabout)
         {
-            GridParameters keyParameters = parameters;
-            keyParameters.HeightAt = null;
-            float3 sum = float3.zero;
-            foreach (float3 p in positions) sum += p;
-            object key = (positions.Count, sum, _settings.LoopMode, keyParameters);
-            if ((_sketchSegments == null || !key.Equals(_sketchKey)) && _seedSegments != null && key.Equals(_seedKey))
-            {
-                // Grille déjà calculée en fond pendant le drag du slider : reprise telle quelle.
-                _sketchSegments = _seedSegments;
-                _sketchRoundabout = _seedRoundabout;
-                _sketchKey = key;
-                _seedSegments = null;
-                SketchVersion++;
-            }
+            object key = SketchKey(positions, parameters, _settings.LoopMode);
             if (_sketchSegments == null || !key.Equals(_sketchKey))
             {
-                parameters.HeightAt = MakeTerrainSampler();
-                _sketchRoundabout = default;
-                try
+                if (TryReadySketch(key, out List<RoadSegmentDef> ready, out RoundaboutInfo readyRoundabout, out List<RoadSegmentDef> readyRoad))
                 {
-                    _sketchSegments = _settings.LoopMode
-                        ? GridGenerator.GenerateLoopGrid(positions, parameters)
-                        : GridGenerator.GenerateGrid(positions, parameters, out _, out _sketchRoundabout);
+                    _sketchSegments = ready;
+                    _sketchRoundabout = readyRoundabout;
+                    _sketchRoad = readyRoad;
+                    _sketchKey = key;
+                    SketchVersion++;
                 }
-                catch (Exception e)
+                else
                 {
-                    // Grille impossible pour ces réglages : grille vide mémorisée (pas de nouvel essai,
-                    // ni d'erreur, à chaque frame — log en jeu : erreur critique répétée).
-                    Mod.Log.Warn($"Grille impossible pour ce périmètre et ces réglages : {e}");
-                    _sketchSegments = new List<RoadSegmentDef>();
-                    _sketchRoundabout = default;
+                    RequestSketch(key, positions, parameters, _settings.LoopMode);
                 }
-                _sketchKey = key;
-                SketchVersion++;
             }
+            SketchPending = !key.Equals(_sketchKey);
             roundabout = _sketchRoundabout;
-            return new List<RoadSegmentDef>(_sketchSegments);
+            return _sketchSegments != null ? new List<RoadSegmentDef>(_sketchSegments) : new List<RoadSegmentDef>();
         }
 
         private bool ComputePreviewValidityCheap()
@@ -1786,8 +1762,9 @@ namespace GridRoadGenerator.Systems
                 // après avoir peint une grande zone — génération et route de périmètre refaites à
                 // chaque frame).
                 // (réglage sans effet sur la grille, ex. type de route : résumé à refaire)
-                if (_validityVersion == SketchVersion && _validitySettingsVersion == _settingsVersion)
+                if ((_validityVersion == SketchVersion && _validitySettingsVersion == _settingsVersion) || SketchPending)
                 {
+                    // (grille encore en calcul : la réponse de la précédente en attendant, sans rien refaire)
                     return _validityResult;
                 }
                 _validityVersion = SketchVersion;
@@ -1795,7 +1772,7 @@ namespace GridRoadGenerator.Systems
                 _validityResult = false;
                 if (_settings.FreeAreaMode && _freeRing.Count >= 3 && segments.Count > 0)
                 {
-                    segments.AddRange(FreeAreaPerimeter.PerimeterRoad(_freeRing, segments));
+                    segments.AddRange(_sketchRoad ?? FreeAreaPerimeter.PerimeterRoad(_freeRing, segments));
                     RemoveObstacleSegments(segments);
                 }
                 UpdateSummary(segments);
@@ -1893,7 +1870,13 @@ namespace GridRoadGenerator.Systems
                 List<float3> perimeterPositions = BuildCurveAwarePerimeterPositions();
                 GridParameters parameters = _settings.ToGridParameters();
                 parameters.HeightAt = MakeTerrainSampler();
-                if (_settings.LoopMode)
+                if (TryReadySketch(SketchKey(perimeterPositions, parameters, _settings.LoopMode), out List<RoadSegmentDef> readySegments, out RoundaboutInfo readyRoundabout))
+                {
+                    // Même grille que le croquis (calculée en fond) : ni attente, ni écart entre les deux.
+                    segments = new List<RoadSegmentDef>(readySegments);
+                    roundabout = readyRoundabout;
+                }
+                else if (_settings.LoopMode)
                 {
                     // Collectrices éparses + laço interne par super-îlot — voir
                     // GridGenerator.GenerateLoopGrid. Pas de rotonde/comptage d'omission ici

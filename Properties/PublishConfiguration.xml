@@ -73,16 +73,16 @@ Node-selection, tooltip and UI architecture patterns adapted from [CS2-NetworkTo
 	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\04.jpg" />
 	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\05.jpg" />
 	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\06.jpg" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\07.jpg" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\08.jpg" />
+	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\09.jpg" />
 	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\10.jpg" />
-	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\11.jpg" />
-	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\12.jpg" />
-	<Screenshot Value="C:\Dev\GridRoadGenerator\Properties\13.jpg" />
 	<!--Tag, can be set multiple times-->
 	<Tag Value="Code Mod" />
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="https://forum.paradoxplaza.com/forum/threads/grid-road-generator.1935368/" />
 	<!--Version of the mod-->
-	<ModVersion Value="0.4.0" />
+	<ModVersion Value="0.4.1" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.6.*" />
 	<!--Dependency for the mod, can be set multiple times-->
@@ -91,51 +91,10 @@ Node-selection, tooltip and UI architecture patterns adapted from [CS2-NetworkTo
 	<ExternalLink Type="github" Url="https://github.com/Ti4goc/GridRoadGenerator" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
 	<ChangeLog>
-**0.4.0 - Free areas, five new patterns, zoning and a new panel**
+**0.4.1 - Smoother panel, Terrain continuity and right-to-left languages**
 
-Choosing the area (new):
-- Three ways to choose the area: **Existing perimeter** (as before), **Draw area** and **Paint area**
-- **Draw area**: click points on the terrain, like the district tool, then drag any point to reshape the area
-- **Paint area**: round or square brush from 1 to 1000 m (Shift + mouse rotates the square), right-click erases; the painted area is shown in hectares
-- With a drawn or painted area, a smooth road is built along its edge; it connects to existing roads crossing the edge, and streets through water or buildings are left out
-- Drawing and painting lie on the terrain, like the game's own tools, with hints next to the cursor
-
-Five new patterns:
-- **Tree**: a collector along the area with branch streets and pairs of cul-de-sacs (branch spacing, cul-de-sac spacing and length)
-- **Organic**: a gently winding avenue with curved streets and cul-de-sacs, like a real suburb (street spacing, curviness, share of loops, variation seed)
-- **Terrain**: streets along the contour lines, nearly level, linked by uphill streets never steeper than 15% (S-shaped on steep slopes); flat parts get parallel streets, hills inside the area are connected, and a warning appears on flat terrain. The game's contour lines are shown automatically while this pattern is selected
-- **Mixed**: a radial centre surrounded by organic streets, joined by a ring road; the avenues of the centre carry on into the neighbourhood (centre radius)
-- **Radial**: a central roundabout with equally spaced straight avenues and circular layers; the roundabout grows when there are too many avenues, and the outer layers reach the perimeter as arcs
-
-Existing patterns:
-- Grid and Loop: new **Align with the terrain** option, which turns the grid so that half of the streets follow the contour lines
-- Fewer collisions: no more tiny road pieces or sharp junctions near the perimeter (Grid and Loop)
-- Much faster Concentric, Mixed and Terrain on large areas
-
-Networks, upgrades and zoning:
-- Each road type used by the pattern has its own line (streets, avenue, cul-de-sacs, roundabout), with its own road and upgrades
-- New upgrade: roadside grass (left / right)
-- Only the upgrades the chosen road supports are shown (none for alleys or gravel roads, for example)
-- Bridges and dams are no longer offered in the road picker
-- **Automatic zoning**: pick any zone of the game or of zone mods (name shown on hover); it is painted along the new roads once they are built, on empty cells only
-
-Preview and tools:
-- The sketch now lies on the terrain instead of floating at the average height
-- **Summary** above Generate: nodes, points or hectares selected, then number of segments, length and estimated cost
-- **Undo / Redo** (Ctrl+Z / Ctrl+Y) for points, brush strokes and settings
-- Generate now waits for the game to finish checking the placement instead of refusing too early
-- Dragging a slider no longer freezes the game: the sketch is computed in the background and updates as soon as it is ready
-- Smooth drawing and painting of very large areas
-- Streets through power line pylons are left out of drawn and painted areas
-- A description on every option, in all 42 languages
-
-New panel:
-- Patterns as a row of icons, with the name and description of the chosen one
-- Pattern and area type always visible at the top; only the settings below them scroll
-- Two columns on wide screens: networks and zoning on the right (the right column can be hidden)
-- **Resizable**: drag the left or right edge; items move to the next line when narrow, and only icons are shown in a narrow panel (double-click an edge to reset)
-- View buttons and Anarchy in the title bar
-- The panel fits the screen height and no longer opens the game's road menu
-- Game-style dividers, sliders and colours
+- The grid is now computed in the background: releasing a slider or changing the pattern no longer freezes the game; the previous sketch stays on screen until the new one is ready
+- Terrain pattern: streets keep their continuity; dead ends are joined to the street in front of them, and streets running close to each other are no longer cut into short pieces
+- Right-to-left layout: with the Arabic or Persian Localization mod, the panel and the network picker are mirrored to read from right to left
 	</ChangeLog>
 </Publish>

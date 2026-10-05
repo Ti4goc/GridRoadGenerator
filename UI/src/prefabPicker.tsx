@@ -6,6 +6,7 @@ import { useValue } from "cs2/api";
 import { useLocalization } from "cs2/l10n";
 import styles from "./prefabPicker.module.scss";
 import { VC } from "./vanilla";
+import { useRtl } from "./rtl";
 import {
     PrefabEntry,
     pickAuto,
@@ -74,25 +75,30 @@ export const PrefabPicker: React.FC<PrefabPickerProps> = ({ onClose, slot = "pri
     // deviner en rem (pas de conversion rem→px fiable côté cohtml), donc un flash
     // d'un frame côté droit par défaut avant correction est possible mais discret
     // (le picker vient déjà de s'ouvrir, pas d'animation en cours à cet instant).
-    // Ne bascule que dans un sens (jamais de retour à droite) : évite toute
-    // oscillation si aucun des deux côtés ne suffit (panneau très large / écran
-    // très étroit, cas limite non traité au-delà de ce choix déterministe).
+    // Ne bascule qu'une fois : évite toute oscillation si aucun des deux côtés ne
+    // suffit (panneau très large / écran très étroit, cas limite non traité
+    // au-delà de ce choix déterministe).
+    // Lecture de droite à gauche (arabe/persan, voir rtl.ts) : miroir, côté gauche
+    // par défaut, bascule à droite si le bord gauche de l'écran est dépassé.
+    const rtl = useRtl();
     const panelElementRef = useRef<HTMLDivElement>(null);
-    const [flipped, setFlipped] = useState(false);
+    const [flipped, setFlipped] = useState(rtl);
+    const [settled, setSettled] = useState(false);
     useLayoutEffect(() => {
-        if (flipped) {
+        if (settled) {
             return;
         }
         const measure = () => {
             const rect = panelElementRef.current?.getBoundingClientRect();
-            if (rect && rect.right > window.innerWidth) {
-                setFlipped(true);
+            if (rect && (flipped ? rect.left < 0 : rect.right > window.innerWidth)) {
+                setFlipped(!flipped);
+                setSettled(true);
             }
         };
         measure();
         window.addEventListener("resize", measure);
         return () => window.removeEventListener("resize", measure);
-    }, [flipped]);
+    }, [flipped, settled]);
 
     const displayName = (entry: PrefabEntry) =>
         translate(`Assets.NAME[${entry.Name}]`, entry.Name) ?? entry.Name;

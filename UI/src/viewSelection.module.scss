@@ -31,3 +31,10 @@
     flex-direction: row;
     column-gap: 4rem;
 }
+
+// Lecture de droite à gauche (grg-rtl, voir rtl.ts) : boutons de vue en miroir.
+:global(.grg-rtl) {
+    .viewButtons {
+        flex-direction: row-reverse;
+    }
+}
